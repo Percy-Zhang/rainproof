@@ -1,0 +1,267 @@
+import {
+  getDefaultCategoryForKind,
+  getDefaultSubcategoryId,
+  normalizeCategoryId,
+  normalizeSubcategoryId,
+} from './categories';
+import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
+import { parseLabelsInput } from './labels';
+import { parseMoneyInput } from './money';
+import type {
+  Account,
+  AppSnapshot,
+  NewTransactionInput,
+  TransactionKind,
+  UpdateTransactionInput,
+} from './types';
+
+export const OUTSIDE_ACCOUNT_ID = 'outside';
+export const OUTSIDE_MY_ACCOUNTS_LABEL = 'Outside my accounts';
+
+export type TransactionEditDraft = {
+  id: string;
+  kind: TransactionKind;
+  title: string;
+  amount: string;
+  date: string;
+  time: string;
+  accountId: string;
+  targetAccountId: string;
+  externalParty: string;
+  categoryId: string;
+  subcategoryId: string;
+  notes: string;
+  labels: string;
+  groupId: string;
+};
+
+export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId: string): TransactionEditDraft {
+  const transaction = snapshot.transactions.find((item) => item.id === transactionId);
+  if (!transaction) {
+    throw new Error('Transaction not found.');
+  }
+
+  const lines = snapshot.transactionLines.filter((line) => line.transactionId === transaction.id);
+  if (!lines.length) {
+    throw new Error('Transaction has no lines.');
+  }
+
+  const dateValue = new Date(transaction.datetime);
+  const defaultCategory = getDefaultCategoryForKind(transaction.kind, snapshot.categories);
+
+  if (transaction.kind === 'transfer') {
+    const sourceLine = lines.find((line) => line.amountMinor < 0);
+    const targetLine = lines.find((line) => line.amountMinor > 0 && line.accountId !== sourceLine?.accountId);
+    const amountLine = sourceLine ?? targetLine ?? lines[0];
+
+    return {
+      id: transaction.id,
+      kind: transaction.kind,
+      title: transaction.title,
+      amount: minorToInput(Math.abs(amountLine.amountMinor)),
+      date: toDateInputValue(dateValue),
+      time: toTimeInputValue(dateValue),
+      accountId: sourceLine?.accountId ?? OUTSIDE_ACCOUNT_ID,
+      targetAccountId: targetLine?.accountId ?? OUTSIDE_ACCOUNT_ID,
+      externalParty: sourceLine?.externalParty || targetLine?.externalParty || OUTSIDE_MY_ACCOUNTS_LABEL,
+      categoryId: '',
+      subcategoryId: '',
+      notes: transaction.notes,
+      labels: transaction.labels.join(', '),
+      groupId: transaction.groupId,
+    };
+  }
+
+  if (lines.length !== 1) {
+    throw new Error('Split transaction editing is not supported yet.');
+  }
+
+  const line = lines[0];
+  const categoryId = normalizeCategoryId(line.categoryId || defaultCategory.id, snapshot.categories);
+  return {
+    id: transaction.id,
+    kind: transaction.kind,
+    title: transaction.title,
+    amount: minorToInput(Math.abs(line.amountMinor)),
+    date: toDateInputValue(dateValue),
+    time: toTimeInputValue(dateValue),
+    accountId: line.accountId,
+    targetAccountId: OUTSIDE_ACCOUNT_ID,
+    externalParty: line.externalParty || OUTSIDE_MY_ACCOUNTS_LABEL,
+    categoryId,
+    subcategoryId: normalizeSubcategoryId(
+      categoryId,
+      line.subcategoryId || getDefaultSubcategoryId(defaultCategory),
+      snapshot.categories,
+    ),
+    notes: transaction.notes,
+    labels: transaction.labels.join(', '),
+    groupId: transaction.groupId,
+  };
+}
+
+export function buildTransactionUpdateInput(
+  draft: TransactionEditDraft,
+  accounts: Account[],
+): UpdateTransactionInput {
+  const amountMinor = Math.abs(parseMoneyInput(draft.amount));
+  if (amountMinor <= 0) {
+    throw new Error('Amount must be greater than zero.');
+  }
+
+  const datetime = parseDateTimeInput(draft.date, draft.time);
+  const labels = parseLabelsInput(draft.labels);
+
+  if (draft.kind === 'transfer') {
+    return {
+      id: draft.id,
+      kind: draft.kind,
+      title: draft.title,
+      datetime,
+      notes: draft.notes,
+      labels,
+      groupId: draft.groupId,
+      lines: buildTransferTransactionLines({
+        amountMinor,
+        accounts,
+        externalParty: draft.externalParty,
+        sourceAccountId: draft.accountId,
+        targetAccountId: draft.targetAccountId,
+      }),
+    };
+  }
+
+  const account = accounts.find((item) => item.id === draft.accountId);
+  if (!account) {
+    throw new Error('Choose an account.');
+  }
+
+  if (!draft.categoryId || !draft.subcategoryId) {
+    throw new Error('Choose a category and subcategory.');
+  }
+  const categoryId = normalizeCategoryId(draft.categoryId);
+  const subcategoryId = normalizeSubcategoryId(categoryId, draft.subcategoryId);
+
+  return {
+    id: draft.id,
+    kind: draft.kind,
+    title: draft.title,
+    datetime,
+    notes: draft.notes,
+    labels,
+    groupId: draft.groupId,
+    lines: [
+      {
+        accountId: account.id,
+        amountMinor: draft.kind === 'expense' ? -amountMinor : amountMinor,
+        currencyCode: account.currencyCode,
+        categoryId,
+        subcategoryId,
+      },
+    ],
+  };
+}
+
+export function formatEditDateLabel(dateValue: string): string {
+  return formatLongDateLabel(dateValue);
+}
+
+export function isOutsideAccountId(accountId: string): boolean {
+  return accountId === OUTSIDE_ACCOUNT_ID || accountId === 'external';
+}
+
+export function getTransferAmountCurrencyCode({
+  accounts,
+  sourceAccountId,
+  targetAccountId,
+}: {
+  accounts: Account[];
+  sourceAccountId: string;
+  targetAccountId: string;
+}): string {
+  const sourceAccount = isOutsideAccountId(sourceAccountId)
+    ? undefined
+    : accounts.find((account) => account.id === sourceAccountId);
+  const targetAccount = isOutsideAccountId(targetAccountId)
+    ? undefined
+    : accounts.find((account) => account.id === targetAccountId);
+
+  return sourceAccount?.currencyCode ?? targetAccount?.currencyCode ?? '';
+}
+
+export function buildTransferTransactionLines({
+  amountMinor,
+  accounts,
+  externalParty,
+  sourceAccountId,
+  targetAccountId,
+}: {
+  amountMinor: number;
+  accounts: Account[];
+  externalParty: string;
+  sourceAccountId: string;
+  targetAccountId: string;
+}): NewTransactionInput['lines'] {
+  const sourceAccount = isOutsideAccountId(sourceAccountId)
+    ? undefined
+    : accounts.find((account) => account.id === sourceAccountId);
+  const targetAccount = isOutsideAccountId(targetAccountId)
+    ? undefined
+    : accounts.find((account) => account.id === targetAccountId);
+  const outsideLabel = externalParty.trim() || OUTSIDE_MY_ACCOUNTS_LABEL;
+
+  if (!sourceAccount && !targetAccount) {
+    throw new Error('Choose at least one account inside Rainproof.');
+  }
+
+  if (sourceAccount?.id === targetAccount?.id) {
+    throw new Error('Source and destination accounts must be different.');
+  }
+
+  if (sourceAccount && targetAccount && sourceAccount.currencyCode !== targetAccount.currencyCode) {
+    throw new Error('Transfers between different currencies need exchange rates. For now, choose accounts with the same currency.');
+  }
+
+  if (sourceAccount && !targetAccount) {
+    return [
+      {
+        accountId: sourceAccount.id,
+        amountMinor: -amountMinor,
+        currencyCode: sourceAccount.currencyCode,
+        externalParty: outsideLabel,
+      },
+    ];
+  }
+
+  if (!sourceAccount && targetAccount) {
+    return [
+      {
+        accountId: targetAccount.id,
+        amountMinor,
+        currencyCode: targetAccount.currencyCode,
+        externalParty: outsideLabel,
+      },
+    ];
+  }
+
+  return [
+    {
+      accountId: sourceAccount!.id,
+      amountMinor: -amountMinor,
+      currencyCode: sourceAccount!.currencyCode,
+      transferPeerAccountId: targetAccount!.id,
+    },
+    {
+      accountId: targetAccount!.id,
+      amountMinor,
+      currencyCode: targetAccount!.currencyCode,
+      transferPeerAccountId: sourceAccount!.id,
+    },
+  ];
+}
+
+function minorToInput(amountMinor: number): string {
+  const whole = Math.floor(amountMinor / 100);
+  const cents = String(amountMinor % 100).padStart(2, '0');
+  return `${whole}.${cents}`;
+}

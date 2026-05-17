@@ -1,0 +1,426 @@
+import { Ionicons } from '@expo/vector-icons';
+import { useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+
+import { AccountIconBadge } from '../../components/AccountDisplay';
+import { CategoryIconBadge, CategoryRow, SubcategoryRow } from '../../components/CategoryDisplay';
+import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
+import { getCategorySuggestions, type CategorySuggestionMode } from '../../domain/categorySuggestions';
+import {
+  defaultCategories,
+  getCategory,
+  getSubcategory,
+  getSubcategoryColor,
+  getSubcategoryIcon,
+  getSubcategoryName,
+} from '../../domain/categories';
+import { isOutsideAccountId, OUTSIDE_ACCOUNT_ID } from '../../domain/transactionEdit';
+import type { Account, CategoryDefinition, Transaction, TransactionKind, TransactionLine } from '../../domain/types';
+import { colors, spacing, typography } from '../../theme/tokens';
+import { formatTransactionKindLabel } from './TransactionKindTabs';
+
+export type TransactionPickerMode = 'sourceAccount' | 'targetAccount' | 'category';
+
+export function TransactionPickerScreen({
+  mode,
+  accounts,
+  selectedAccountId,
+  selectedCategoryId,
+  selectedSubcategoryId,
+  kind,
+  categories: categoryCatalog = defaultCategories,
+  transactions = [],
+  transactionLines = [],
+  showCurrencyCodes,
+  sourceAccountId,
+  onClose,
+  onExit,
+  onSelectAccount,
+  onSelectCategory,
+  cancelTestID = 'cancel-transaction-picker',
+}: {
+  mode: TransactionPickerMode;
+  accounts: Account[];
+  selectedAccountId: string;
+  selectedCategoryId: string;
+  selectedSubcategoryId: string;
+  kind: TransactionKind;
+  categories?: CategoryDefinition[];
+  transactions?: Transaction[];
+  transactionLines?: TransactionLine[];
+  showCurrencyCodes: boolean;
+  sourceAccountId: string;
+  onClose: () => void;
+  onExit: () => void;
+  onSelectAccount: (accountId: string) => void;
+  onSelectCategory: (categoryId: string, subcategoryId: string) => void;
+  cancelTestID?: string;
+}) {
+  const [expandedCategoryId, setExpandedCategoryId] = useState(selectedCategoryId ? getCategory(selectedCategoryId, categoryCatalog).id : '');
+  const [suggestionMode, setSuggestionMode] = useState<CategorySuggestionMode>('frequent');
+  const categories = categoryCatalog.filter((category) =>
+    kind === 'income' ? category.type === 'income' : category.type === 'expense',
+  );
+  const frequentSuggestions = useMemo(
+    () => getCategorySuggestions({ transactions, lines: transactionLines, kind, mode: 'frequent' }),
+    [kind, transactionLines, transactions],
+  );
+  const recentSuggestions = useMemo(
+    () => getCategorySuggestions({ transactions, lines: transactionLines, kind, mode: 'recent' }),
+    [kind, transactionLines, transactions],
+  );
+  const hasSuggestions = frequentSuggestions.length > 0 || recentSuggestions.length > 0;
+  const visibleSuggestions = suggestionMode === 'frequent' ? frequentSuggestions : recentSuggestions;
+  const title =
+    mode === 'sourceAccount'
+      ? kind === 'transfer' ? 'Transfer from' : 'Account'
+      : mode === 'targetAccount'
+        ? 'Transfer to'
+        : 'Category';
+  const outsideLabel = mode === 'sourceAccount' ? 'From outside my accounts' : 'To outside my accounts';
+
+  return (
+    <View style={styles.screen}>
+      <View style={styles.pickerTopBar}>
+        <Pressable accessibilityRole="button" onPress={onClose} style={styles.backIconButton}>
+          <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
+          <Text style={styles.backButtonText}>Back</Text>
+        </Pressable>
+        <Text style={styles.pickerTitle}>{title}</Text>
+        <Pressable accessibilityRole="button" onPress={onExit} style={styles.iconButton} testID={cancelTestID}>
+          <Ionicons name="close" size={24} color={colors.primaryDark} />
+        </Pressable>
+      </View>
+
+      {mode === 'category' ? (
+        <ScrollView contentContainerStyle={styles.pickerList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {hasSuggestions ? (
+            <View style={styles.suggestionPanel}>
+              <View style={styles.suggestionTabs}>
+                {(['frequent', 'recent'] as CategorySuggestionMode[]).map((option) => (
+                  <Pressable
+                    accessibilityRole="button"
+                    key={option}
+                    onPress={() => setSuggestionMode(option)}
+                    style={({ pressed }) => [
+                      styles.suggestionTab,
+                      suggestionMode === option && styles.suggestionTabSelected,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    <Text style={[styles.suggestionTabText, suggestionMode === option && styles.suggestionTabTextSelected]}>
+                      {formatTransactionKindLabel(option)}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+              {visibleSuggestions.length ? (
+                <ScrollView
+                  horizontal
+                  contentContainerStyle={styles.categorySuggestionList}
+                  keyboardShouldPersistTaps="handled"
+                  showsHorizontalScrollIndicator={false}
+                >
+                  {visibleSuggestions.map((suggestion) => (
+                    <CategorySuggestionRow
+                      key={`${suggestion.categoryId}:${suggestion.subcategoryId}`}
+                      categoryId={suggestion.categoryId}
+                      subcategoryId={suggestion.subcategoryId}
+                      categories={categoryCatalog}
+                      selected={selectedCategoryId === suggestion.categoryId && selectedSubcategoryId === suggestion.subcategoryId}
+                      onPress={() => onSelectCategory(suggestion.categoryId, suggestion.subcategoryId)}
+                    />
+                  ))}
+                </ScrollView>
+              ) : (
+                <Text style={styles.emptySuggestionText}>No {suggestionMode} categories yet.</Text>
+              )}
+            </View>
+          ) : null}
+          {categories.map((category) => (
+            <View key={category.id} style={styles.categoryGroup}>
+              <CategoryRow
+                category={category}
+                expanded={expandedCategoryId === category.id}
+                onPress={() => setExpandedCategoryId((currentId) => (currentId === category.id ? '' : category.id))}
+              />
+              {expandedCategoryId === category.id ? (
+                <View style={styles.subcategoryList}>
+                  {category.subcategories.map((subcategory) => (
+                    <SubcategoryRow
+                      key={subcategory.id}
+                      onPress={() => onSelectCategory(category.id, subcategory.id)}
+                      selected={selectedCategoryId === category.id && selectedSubcategoryId === subcategory.id}
+                      color={subcategory.color}
+                      icon={subcategory.icon}
+                      name={subcategory.name}
+                    />
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          ))}
+        </ScrollView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.pickerList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          {kind === 'transfer' ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onSelectAccount(OUTSIDE_ACCOUNT_ID)}
+              style={({ pressed }) => [
+                styles.pickerRow,
+                styles.outsidePickerRow,
+                isOutsideAccountId(selectedAccountId) && styles.pickerRowSelected,
+                pressed && styles.pressed,
+              ]}
+            >
+              <AccountIconBadge color={colors.primary} iconName="globe-outline" size="md" />
+              <View style={styles.pickerRowText}>
+                <Text numberOfLines={1} style={styles.pickerRowTitle}>{outsideLabel}</Text>
+                <Text numberOfLines={2} style={styles.pickerRowMeta}>Not tracked in Rainproof</Text>
+              </View>
+            </Pressable>
+          ) : null}
+          {accounts
+            .filter((account) => mode !== 'targetAccount' || account.id !== sourceAccountId)
+            .map((account) => (
+              <Pressable
+                key={account.id}
+                accessibilityRole="button"
+                onPress={() => onSelectAccount(account.id)}
+                style={({ pressed }) => [
+                  styles.pickerRow,
+                  {
+                    backgroundColor: getTint(account.themeColor),
+                    borderColor: selectedAccountId === account.id ? account.themeColor : getFaintBorder(account.themeColor),
+                  },
+                  pressed && styles.pressed,
+                ]}
+              >
+                <View style={[styles.accountRail, { backgroundColor: account.themeColor }]} />
+                <AccountIconBadge account={account} size="md" />
+                <View style={styles.pickerRowText}>
+                  <Text style={styles.pickerRowTitle}>{getAccountDisplayName(account)}</Text>
+                  <Text style={styles.pickerRowMeta}>
+                    {showCurrencyCodes ? `${account.type.replace('_', ' ')} / ${account.currencyCode}` : account.type.replace('_', ' ')}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
+function CategorySuggestionRow({
+  categoryId,
+  subcategoryId,
+  categories,
+  selected,
+  onPress,
+}: {
+  categoryId: string;
+  subcategoryId: string;
+  categories: CategoryDefinition[];
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const category = getCategory(categoryId, categories);
+  const subcategory = getSubcategory(categoryId, subcategoryId, categories);
+  const color = getSubcategoryColor(categoryId, subcategoryId, categories);
+  const icon = getSubcategoryIcon(categoryId, subcategoryId, categories);
+  const label = subcategoryId ? getSubcategoryName(categoryId, subcategoryId, categories) : category.name;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.categorySuggestionRow,
+        { borderColor: selected ? color : colors.faint },
+        selected && styles.categorySuggestionRowSelected,
+        pressed && styles.pressed,
+      ]}
+    >
+      <CategoryIconBadge color={color} icon={icon} size="sm" />
+      <View style={styles.categorySuggestionText}>
+        <Text numberOfLines={1} style={styles.categorySuggestionTitle}>
+          {subcategory?.name ?? label}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function getTint(color: string): string {
+  return getTransparentColor(color, '22');
+}
+
+function getFaintBorder(color: string): string {
+  return getTransparentColor(color, '66');
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    gap: spacing.sm,
+  },
+  iconButton: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  backIconButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minHeight: 40,
+    paddingRight: spacing.sm,
+  },
+  backButtonText: {
+    color: colors.primaryDark,
+    fontSize: typography.body,
+    fontWeight: '800',
+  },
+  pickerTopBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'space-between',
+    minHeight: 44,
+  },
+  pickerTitle: {
+    color: colors.ink,
+    fontSize: typography.h2,
+    flex: 1,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  pickerList: {
+    flexGrow: 1,
+    gap: spacing.sm,
+    paddingBottom: spacing.xl,
+  },
+  suggestionPanel: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: spacing.xs,
+    padding: spacing.xs,
+  },
+  suggestionTabs: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  suggestionTab: {
+    alignItems: 'center',
+    borderRadius: 999,
+    flex: 1,
+    minHeight: 30,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  suggestionTabSelected: {
+    backgroundColor: colors.surface,
+  },
+  suggestionTabText: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  suggestionTabTextSelected: {
+    color: colors.primaryDark,
+  },
+  categorySuggestionList: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    paddingRight: spacing.xs,
+  },
+  categorySuggestionRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    maxWidth: 148,
+    minHeight: 38,
+    minWidth: 104,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+  },
+  categorySuggestionRowSelected: {
+    backgroundColor: '#F4FAFF',
+  },
+  categorySuggestionText: {
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  categorySuggestionTitle: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  emptySuggestionText: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+    paddingHorizontal: spacing.xs,
+  },
+  pickerRow: {
+    alignItems: 'flex-start',
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  pickerRowSelected: {
+    backgroundColor: '#F4FAFF',
+    borderColor: colors.primary,
+  },
+  outsidePickerRow: {
+    backgroundColor: colors.surfaceMuted,
+  },
+  accountRail: {
+    alignSelf: 'stretch',
+    borderRadius: 999,
+    width: 5,
+  },
+  pickerRowText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  pickerRowTitle: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  pickerRowMeta: {
+    color: colors.muted,
+    flexShrink: 1,
+    fontSize: typography.small,
+    lineHeight: 17,
+  },
+  categoryGroup: {
+    gap: spacing.xs,
+  },
+  subcategoryList: {
+    gap: spacing.xs,
+  },
+  pressed: {
+    opacity: 0.78,
+  },
+});
