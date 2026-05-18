@@ -1,4 +1,4 @@
-import * as SQLite from 'expo-sqlite';
+import type * as SQLite from 'expo-sqlite';
 
 import {
   normalizeAccountIconName,
@@ -63,6 +63,11 @@ import {
 } from './sampleData';
 import { shouldSeedDemoData } from './seedConfig';
 
+export type RepositoryDatabase = Pick<
+  SQLite.SQLiteDatabase,
+  'execAsync' | 'getAllAsync' | 'getFirstAsync' | 'runAsync' | 'withTransactionAsync'
+>;
+
 export type FinanceRepository = {
   initialize(defaultCurrencyCode: string): Promise<void>;
   getSnapshot(): Promise<AppSnapshot>;
@@ -93,12 +98,17 @@ export type FinanceRepository = {
 };
 
 export async function createSQLiteFinanceRepository(): Promise<FinanceRepository> {
-  const db = await SQLite.openDatabaseAsync('rainproof.db');
+  const SQLiteModule = await import('expo-sqlite');
+  const db = await SQLiteModule.openDatabaseAsync('rainproof.db');
+  return createSQLiteFinanceRepositoryForDatabase(db);
+}
+
+export function createSQLiteFinanceRepositoryForDatabase(db: RepositoryDatabase): FinanceRepository {
   return new SQLiteFinanceRepository(db);
 }
 
 class SQLiteFinanceRepository implements FinanceRepository {
-  constructor(private readonly db: SQLite.SQLiteDatabase) {}
+  constructor(private readonly db: RepositoryDatabase) {}
 
   async initialize(defaultCurrencyCode: string): Promise<void> {
     const currencyCode = normalizeCurrencyCode(defaultCurrencyCode);
