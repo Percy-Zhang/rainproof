@@ -1,6 +1,6 @@
 import { uniqueCurrencyCodes } from './currencyCatalog';
 import { normalizeCurrencyCode } from './money';
-import type { CurrencyCode } from './types';
+import type { CurrencyCode, DefaultCurrencyMode } from './types';
 
 type LocaleCurrencyCandidate = {
   currencyCode?: string | null;
@@ -28,4 +28,28 @@ export function getDefaultCurrencyFromLocales(
 
 export function getCurrenciesInUse(currencies: (string | null | undefined)[]): CurrencyCode[] {
   return uniqueCurrencyCodes(currencies);
+}
+
+export function normalizeDefaultCurrencyMode(value: string | null | undefined): DefaultCurrencyMode {
+  return value === 'manual' ? 'manual' : 'auto';
+}
+
+export function getEffectiveDisplayCurrency({
+  defaultCurrencyCode,
+  defaultCurrencyMode,
+  accountCurrencyCodes,
+  fallbackCurrencyCode = 'USD',
+}: {
+  defaultCurrencyCode: string | null | undefined;
+  defaultCurrencyMode?: DefaultCurrencyMode | string | null;
+  accountCurrencyCodes: (string | null | undefined)[];
+  fallbackCurrencyCode?: CurrencyCode;
+}): CurrencyCode {
+  const normalizedDefaultCurrencyCode = normalizeCurrencyCode(defaultCurrencyCode, fallbackCurrencyCode);
+  if (normalizeDefaultCurrencyMode(defaultCurrencyMode) === 'manual') {
+    return normalizedDefaultCurrencyCode;
+  }
+
+  const uniqueAccountCurrencyCodes = uniqueCurrencyCodes(accountCurrencyCodes);
+  return uniqueAccountCurrencyCodes.length === 1 ? uniqueAccountCurrencyCodes[0] : normalizedDefaultCurrencyCode;
 }

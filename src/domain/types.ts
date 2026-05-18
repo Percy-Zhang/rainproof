@@ -1,4 +1,5 @@
 export type CurrencyCode = string;
+export type DefaultCurrencyMode = 'auto' | 'manual';
 
 export type AccountType =
   | 'checking'
@@ -176,6 +177,7 @@ export type UpcomingBill = RecurringBill & {
 
 export type AppSettings = {
   defaultCurrencyCode: CurrencyCode;
+  defaultCurrencyMode: DefaultCurrencyMode;
   multiCurrencyEnabled: boolean;
   enabledCurrencyCodes: CurrencyCode[];
   dashboardSelectedAccountIds: string[] | null;

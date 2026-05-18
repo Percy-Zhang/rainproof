@@ -2,7 +2,7 @@ import { normalizeCurrencyCode } from '../domain/money';
 import type { UpdateRainyDayFundInput } from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
-import type { AccountRow, RainyDayFundRow } from './mappers';
+import type { AccountRow, CountRow, RainyDayFundRow } from './mappers';
 
 export async function ensureRainyDayFund(
   db: RepositoryDatabase,
@@ -63,6 +63,32 @@ export async function updateRainyDayFundStorage(
       }
     }
   });
+}
+
+export async function updateEmptyRainyDayFundCurrency(
+  db: RepositoryDatabase,
+  currencyCode: string,
+): Promise<void> {
+  const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  const fund = await db.getFirstAsync<RainyDayFundRow>('SELECT * FROM rainy_day_funds LIMIT 1');
+  if (!fund || fund.goal_minor !== 0 || fund.currency_code === normalizedCurrencyCode) {
+    return;
+  }
+
+  const linkedCount = await db.getFirstAsync<CountRow>(
+    'SELECT COUNT(*) as count FROM rainy_day_fund_accounts WHERE fund_id = ?',
+    fund.id,
+  );
+  if ((linkedCount?.count ?? 0) > 0) {
+    return;
+  }
+
+  await db.runAsync(
+    'UPDATE rainy_day_funds SET currency_code = ?, updated_at = ? WHERE id = ?',
+    normalizedCurrencyCode,
+    new Date().toISOString(),
+    fund.id,
+  );
 }
 
 export async function linkAccountToRainyFundIfCompatible(

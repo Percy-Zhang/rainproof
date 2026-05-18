@@ -7,8 +7,11 @@ import type { NewAccountInput, UpdateAccountInput } from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
 import type { AccountRow, CountRow, RainyDayFundRow } from './mappers';
-import { linkAccountToRainyFundIfCompatible } from './rainyDayStorage';
-import { addAccountToStoredDashboardSelection } from './settingsStorage';
+import { linkAccountToRainyFundIfCompatible, updateEmptyRainyDayFundCurrency } from './rainyDayStorage';
+import {
+  addAccountToStoredDashboardSelection,
+  promoteAutomaticDefaultCurrencyForFirstAccount,
+} from './settingsStorage';
 
 export async function addAccountStorage(
   db: RepositoryDatabase,
@@ -39,6 +42,10 @@ export async function addAccountStorage(
     now,
     now,
   );
+
+  if (await promoteAutomaticDefaultCurrencyForFirstAccount(db, currencyCode)) {
+    await updateEmptyRainyDayFundCurrency(db, currencyCode);
+  }
 
   if (input.includeInRainyDay) {
     await linkAccountToRainyFundIfCompatible(db, id, currencyCode);

@@ -1,5 +1,5 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Platform,
   Pressable,
@@ -18,7 +18,7 @@ import {
   getSpendingByCategory,
 } from '../../domain/aggregates';
 import { defaultCategories, getCategory } from '../../domain/categories';
-import { getCurrenciesInUse } from '../../domain/currency';
+import { getCurrenciesInUse, getEffectiveDisplayCurrency } from '../../domain/currency';
 import { getDateRangeForPreset, getInclusiveDateRange, toDateInputValue } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
 import type { Account, AppSnapshot } from '../../domain/types';
@@ -45,7 +45,16 @@ export function StatsScreen({ snapshot }: StatsScreenProps) {
   );
   const [customEndDate, setCustomEndDate] = useState(() => toDateInputValue(new Date()));
   const [datePickerTarget, setDatePickerTarget] = useState<DatePickerTarget | null>(null);
-  const [currencyCode, setCurrencyCode] = useState(snapshot.defaultCurrencyCode);
+  const effectiveDisplayCurrency = useMemo(
+    () =>
+      getEffectiveDisplayCurrency({
+        defaultCurrencyCode: snapshot.defaultCurrencyCode,
+        defaultCurrencyMode: snapshot.settings.defaultCurrencyMode,
+        accountCurrencyCodes: snapshot.accounts.map((account) => account.currencyCode),
+      }),
+    [snapshot.accounts, snapshot.defaultCurrencyCode, snapshot.settings.defaultCurrencyMode],
+  );
+  const [currencyCode, setCurrencyCode] = useState(effectiveDisplayCurrency);
   const [accountId, setAccountId] = useState('all');
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -54,12 +63,22 @@ export function StatsScreen({ snapshot }: StatsScreenProps) {
   const currencies = useMemo(
     () =>
       getCurrenciesInUse([
-        snapshot.defaultCurrencyCode,
+        effectiveDisplayCurrency,
         ...snapshot.accounts.map((account) => account.currencyCode),
         ...snapshot.budgets.map((budget) => budget.currencyCode),
       ]),
-    [snapshot],
+    [effectiveDisplayCurrency, snapshot.accounts, snapshot.budgets],
   );
+
+  useEffect(() => {
+    const canKeepCurrency =
+      currencies.includes(currencyCode) && (showCurrencyCodes || currencyCode === effectiveDisplayCurrency);
+    if (!canKeepCurrency) {
+      setCurrencyCode(effectiveDisplayCurrency);
+      setAccountId('all');
+    }
+  }, [currencies, currencyCode, effectiveDisplayCurrency, showCurrencyCodes]);
+
   const accountsForCurrency = useMemo(
     () => snapshot.accounts.filter((account) => account.currencyCode === currencyCode),
     [currencyCode, snapshot.accounts],

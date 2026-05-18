@@ -69,6 +69,7 @@ function snapshot(kind: Transaction['kind'], lines: TransactionLine[]): AppSnaps
     defaultCurrencyCode: 'AUD',
     settings: {
       defaultCurrencyCode: 'AUD',
+      defaultCurrencyMode: 'auto',
       multiCurrencyEnabled: false,
       enabledCurrencyCodes: ['AUD'],
       dashboardSelectedAccountIds: null,

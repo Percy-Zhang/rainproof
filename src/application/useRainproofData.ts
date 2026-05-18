@@ -9,6 +9,7 @@ import {
   getUpcomingBills,
   groupBalancesByCurrency,
 } from '../domain/aggregates';
+import { getEffectiveDisplayCurrency } from '../domain/currency';
 import { getDateRangeForPreset } from '../domain/dates';
 import type {
   AccountBalance,
@@ -180,7 +181,11 @@ export function useRainproofData(): RainproofDataState {
     const totalsByCurrency = groupBalancesByCurrency(accountBalances);
     const rainyDayProgress = getRainyDayProgress(snapshot.rainyDayFund, accountBalances);
     const monthRange = getDateRangeForPreset('last_month');
-    const currentCurrency = snapshot.rainyDayFund.currencyCode || snapshot.defaultCurrencyCode;
+    const currentCurrency = getEffectiveDisplayCurrency({
+      defaultCurrencyCode: snapshot.defaultCurrencyCode,
+      defaultCurrencyMode: snapshot.settings.defaultCurrencyMode,
+      accountCurrencyCodes: snapshot.accounts.map((account) => account.currencyCode),
+    });
     const currentMonthSpending = getSpendingByCategory({
       transactions: snapshot.transactions,
       lines: snapshot.transactionLines,

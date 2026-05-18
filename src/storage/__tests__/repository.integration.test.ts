@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { getAccountBalances, getRainyDayProgress } from '../../domain/aggregates';
+import { getAccountBalances, getCashFlowSummary, getRainyDayProgress, getSpendingByCategory } from '../../domain/aggregates';
 import type {
   Account,
   AppSnapshot,
@@ -158,12 +158,13 @@ async function addAccount(
     openingBalanceMinor?: number;
     iconName?: string;
     includeInRainyDay?: boolean;
+    currencyCode?: string;
   },
 ): Promise<Account> {
   await repository.addAccount({
     name: input.name,
     type: input.type ?? 'checking',
-    currencyCode: 'AUD',
+    currencyCode: input.currencyCode ?? 'AUD',
     openingBalanceMinor: input.openingBalanceMinor ?? 0,
     iconName: input.iconName,
     includeInRainyDay: input.includeInRainyDay,
@@ -243,11 +244,13 @@ describe('SQLite finance repository integration', () => {
         expect.arrayContaining([
           'category_catalog_json',
           'default_currency_code',
+          'default_currency_mode',
           'enabled_currency_codes',
           'multi_currency_enabled',
         ]),
       );
       expect(snapshot.defaultCurrencyCode).toBe('AUD');
+      expect(snapshot.settings.defaultCurrencyMode).toBe('auto');
       expect(snapshot.settings.enabledCurrencyCodes).toContain('AUD');
       expect(snapshot.categories?.length).toBeGreaterThan(0);
       expect(snapshot.accounts).toEqual([]);
@@ -259,6 +262,136 @@ describe('SQLite finance repository integration', () => {
       expect(snapshot.rainyDayFund.goalMinor).toBe(0);
       expect(snapshot.rainyDayFund.linkedAccountIds).toEqual([]);
     });
+  });
+
+  it('promotes the automatic default currency to the first account currency', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.repository.initialize('USD');
+
+      await addAccount(fixture.repository, { name: 'Everyday', currencyCode: 'AUD', includeInRainyDay: true });
+      const snapshot = await fixture.repository.getSnapshot();
+
+      expect(snapshot.defaultCurrencyCode).toBe('AUD');
+      expect(snapshot.settings.defaultCurrencyMode).toBe('auto');
+      expect(snapshot.settings.enabledCurrencyCodes).toEqual(expect.arrayContaining(['AUD', 'USD']));
+      expect(snapshot.rainyDayFund.currencyCode).toBe('AUD');
+      expect(snapshot.rainyDayFund.linkedAccountIds).toHaveLength(1);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it.each(['EUR', 'GBP', 'JPY'])(
+    'promotes the automatic default currency to a first %s account',
+    async (currencyCode) => {
+      const fixture = createFixture();
+      try {
+        await fixture.repository.initialize('USD');
+
+        await addAccount(fixture.repository, { name: `${currencyCode} account`, currencyCode });
+        const snapshot = await fixture.repository.getSnapshot();
+
+        expect(snapshot.defaultCurrencyCode).toBe(currencyCode);
+        expect(snapshot.settings.enabledCurrencyCodes).toContain(currencyCode);
+      } finally {
+        fixture.cleanup();
+      }
+    },
+  );
+
+  it('does not overwrite a manual default currency when adding the first account', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.repository.initialize('USD');
+      await fixture.repository.updateSettings({
+        defaultCurrencyCode: 'USD',
+        multiCurrencyEnabled: false,
+        enabledCurrencyCodes: ['USD'],
+      });
+
+      await addAccount(fixture.repository, { name: 'Everyday', currencyCode: 'AUD' });
+      const snapshot = await fixture.repository.getSnapshot();
+
+      expect(snapshot.defaultCurrencyCode).toBe('USD');
+      expect(snapshot.settings.defaultCurrencyMode).toBe('manual');
+      expect(snapshot.settings.enabledCurrencyCodes).toContain('AUD');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('uses a single existing account currency when older settings have no manual default flag', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.repository.initialize('USD');
+      await addAccount(fixture.repository, { name: 'Everyday', currencyCode: 'AUD' });
+      await fixture.db.runAsync(
+        `INSERT INTO settings (key, value)
+         VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        'default_currency_code',
+        'USD',
+      );
+      await fixture.db.runAsync('DELETE FROM settings WHERE key = ?', 'default_currency_mode');
+
+      const snapshot = await fixture.repository.getSnapshot();
+
+      expect(snapshot.defaultCurrencyCode).toBe('AUD');
+      expect(snapshot.settings.defaultCurrencyMode).toBe('auto');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it.each(['AUD', 'EUR'])('uses the effective single %s currency for stats calculations', async (currencyCode) => {
+    const fixture = createFixture();
+    try {
+      await fixture.repository.initialize('USD');
+      const everyday = await addAccount(fixture.repository, { name: 'Everyday', currencyCode });
+      await fixture.repository.addTransaction({
+        kind: 'expense',
+        title: 'Groceries',
+        datetime: '2026-05-18T12:00:00.000Z',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: -4200,
+            currencyCode,
+            categoryId: 'food-dining',
+            subcategoryId: 'groceries',
+          },
+        ],
+      });
+
+      const snapshot = await fixture.repository.getSnapshot();
+      const range = {
+        startIso: '2026-05-01T00:00:00.000Z',
+        endIso: '2026-06-01T00:00:00.000Z',
+      };
+
+      expect(snapshot.defaultCurrencyCode).toBe(currencyCode);
+      expect(
+        getSpendingByCategory({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          range,
+          currencyCode: snapshot.defaultCurrencyCode,
+        }),
+      ).toEqual([{ categoryId: 'food-dining', currencyCode, amountMinor: 4200 }]);
+      expect(
+        getCashFlowSummary({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          range,
+          currencyCode: snapshot.defaultCurrencyCode,
+        }).expenseMinor,
+      ).toBe(4200);
+    } finally {
+      fixture.cleanup();
+    }
   });
 
   it('persists account create, edit, icon, visibility, closed state, and derived balance inputs', async () => {

@@ -75,6 +75,7 @@ function snapshot(accounts: Account[], transactions: Transaction[], transactionL
     defaultCurrencyCode: 'AUD',
     settings: {
       defaultCurrencyCode: 'AUD',
+      defaultCurrencyMode: 'auto',
       multiCurrencyEnabled: false,
       enabledCurrencyCodes: ['AUD'],
       dashboardSelectedAccountIds: null,

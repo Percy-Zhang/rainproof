@@ -1,5 +1,6 @@
 import { sanitizeCategoryCatalog } from '../domain/categories';
 import { uniqueCurrencyCodes } from '../domain/currencyCatalog';
+import { getEffectiveDisplayCurrency, normalizeDefaultCurrencyMode } from '../domain/currency';
 import { normalizeCurrencyCode } from '../domain/money';
 import type { AppSnapshot, RainyDayFund } from '../domain/types';
 import type { RepositoryDatabase } from './database';
@@ -31,6 +32,12 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       'SELECT value FROM settings WHERE key = ?',
       'default_currency_code',
     ))?.value ?? 'USD';
+  const defaultCurrencyMode = normalizeDefaultCurrencyMode(
+    (await db.getFirstAsync<SettingRow>(
+      'SELECT value FROM settings WHERE key = ?',
+      'default_currency_mode',
+    ))?.value,
+  );
   const accountRows = await db.getAllAsync<AccountRow>(
     'SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC',
   );
@@ -67,6 +74,13 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       ))?.value,
     ),
   );
+  const storedDefaultCurrencyCode = normalizeCurrencyCode(defaultCurrency);
+  const accountCurrencyCodes = uniqueCurrencyCodes(accountRows.map((account) => account.currency_code));
+  const defaultCurrencyCode = getEffectiveDisplayCurrency({
+    defaultCurrencyCode: storedDefaultCurrencyCode,
+    defaultCurrencyMode,
+    accountCurrencyCodes,
+  });
   const fundRow = await db.getFirstAsync<RainyDayFundRow>('SELECT * FROM rainy_day_funds LIMIT 1');
 
   let rainyDayFund: RainyDayFund;
@@ -81,7 +95,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     rainyDayFund = {
       id: 'fund_missing',
       name: 'Rainy day fund',
-      currencyCode: normalizeCurrencyCode(defaultCurrency),
+      currencyCode: defaultCurrencyCode,
       goalMinor: 0,
       linkedAccountIds: [],
       createdAt: now,
@@ -89,18 +103,17 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     };
   }
 
-  const defaultCurrencyCode = normalizeCurrencyCode(defaultCurrency);
   const enabledCurrencyCodes = uniqueCurrencyCodes([
     defaultCurrencyCode,
     ...storedEnabledCurrencyCodes,
     ...accountRows.map((account) => account.currency_code),
   ]);
-  const accountCurrencyCodes = uniqueCurrencyCodes(accountRows.map((account) => account.currency_code));
 
   return {
     defaultCurrencyCode,
     settings: {
       defaultCurrencyCode,
+      defaultCurrencyMode,
       multiCurrencyEnabled: accountCurrencyCodes.length > 1,
       enabledCurrencyCodes,
       dashboardSelectedAccountIds,
