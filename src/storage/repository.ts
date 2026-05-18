@@ -1,7 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 
 import {
-  DEFAULT_ACCOUNT_THEME_COLOR,
   normalizeAccountIconName,
   normalizeAccountThemeColor,
 } from '../domain/accountThemes';
@@ -53,6 +52,7 @@ import {
   type TransactionLinkRow,
   type TransactionRow,
 } from './mappers';
+import { runMigrations } from './migrations';
 import {
   getExpandedSampleAccounts,
   getExpandedSampleBudgets,
@@ -61,7 +61,6 @@ import {
   SAMPLE_DATA_VERSION,
   type SeedTransactionLine,
 } from './sampleData';
-import { SCHEMA_SQL, SCHEMA_VERSION } from './schema';
 import { shouldSeedDemoData } from './seedConfig';
 
 export type FinanceRepository = {
@@ -104,9 +103,7 @@ class SQLiteFinanceRepository implements FinanceRepository {
   async initialize(defaultCurrencyCode: string): Promise<void> {
     const currencyCode = normalizeCurrencyCode(defaultCurrencyCode);
 
-    await this.db.execAsync(SCHEMA_SQL);
-    await this.ensureAccountColumns();
-    await this.db.execAsync(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+    await runMigrations(this.db);
     await this.db.runAsync(
       'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
       'default_currency_code',
@@ -706,33 +703,6 @@ class SQLiteFinanceRepository implements FinanceRepository {
       await this.db.runAsync('DELETE FROM rainy_day_fund_accounts WHERE account_id = ?', accountId);
       await this.db.runAsync('DELETE FROM accounts WHERE id = ?', accountId);
     });
-  }
-
-  private async ensureAccountColumns(): Promise<void> {
-    const columns = await this.db.getAllAsync<TableColumnRow>('PRAGMA table_info(accounts)');
-    const columnNames = new Set(columns.map((column) => column.name));
-
-    if (!columnNames.has('nickname')) {
-      await this.db.runAsync("ALTER TABLE accounts ADD COLUMN nickname TEXT NOT NULL DEFAULT ''");
-    }
-
-    if (!columnNames.has('theme_color')) {
-      await this.db.runAsync(
-        `ALTER TABLE accounts ADD COLUMN theme_color TEXT NOT NULL DEFAULT '${DEFAULT_ACCOUNT_THEME_COLOR}'`,
-      );
-    }
-
-    if (!columnNames.has('icon_name')) {
-      await this.db.runAsync("ALTER TABLE accounts ADD COLUMN icon_name TEXT NOT NULL DEFAULT ''");
-    }
-
-    if (!columnNames.has('sort_order')) {
-      await this.db.runAsync('ALTER TABLE accounts ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0');
-    }
-
-    if (!columnNames.has('show_on_dashboard')) {
-      await this.db.runAsync('ALTER TABLE accounts ADD COLUMN show_on_dashboard INTEGER NOT NULL DEFAULT 1');
-    }
   }
 
   private async ensureAccountSortOrder(): Promise<void> {
