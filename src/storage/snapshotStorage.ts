@@ -1,0 +1,117 @@
+import { sanitizeCategoryCatalog } from '../domain/categories';
+import { uniqueCurrencyCodes } from '../domain/currencyCatalog';
+import { normalizeCurrencyCode } from '../domain/money';
+import type { AppSnapshot, RainyDayFund } from '../domain/types';
+import type { RepositoryDatabase } from './database';
+import {
+  type AccountRow,
+  type BudgetRow,
+  type LinkedAccountRow,
+  mapAccount,
+  mapBudget,
+  mapRainyDayFund,
+  mapRecurringBill,
+  mapTransaction,
+  mapTransactionLine,
+  mapTransactionLink,
+  type RainyDayFundRow,
+  type RecurringBillRow,
+  safeParseCurrencyCodes,
+  safeParseJson,
+  safeParseNullableStringArray,
+  type SettingRow,
+  type TransactionLineRow,
+  type TransactionLinkRow,
+  type TransactionRow,
+} from './mappers';
+
+export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSnapshot> {
+  const defaultCurrency =
+    (await db.getFirstAsync<SettingRow>(
+      'SELECT value FROM settings WHERE key = ?',
+      'default_currency_code',
+    ))?.value ?? 'USD';
+  const accountRows = await db.getAllAsync<AccountRow>(
+    'SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC',
+  );
+  const transactionRows = await db.getAllAsync<TransactionRow>(
+    'SELECT * FROM transactions ORDER BY datetime DESC, created_at DESC, id DESC',
+  );
+  const lineRows = await db.getAllAsync<TransactionLineRow>(
+    'SELECT * FROM transaction_lines ORDER BY created_at ASC',
+  );
+  const linkRows = await db.getAllAsync<TransactionLinkRow>(
+    'SELECT * FROM transaction_links ORDER BY created_at ASC, id ASC',
+  );
+  const budgetRows = await db.getAllAsync<BudgetRow>('SELECT * FROM budgets ORDER BY category_id ASC');
+  const billRows = await db.getAllAsync<RecurringBillRow>(
+    'SELECT * FROM recurring_bills ORDER BY due_day ASC',
+  );
+  const storedEnabledCurrencyCodes = safeParseCurrencyCodes(
+    (await db.getFirstAsync<SettingRow>(
+      'SELECT value FROM settings WHERE key = ?',
+      'enabled_currency_codes',
+    ))?.value,
+  );
+  const dashboardSelectedAccountIds = safeParseNullableStringArray(
+    (await db.getFirstAsync<SettingRow>(
+      'SELECT value FROM settings WHERE key = ?',
+      'dashboard_selected_account_ids',
+    ))?.value,
+  );
+  const categories = sanitizeCategoryCatalog(
+    safeParseJson(
+      (await db.getFirstAsync<SettingRow>(
+        'SELECT value FROM settings WHERE key = ?',
+        'category_catalog_json',
+      ))?.value,
+    ),
+  );
+  const fundRow = await db.getFirstAsync<RainyDayFundRow>('SELECT * FROM rainy_day_funds LIMIT 1');
+
+  let rainyDayFund: RainyDayFund;
+  if (fundRow) {
+    const linkedRows = await db.getAllAsync<LinkedAccountRow>(
+      'SELECT account_id FROM rainy_day_fund_accounts WHERE fund_id = ?',
+      fundRow.id,
+    );
+    rainyDayFund = mapRainyDayFund(fundRow, linkedRows.map((row) => row.account_id));
+  } else {
+    const now = new Date().toISOString();
+    rainyDayFund = {
+      id: 'fund_missing',
+      name: 'Rainy day fund',
+      currencyCode: normalizeCurrencyCode(defaultCurrency),
+      goalMinor: 0,
+      linkedAccountIds: [],
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  const defaultCurrencyCode = normalizeCurrencyCode(defaultCurrency);
+  const enabledCurrencyCodes = uniqueCurrencyCodes([
+    defaultCurrencyCode,
+    ...storedEnabledCurrencyCodes,
+    ...accountRows.map((account) => account.currency_code),
+  ]);
+  const accountCurrencyCodes = uniqueCurrencyCodes(accountRows.map((account) => account.currency_code));
+
+  return {
+    defaultCurrencyCode,
+    settings: {
+      defaultCurrencyCode,
+      multiCurrencyEnabled: accountCurrencyCodes.length > 1,
+      enabledCurrencyCodes,
+      dashboardSelectedAccountIds,
+    },
+    categories,
+    accounts: accountRows.map(mapAccount),
+    transactions: transactionRows.map(mapTransaction),
+    transactionLines: lineRows.map(mapTransactionLine),
+    transactionLinks: linkRows.map(mapTransactionLink),
+    budgets: budgetRows.map(mapBudget),
+    recurringBills: billRows.map(mapRecurringBill),
+    rainyDayFund,
+  };
+}
