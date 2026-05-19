@@ -43,6 +43,7 @@ type TransactionsScreenProps = {
   periodState: TransactionPeriodState;
   onPeriodStateChange: (periodState: TransactionPeriodState) => void;
   onOpenTransaction: (transactionId: string) => void;
+  showHeader?: boolean;
 };
 
 type RangeMode = 'preset' | 'custom';
@@ -69,6 +70,7 @@ export function TransactionsScreen({
   periodState,
   onPeriodStateChange,
   onOpenTransaction,
+  showHeader = true,
 }: TransactionsScreenProps) {
   const insets = useSafeAreaInsets();
   const [datePickerTarget, setDatePickerTarget] = useState<DatePickerTarget | null>(null);
@@ -163,7 +165,9 @@ export function TransactionsScreen({
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <SectionHeader title="Transactions" detail="Review transactions by period and account." />
+        {showHeader ? (
+          <SectionHeader title="Transactions" detail="Review transactions by period and account." />
+        ) : null}
 
         <Card testID="transaction-list-card">
           <Text style={styles.cardTitle}>Transactions</Text>

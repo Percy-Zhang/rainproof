@@ -55,6 +55,7 @@ export function CategoryManagementPage({
   onBack,
   onSave,
   onOpenCategory,
+  showHeader = true,
 }: {
   categories: CategoryDefinition[];
   dirty: boolean;
@@ -62,10 +63,13 @@ export function CategoryManagementPage({
   onBack: () => void;
   onSave: () => void;
   onOpenCategory: (category: CategoryDefinition) => void;
+  showHeader?: boolean;
 }) {
   return (
     <View style={styles.stack}>
-      <CategoryPageHeader title="Edit categories" dirty={dirty} onBack={onBack} onSave={onSave} />
+      {showHeader ? (
+        <CategoryPageHeader title="Edit categories" dirty={dirty} onBack={onBack} onSave={onSave} />
+      ) : null}
       <FormError message={error} />
       <Card testID="category-management-card">
         <View style={styles.categoryList}>
@@ -91,6 +95,7 @@ export function CategoryEditPage({
   onSave,
   onUpdateCategory,
   onOpenSubcategory,
+  showHeader = true,
 }: {
   category: CategoryDefinition;
   dirty: boolean;
@@ -99,10 +104,13 @@ export function CategoryEditPage({
   onSave: () => void;
   onUpdateCategory: (patch: CategoryPatch) => void;
   onOpenSubcategory: (subcategory: SubcategoryDefinition) => void;
+  showHeader?: boolean;
 }) {
   return (
     <View style={styles.stack}>
-      <CategoryPageHeader title={category.name} dirty={dirty} onBack={onBack} onSave={onSave} />
+      {showHeader ? (
+        <CategoryPageHeader title={category.name} dirty={dirty} onBack={onBack} onSave={onSave} />
+      ) : null}
       <FormError message={error} />
       <Card testID="category-edit-card">
         <EditorHeader title="Category" color={category.color} icon={category.icon} />
@@ -147,6 +155,7 @@ export function SubcategoryEditPage({
   onBack,
   onSave,
   onUpdateSubcategory,
+  showHeader = true,
 }: {
   category: CategoryDefinition;
   dirty: boolean;
@@ -155,10 +164,13 @@ export function SubcategoryEditPage({
   onBack: () => void;
   onSave: () => void;
   onUpdateSubcategory: (patch: SubcategoryPatch) => void;
+  showHeader?: boolean;
 }) {
   return (
     <View style={styles.stack}>
-      <CategoryPageHeader title={subcategory.name} dirty={dirty} onBack={onBack} onSave={onSave} />
+      {showHeader ? (
+        <CategoryPageHeader title={subcategory.name} dirty={dirty} onBack={onBack} onSave={onSave} />
+      ) : null}
       <FormError message={error} />
       <Card testID="subcategory-edit-card">
         <EditorHeader title={category.name} color={category.color} icon={category.icon} />

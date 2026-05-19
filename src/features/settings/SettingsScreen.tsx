@@ -1,174 +1,29 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import {
-  CategoryIconBadge,
-} from '../../components/CategoryDisplay';
+import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { Card, SectionHeader } from '../../components/ui';
-import {
-  defaultCategories,
-  sanitizeCategoryCatalog,
-} from '../../domain/categories';
-import {
-  getCurrencyName,
-  uniqueCurrencyCodes,
-} from '../../domain/currencyCatalog';
+import { getCurrencyName, uniqueCurrencyCodes } from '../../domain/currencyCatalog';
 import { getCurrencySymbol } from '../../domain/money';
-import type {
-  AppSnapshot,
-  CategoryDefinition,
-  SubcategoryDefinition,
-  UpdateAppSettingsInput,
-  UpdateCategoryCatalogInput,
-} from '../../domain/types';
+import type { AppSnapshot, UpdateAppSettingsInput } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
-import {
-  CategoryEditPage,
-  CategoryManagementPage,
-  SubcategoryEditPage,
-} from './CategorySettingsPages';
 
 type SettingsScreenProps = {
   snapshot: AppSnapshot;
-  onUpdateCategoryCatalog: (input: UpdateCategoryCatalogInput) => Promise<void>;
+  onOpenCategoryManagement: () => void;
   onUpdateSettings: (input: UpdateAppSettingsInput) => Promise<void>;
+  showHeader?: boolean;
 };
 
-type SettingsPage = 'settings' | 'categories' | 'category' | 'subcategory';
-
-export function SettingsScreen({ snapshot, onUpdateCategoryCatalog }: SettingsScreenProps) {
+export function SettingsScreen({ snapshot, onOpenCategoryManagement, showHeader = true }: SettingsScreenProps) {
   const accountCurrencyCodes = uniqueCurrencyCodes(snapshot.accounts.map((account) => account.currencyCode));
   const displayCurrencyCodes = accountCurrencyCodes.length ? accountCurrencyCodes : [snapshot.settings.defaultCurrencyCode];
-  const [page, setPage] = useState<SettingsPage>('settings');
-  const [draftCategories, setDraftCategories] = useState(() => sanitizeCategoryCatalog(snapshot.categories ?? defaultCategories));
-  const [selectedCategoryId, setSelectedCategoryId] = useState(draftCategories[0]?.id ?? '');
-  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState(draftCategories[0]?.subcategories[0]?.id ?? '');
-  const [dirty, setDirty] = useState(false);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!dirty) {
-      const nextCategories = sanitizeCategoryCatalog(snapshot.categories ?? defaultCategories);
-      setDraftCategories(nextCategories);
-      setSelectedCategoryId((currentId) =>
-        nextCategories.some((category) => category.id === currentId) ? currentId : nextCategories[0]?.id ?? '',
-      );
-      setSelectedSubcategoryId((currentId) =>
-        nextCategories.some((category) => category.subcategories.some((subcategory) => subcategory.id === currentId))
-          ? currentId
-          : nextCategories[0]?.subcategories[0]?.id ?? '',
-      );
-    }
-  }, [dirty, snapshot.categories]);
-
-  const selectedCategory = useMemo(
-    () => draftCategories.find((category) => category.id === selectedCategoryId) ?? draftCategories[0],
-    [draftCategories, selectedCategoryId],
-  );
-  const selectedSubcategory = useMemo(
-    () => selectedCategory?.subcategories.find((subcategory) => subcategory.id === selectedSubcategoryId) ?? selectedCategory?.subcategories[0],
-    [selectedCategory, selectedSubcategoryId],
-  );
-
-  function openCategory(category: CategoryDefinition) {
-    setSelectedCategoryId(category.id);
-    setSelectedSubcategoryId(category.subcategories[0]?.id ?? '');
-    setPage('category');
-  }
-
-  function openSubcategory(subcategory: SubcategoryDefinition) {
-    setSelectedSubcategoryId(subcategory.id);
-    setPage('subcategory');
-  }
-
-  function updateCategory(patch: Partial<Pick<CategoryDefinition, 'name' | 'color' | 'icon'>>) {
-    if (!selectedCategory) {
-      return;
-    }
-
-    setDirty(true);
-    setDraftCategories((currentCategories) =>
-      currentCategories.map((category) =>
-        category.id === selectedCategory.id ? { ...category, ...patch } : category,
-      ),
-    );
-  }
-
-  function updateSubcategory(patch: Partial<Pick<SubcategoryDefinition, 'name' | 'color' | 'icon'>>) {
-    if (!selectedCategory || !selectedSubcategory) {
-      return;
-    }
-
-    setDirty(true);
-    setDraftCategories((currentCategories) =>
-      currentCategories.map((category) =>
-        category.id === selectedCategory.id
-          ? {
-              ...category,
-              subcategories: category.subcategories.map((subcategory) =>
-                subcategory.id === selectedSubcategory.id ? { ...subcategory, ...patch } : subcategory,
-              ),
-            }
-          : category,
-      ),
-    );
-  }
-
-  async function saveCategories() {
-    try {
-      await onUpdateCategoryCatalog({ categories: sanitizeCategoryCatalog(draftCategories) });
-      setDirty(false);
-      setError('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save categories.');
-    }
-  }
-
-  if (page === 'categories') {
-    return (
-      <CategoryManagementPage
-        categories={draftCategories}
-        dirty={dirty}
-        error={error}
-        onBack={() => setPage('settings')}
-        onOpenCategory={openCategory}
-        onSave={saveCategories}
-      />
-    );
-  }
-
-  if (page === 'category' && selectedCategory) {
-    return (
-      <CategoryEditPage
-        category={selectedCategory}
-        dirty={dirty}
-        error={error}
-        onBack={() => setPage('categories')}
-        onOpenSubcategory={openSubcategory}
-        onSave={saveCategories}
-        onUpdateCategory={updateCategory}
-      />
-    );
-  }
-
-  if (page === 'subcategory' && selectedCategory && selectedSubcategory) {
-    return (
-      <SubcategoryEditPage
-        category={selectedCategory}
-        dirty={dirty}
-        error={error}
-        subcategory={selectedSubcategory}
-        onBack={() => setPage('category')}
-        onSave={saveCategories}
-        onUpdateSubcategory={updateSubcategory}
-      />
-    );
-  }
 
   return (
     <View style={styles.stack}>
-      <SectionHeader title="Settings" detail="App defaults, currency behavior, and categories." />
+      {showHeader ? (
+        <SectionHeader title="Settings" detail="App defaults, currency behavior, and categories." />
+      ) : null}
 
       <Card testID="currency-settings-card">
         <Text style={styles.cardTitle}>Currency</Text>
@@ -212,7 +67,7 @@ export function SettingsScreen({ snapshot, onUpdateCategoryCatalog }: SettingsSc
         <Text style={styles.cardTitle}>Categories</Text>
         <Pressable
           accessibilityRole="button"
-          onPress={() => setPage('categories')}
+          onPress={onOpenCategoryManagement}
           style={({ pressed }) => [styles.settingsNavRow, pressed && styles.pressed]}
         >
           <CategoryIconBadge color={colors.primary} icon="pricetags-outline" size="md" />

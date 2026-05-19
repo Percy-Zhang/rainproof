@@ -21,6 +21,7 @@ type AccountsScreenProps = {
   onEditAccount: (accountId: string) => void;
   onUpdateAccountDashboardVisibility: (accountId: string, showOnDashboard: boolean) => Promise<void>;
   onUpdateAccountOrder: (accountIds: string[]) => Promise<void>;
+  showHeader?: boolean;
 };
 
 export function AccountsScreen({
@@ -30,6 +31,7 @@ export function AccountsScreen({
   onEditAccount,
   onUpdateAccountDashboardVisibility,
   onUpdateAccountOrder,
+  showHeader = true,
 }: AccountsScreenProps) {
   const [dashboardEditMode, setDashboardEditMode] = useState(false);
   const balanceByAccountId = useMemo(
@@ -63,7 +65,9 @@ export function AccountsScreen({
 
   return (
     <View style={styles.stack}>
-      <SectionHeader title="Accounts" detail="Drag to reorder. Use edit mode to choose Dashboard accounts." />
+      {showHeader ? (
+        <SectionHeader title="Accounts" detail="Drag to reorder. Use edit mode to choose Dashboard accounts." />
+      ) : null}
 
       <Card testID="accounts-list-card" style={styles.listCard}>
         <View style={styles.headerRow}>

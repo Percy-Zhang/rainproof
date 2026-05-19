@@ -31,12 +31,13 @@ import {
 
 type StatsScreenProps = {
   snapshot: AppSnapshot;
+  showHeader?: boolean;
 };
 
 type RangeMode = 'preset' | 'custom';
 type DatePickerTarget = 'start' | 'end';
 
-export function StatsScreen({ snapshot }: StatsScreenProps) {
+export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
   const insets = useSafeAreaInsets();
   const [preset, setPreset] = useState<PeriodOption>('last_month');
   const [rangeMode, setRangeMode] = useState<RangeMode>('preset');
@@ -154,7 +155,12 @@ export function StatsScreen({ snapshot }: StatsScreenProps) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <SectionHeader title="Statistics" detail="Shared period, currency, and account filters for spending and cash flow." />
+        {showHeader ? (
+          <SectionHeader
+            title="Statistics"
+            detail="Shared period, currency, and account filters for spending and cash flow."
+          />
+        ) : null}
 
         <Card testID="cash-flow-card">
           <Text style={styles.cardTitle}>Cash flow</Text>

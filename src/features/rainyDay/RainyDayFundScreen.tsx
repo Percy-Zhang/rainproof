@@ -16,6 +16,7 @@ type RainyDayFundScreenProps = {
   accountBalances: AccountBalance[];
   rainyDayProgress: RainyDayProgress;
   onUpdateRainyDayFund: (input: UpdateRainyDayFundInput) => Promise<void>;
+  showHeader?: boolean;
 };
 
 export function RainyDayFundScreen({
@@ -23,6 +24,7 @@ export function RainyDayFundScreen({
   accountBalances,
   rainyDayProgress,
   onUpdateRainyDayFund,
+  showHeader = true,
 }: RainyDayFundScreenProps) {
   const [currencyCode, setCurrencyCode] = useState(snapshot.rainyDayFund.currencyCode);
   const [goalText, setGoalText] = useState(formatMinorForInput(snapshot.rainyDayFund.goalMinor));
@@ -97,10 +99,12 @@ export function RainyDayFundScreen({
 
   return (
     <View style={styles.stack}>
-      <SectionHeader
-        title="Rainy day fund"
-        detail="Set a threshold and choose which accounts count toward it."
-      />
+      {showHeader ? (
+        <SectionHeader
+          title="Rainy day fund"
+          detail="Set a threshold and choose which accounts count toward it."
+        />
+      ) : null}
 
       <Card testID="rainy-day-progress-card" style={styles.progressCard}>
         <RainyDayProgressCard

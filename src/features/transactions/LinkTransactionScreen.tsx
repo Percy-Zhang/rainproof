@@ -28,6 +28,7 @@ type LinkTransactionScreenProps = {
   onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
   onDeleteTransactionLink: (linkId: string) => Promise<void>;
   onBack: () => void;
+  showHeader?: boolean;
 };
 
 export function LinkTransactionScreen({
@@ -37,6 +38,7 @@ export function LinkTransactionScreen({
   onUpdateTransactionLink,
   onDeleteTransactionLink,
   onBack,
+  showHeader = true,
 }: LinkTransactionScreenProps) {
   const [error, setError] = useState('');
   const transaction = snapshot.transactions.find((item) => item.id === transactionId);
@@ -52,14 +54,16 @@ export function LinkTransactionScreen({
 
   return (
     <View style={styles.screen}>
-      <View style={styles.topBar}>
-        <Pressable accessibilityRole="button" onPress={onBack} style={styles.backIconButton}>
-          <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
-          <Text style={styles.backButtonText}>Back</Text>
-        </Pressable>
-        <Text style={styles.title}>Link transaction</Text>
-        <View style={styles.headerPlaceholder} />
-      </View>
+      {showHeader ? (
+        <View style={styles.topBar}>
+          <Pressable accessibilityRole="button" onPress={onBack} style={styles.backIconButton}>
+            <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
+            <Text style={styles.backButtonText}>Back</Text>
+          </Pressable>
+          <Text style={styles.title}>Link transaction</Text>
+          <View style={styles.headerPlaceholder} />
+        </View>
+      ) : null}
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
