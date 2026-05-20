@@ -208,6 +208,24 @@ describe('dashboard helpers', () => {
     expect(recent[0]).toEqual(expect.objectContaining({ accountId: 'a1', amountMinor: -3500 }));
   });
 
+  it('shows one recent row per split expense instead of duplicating split lines', () => {
+    const accounts = [account('a1', 0)];
+    const splitExpense = transaction('split', new Date(2026, 4, 23, 9).toISOString());
+
+    const recent = getDashboardRecentTransactions({
+      previewAccountIds: ['a1'],
+      snapshot: snapshot(accounts, [splitExpense], [
+        line('split', 'a1', { id: 'food-line', amountMinor: -1500, categoryId: 'food' }),
+        line('split', 'a1', { id: 'housing-line', amountMinor: -3000, categoryId: 'housing' }),
+      ]),
+      selectedAccountIds: ['a1'],
+    });
+
+    expect(recent).toHaveLength(1);
+    expect(recent[0]).toEqual(expect.objectContaining({ id: 'split', amountMinor: -4500 }));
+    expect(recent[0].lines.map((item) => item.id)).toEqual(['food-line', 'housing-line']);
+  });
+
   it('uses the target transfer leg when only the target account is selected', () => {
     const accounts = [account('a1', 0), account('a2', 1)];
     const transfer = transaction('transfer', new Date(2026, 4, 23, 9).toISOString(), 'transfer');

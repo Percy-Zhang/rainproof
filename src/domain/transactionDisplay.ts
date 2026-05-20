@@ -1,8 +1,9 @@
 import { getAccountDisplayName } from './accountThemes';
 import { getCategory, getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from './categories';
 import type { TransactionDisplayEntry } from './aggregates';
+import { isSplitExpenseTransaction } from './splitTransactions';
 import { OUTSIDE_MY_ACCOUNTS_LABEL } from './transactionEdit';
-import type { Account, CategoryDefinition } from './types';
+import type { Account, CategoryDefinition, TransactionLine } from './types';
 
 export type TransactionAmountTone = 'positive' | 'negative' | 'neutral';
 
@@ -14,6 +15,15 @@ export type TransactionRelationParts = {
   highlightSide?: 'source' | 'target';
 };
 
+export type TransactionSplitDisplayMetadata = {
+  isSplit: boolean;
+  splitLineCount: number;
+  primaryLine?: TransactionLine;
+  primaryCategoryId?: string;
+  primarySubcategoryId?: string;
+  splitLabel?: string;
+};
+
 export function getTransactionSubcategoryLabel(
   entry: TransactionDisplayEntry,
   categories?: CategoryDefinition[],
@@ -22,7 +32,7 @@ export function getTransactionSubcategoryLabel(
     return 'Transfer';
   }
 
-  const line = entry.lines[0];
+  const line = getTransactionPrimaryLine(entry);
   return line ? getSubcategoryName(line.categoryId, line.subcategoryId, categories) : 'Uncategorized';
 }
 
@@ -89,7 +99,7 @@ export function getTransactionCategoryColor(entry: TransactionDisplayEntry, cate
     return '#5F9DB5';
   }
 
-  const line = entry.lines[0];
+  const line = getTransactionPrimaryLine(entry);
   return line ? getSubcategoryColor(line.categoryId, line.subcategoryId, categories) : getCategory('other', categories).color;
 }
 
@@ -98,8 +108,40 @@ export function getTransactionCategoryIcon(entry: TransactionDisplayEntry, categ
     return 'swap-horizontal-outline';
   }
 
-  const line = entry.lines[0];
+  const line = getTransactionPrimaryLine(entry);
   return line ? getSubcategoryIcon(line.categoryId, line.subcategoryId, categories) : getCategory('other', categories).icon;
+}
+
+export function getTransactionSplitDisplayMetadata(entry: TransactionDisplayEntry): TransactionSplitDisplayMetadata {
+  const isSplit = isSplitExpenseTransaction(entry.transaction, entry.lines);
+  const primaryLine = getTransactionPrimaryLine(entry);
+
+  return {
+    isSplit,
+    splitLineCount: isSplit ? entry.lines.filter((line) => line.amountMinor < 0).length : 0,
+    primaryLine,
+    primaryCategoryId: primaryLine?.categoryId,
+    primarySubcategoryId: primaryLine?.subcategoryId,
+    splitLabel: isSplit ? formatSplitLabel(entry.lines.filter((line) => line.amountMinor < 0).length) : undefined,
+  };
+}
+
+export function getTransactionPrimaryLine(entry: TransactionDisplayEntry): TransactionLine | undefined {
+  if (entry.transaction.kind === 'transfer') {
+    return entry.lines[0];
+  }
+
+  return entry.lines.reduce<TransactionLine | undefined>((primaryLine, line) => {
+    if (!primaryLine) {
+      return line;
+    }
+
+    return Math.abs(line.amountMinor) > Math.abs(primaryLine.amountMinor) ? line : primaryLine;
+  }, undefined);
+}
+
+function formatSplitLabel(splitLineCount: number): string {
+  return `Split \u00b7 ${splitLineCount} ${splitLineCount === 1 ? 'line' : 'lines'}`;
 }
 
 export function formatTransactionShortDate(isoDate: string): string {

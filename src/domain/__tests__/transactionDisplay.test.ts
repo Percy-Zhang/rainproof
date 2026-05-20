@@ -2,10 +2,12 @@ import type { TransactionDisplayEntry } from '../aggregates';
 import {
   formatTransactionShortDate,
   getTransactionAccountLabel,
+  getTransactionCategoryColor,
   getTransactionCategoryIcon,
   getTransactionItemTitle,
   getTransactionRelationLabel,
   getTransactionRelationParts,
+  getTransactionSplitDisplayMetadata,
   getTransactionSubcategoryLabel,
 } from '../transactionDisplay';
 import type { Account, Transaction, TransactionLine } from '../types';
@@ -92,6 +94,61 @@ describe('transaction display helpers', () => {
 
   it('uses category metadata icons and supports old subcategory names', () => {
     expect(getTransactionCategoryIcon(entry())).toBe('basket-outline');
+  });
+
+  it('chooses the largest split line as the primary display category', () => {
+    const splitEntry = entry({
+      lines: [
+        { ...baseLine, id: 'small', amountMinor: -1500, categoryId: 'food', subcategoryId: 'groceries' },
+        { ...baseLine, id: 'large', amountMinor: -3000, categoryId: 'housing', subcategoryId: 'rent' },
+        { ...baseLine, id: 'medium', amountMinor: -2000, categoryId: 'transport', subcategoryId: 'fuel' },
+      ],
+      amountMinor: -6500,
+    });
+
+    expect(getTransactionSubcategoryLabel(splitEntry)).toBe('Rent');
+    expect(getTransactionCategoryIcon(splitEntry)).toBe('key-outline');
+    expect(getTransactionCategoryColor(splitEntry)).toBe('#256F9C');
+  });
+
+  it('keeps split primary display deterministic for tied line amounts', () => {
+    const splitEntry = entry({
+      lines: [
+        { ...baseLine, id: 'first', amountMinor: -2000, categoryId: 'food', subcategoryId: 'groceries' },
+        { ...baseLine, id: 'second', amountMinor: -2000, categoryId: 'housing', subcategoryId: 'rent' },
+      ],
+      amountMinor: -4000,
+    });
+
+    expect(getTransactionSubcategoryLabel(splitEntry)).toBe('Groceries');
+  });
+
+  it('returns compact split metadata for split expenses only', () => {
+    const splitEntry = entry({
+      lines: [
+        { ...baseLine, id: 'food-line', amountMinor: -1500 },
+        { ...baseLine, id: 'housing-line', amountMinor: -3000, categoryId: 'housing', subcategoryId: 'rent' },
+        { ...baseLine, id: 'transport-line', amountMinor: -2000, categoryId: 'transport', subcategoryId: 'fuel' },
+      ],
+      amountMinor: -6500,
+    });
+
+    expect(getTransactionSplitDisplayMetadata(splitEntry)).toEqual(
+      expect.objectContaining({
+        isSplit: true,
+        splitLineCount: 3,
+        primaryCategoryId: 'housing',
+        primarySubcategoryId: 'rent',
+        splitLabel: 'Split · 3 lines',
+      }),
+    );
+    expect(getTransactionSplitDisplayMetadata(entry())).toEqual(
+      expect.objectContaining({
+        isSplit: false,
+        splitLineCount: 0,
+        splitLabel: undefined,
+      }),
+    );
   });
 
   it('formats compact dashboard dates as month then day', () => {

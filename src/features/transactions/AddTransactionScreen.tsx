@@ -28,6 +28,13 @@ import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputV
 import { applyLabelSuggestion, getLabelAutocompleteOptions, parseLabelsInput } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
 import {
+  buildSplitExpenseLinesFromForm,
+  createSplitExpenseFormLine,
+  formatMinorInput,
+  getSplitExpenseFormSummary,
+  type SplitExpenseFormLine,
+} from '../../domain/splitTransactionForm';
+import {
   buildTransferTransactionLines,
   getTransferAmountCurrencyCode,
   isOutsideAccountId,
@@ -55,6 +62,7 @@ import {
 } from './TransactionFormComponents';
 import { TransactionAmountCard } from './TransactionAmountCard';
 import { TransactionCalculator, type CalculatorKey } from './TransactionCalculator';
+import { SplitTransactionEditor } from './SplitTransactionEditor';
 
 type AddTransactionScreenProps = {
   snapshot: AppSnapshot;
@@ -62,7 +70,14 @@ type AddTransactionScreenProps = {
   onDone: () => void;
 };
 
-type Page = 'amount' | 'details';
+type Page = 'amount' | 'details' | 'split';
+
+let splitLineCounter = 0;
+
+function createSplitLineId(): string {
+  splitLineCounter += 1;
+  return `split-line-${splitLineCounter}`;
+}
 
 export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: AddTransactionScreenProps) {
   const now = new Date();
@@ -81,6 +96,8 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   const [subcategoryId, setSubcategoryId] = useState(getDefaultSubcategoryId(getDefaultCategoryForKind('expense')));
   const [labels, setLabels] = useState('');
   const [groupId, setGroupId] = useState('');
+  const [splitLines, setSplitLines] = useState<SplitExpenseFormLine[]>([]);
+  const [splitCategoryLineId, setSplitCategoryLineId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -91,8 +108,18 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
     ? undefined
     : snapshot.accounts.find((account) => account.id === toAccountId);
   const selectedCategory = categoryId ? getCategory(categoryId, categories) : categories[0];
+  const selectedSplitLine = splitCategoryLineId
+    ? splitLines.find((line) => line.id === splitCategoryLineId)
+    : undefined;
+  const pickerCategoryId = selectedSplitLine?.categoryId ?? categoryId;
+  const pickerSubcategoryId = selectedSplitLine?.subcategoryId ?? subcategoryId;
   const displayAmount = getDisplayAmount(amountExpression);
   const previewAmountMinor = parsePreviewAmount(displayAmount, kind, fromAccountId);
+  const splitTotalMinor = Math.abs(previewAmountMinor);
+  const splitSummary = useMemo(
+    () => getSplitExpenseFormSummary(splitTotalMinor, splitLines),
+    [splitLines, splitTotalMinor],
+  );
   const amountCurrencyCode =
     kind === 'transfer'
       ? getTransferAmountCurrencyCode({ accounts: snapshot.accounts, sourceAccountId: fromAccountId, targetAccountId: toAccountId })
@@ -133,6 +160,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
 
       if (action === 'close_picker') {
         setPickerMode(null);
+        setSplitCategoryLineId(null);
         return true;
       }
 
@@ -151,6 +179,13 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   function changeKind(nextKind: TransactionKind) {
     const defaultCategory = getDefaultCategoryForKind(nextKind, categories);
     setKind(nextKind);
+    if (nextKind !== 'expense') {
+      setSplitLines([]);
+      setSplitCategoryLineId(null);
+      if (page === 'split') {
+        setPage('amount');
+      }
+    }
     if (nextKind !== 'transfer' && isOutsideAccountId(fromAccountId)) {
       setFromAccountId(snapshot.accounts[0]?.id ?? '');
     }
@@ -272,8 +307,21 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
       throw new Error('Amount must be greater than zero.');
     }
 
-    if (!categoryId || !subcategoryId) {
+    const normalLine = kind === 'expense' && splitLines.length === 1 ? splitLines[0] : undefined;
+    const effectiveCategoryId = normalLine?.categoryId ?? categoryId;
+    const effectiveSubcategoryId = normalLine?.subcategoryId ?? subcategoryId;
+
+    if (!effectiveCategoryId || !effectiveSubcategoryId) {
       throw new Error('Choose a category and subcategory.');
+    }
+
+    if (kind === 'expense' && splitLines.length >= 2) {
+      return buildSplitExpenseLinesFromForm({
+        accountId: fromAccount.id,
+        currencyCode: fromAccount.currencyCode,
+        totalMinor: minor,
+        lines: splitLines,
+      });
     }
 
     return [
@@ -281,10 +329,68 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
         accountId: fromAccount.id,
         amountMinor: minor * (kind === 'expense' ? -1 : 1),
         currencyCode: fromAccount.currencyCode,
-        categoryId,
-        subcategoryId,
+        categoryId: effectiveCategoryId,
+        subcategoryId: effectiveSubcategoryId,
+        note: normalLine?.note,
       },
     ];
+  }
+
+  function openSplitEditor() {
+    if (kind !== 'expense') {
+      return;
+    }
+
+    setSplitLines((current) => {
+      if (current.length > 0) {
+        return current;
+      }
+
+      const totalMinor = Math.abs(parsePreviewAmount(displayAmount, kind, fromAccountId));
+      return [
+        createSplitExpenseFormLine({
+          id: createSplitLineId(),
+          amount: totalMinor > 0 ? formatMinorInput(totalMinor) : '',
+          categoryId,
+          subcategoryId,
+        }),
+        createSplitExpenseFormLine({
+          id: createSplitLineId(),
+          categoryId,
+          subcategoryId,
+        }),
+      ];
+    });
+    setError('');
+    setPage('split');
+  }
+
+  function addSplitLine() {
+    setSplitLines((current) => {
+      const remainingMinor = getSplitExpenseFormSummary(splitTotalMinor, current).remainingMinor;
+      return [
+        ...current,
+        createSplitExpenseFormLine({
+          id: createSplitLineId(),
+          amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
+          categoryId,
+          subcategoryId,
+        }),
+      ];
+    });
+  }
+
+  function updateSplitLine(lineId: string, patch: Partial<SplitExpenseFormLine>) {
+    setSplitLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
+  }
+
+  function removeSplitLine(lineId: string) {
+    const nextLines = splitLines.filter((line) => line.id !== lineId);
+    if (nextLines.length === 1) {
+      setCategoryId(nextLines[0].categoryId);
+      setSubcategoryId(nextLines[0].subcategoryId);
+    }
+    setSplitLines(nextLines);
   }
 
   if (pickerMode) {
@@ -293,15 +399,18 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
         mode={pickerMode}
         accounts={snapshot.accounts}
         selectedAccountId={pickerMode === 'targetAccount' ? toAccountId : fromAccountId}
-        selectedCategoryId={categoryId}
-        selectedSubcategoryId={subcategoryId}
+        selectedCategoryId={pickerCategoryId}
+        selectedSubcategoryId={pickerSubcategoryId}
         kind={kind}
         categories={categories}
         transactions={snapshot.transactions}
         transactionLines={snapshot.transactionLines}
         showCurrencyCodes={showCurrencyCodes}
         sourceAccountId={fromAccountId}
-        onClose={() => setPickerMode(null)}
+        onClose={() => {
+          setPickerMode(null);
+          setSplitCategoryLineId(null);
+        }}
         onSelectAccount={(accountId) => {
           if (pickerMode === 'targetAccount') {
             setToAccountId(accountId);
@@ -309,11 +418,20 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             setFromAccountId(accountId);
           }
           setPickerMode(null);
+          setSplitCategoryLineId(null);
         }}
         onSelectCategory={(nextCategoryId, nextSubcategoryId) => {
-          setCategoryId(nextCategoryId);
-          setSubcategoryId(nextSubcategoryId);
+          if (splitCategoryLineId) {
+            updateSplitLine(splitCategoryLineId, {
+              categoryId: nextCategoryId,
+              subcategoryId: nextSubcategoryId,
+            });
+          } else {
+            setCategoryId(nextCategoryId);
+            setSubcategoryId(nextSubcategoryId);
+          }
           setPickerMode(null);
+          setSplitCategoryLineId(null);
         }}
         onExit={onDone}
         cancelTestID="cancel-add-transaction-picker"
@@ -327,12 +445,12 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
         <View style={styles.headerSide}>
           <Pressable
             accessibilityRole="button"
-            onPress={page === 'details' ? () => setPage('amount') : onDone}
+            onPress={page === 'amount' ? onDone : () => setPage('amount')}
             style={styles.backIconButton}
             testID="cancel-add-transaction"
           >
             <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
-            <Text style={styles.backButtonText}>{page === 'details' ? 'Amount' : 'Back'}</Text>
+            <Text style={styles.backButtonText}>{page === 'amount' ? 'Back' : 'Amount'}</Text>
           </Pressable>
         </View>
         <View style={styles.headerCenter} />
@@ -343,7 +461,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             disabled={!canSave}
             onPress={submit}
             style={({ pressed }) => [styles.headerSaveButton, !canSave && styles.headerSaveDisabled, pressed && styles.pressed]}
-            testID={page === 'amount' ? 'save-transaction' : 'save-transaction-details'}
+            testID={page === 'amount' ? 'save-transaction' : page === 'split' ? 'save-transaction-split' : 'save-transaction-details'}
           >
             <Text style={[styles.headerSaveText, !canSave && styles.headerSaveTextDisabled]}>Save</Text>
           </Pressable>
@@ -404,6 +522,22 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             )}
           </View>
 
+          {kind === 'expense' ? (
+            <Pressable
+              accessibilityRole="button"
+              onPress={openSplitEditor}
+              style={({ pressed }) => [styles.optionsButton, pressed && styles.pressed]}
+              testID="transaction-split-options"
+            >
+              <Ionicons name="git-branch-outline" size={18} color={colors.primaryDark} />
+              <Text style={styles.optionsButtonText}>
+                {splitLines.length >= 2
+                  ? `Split · ${splitLines.length} lines · ${splitSummary.isBalanced ? 'Ready' : 'Needs total'}`
+                  : 'Split expense'}
+              </Text>
+            </Pressable>
+          ) : null}
+
           <Pressable
             accessibilityRole="button"
             onPress={() => setPage('details')}
@@ -416,6 +550,35 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
 
           <TransactionCalculator onPressKey={pressCalculatorKey} />
         </View>
+      ) : page === 'split' ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={spacing.xl}
+          style={styles.keyboardPane}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            testID="add-transaction-split-page"
+          >
+            <Text style={styles.detailsTitle}>Split expense</Text>
+            <SplitTransactionEditor
+              categories={categories}
+              currencyCode={fromAccount?.currencyCode ?? amountCurrencyCode}
+              lines={splitLines}
+              showCurrencyCodes={showCurrencyCodes}
+              totalMinor={splitTotalMinor}
+              onAddLine={addSplitLine}
+              onPickCategory={(lineId) => {
+                setSplitCategoryLineId(lineId);
+                setPickerMode('category');
+              }}
+              onRemoveLine={removeSplitLine}
+              onUpdateLine={updateSplitLine}
+            />
+          </ScrollView>
+        </KeyboardAvoidingView>
       ) : (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}

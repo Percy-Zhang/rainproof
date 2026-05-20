@@ -111,6 +111,126 @@ describe('transaction edit helpers', () => {
     ]);
   });
 
+  it('loads and preserves a multi-line split expense draft', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('expense', [
+        line({ id: 'food-line', amountMinor: -1200, categoryId: 'food', subcategoryId: 'groceries', note: 'Food' }),
+        line({ id: 'home-line', amountMinor: -3400, categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(draft, accounts);
+
+    expect(draft.amount).toBe('46.00');
+    expect(draft.accountId).toBe('a1');
+    expect(draft.splitLines).toEqual([
+      {
+        id: 'food-line',
+        amount: '12.00',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        note: 'Food',
+      },
+      {
+        id: 'home-line',
+        amount: '34.00',
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        note: 'Rent',
+      },
+    ]);
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        accountId: 'a1',
+        amountMinor: -1200,
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        note: 'Food',
+      }),
+      expect.objectContaining({
+        accountId: 'a1',
+        amountMinor: -3400,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        note: 'Rent',
+      }),
+    ]);
+  });
+
+  it('rejects split expense drafts when the edited total no longer matches split lines', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('expense', [
+        line({ id: 'food-line', amountMinor: -1200, categoryId: 'food', subcategoryId: 'groceries' }),
+        line({ id: 'home-line', amountMinor: -3400, categoryId: 'housing', subcategoryId: 'rent' }),
+      ]),
+      'tx-1',
+    );
+
+    expect(() => buildTransactionUpdateInput({ ...draft, amount: '45.99' }, accounts)).toThrow(
+      'Split line amounts must equal the transaction total.',
+    );
+  });
+
+  it('collapses a split expense draft with one remaining line back to a normal expense', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('expense', [
+        line({ id: 'food-line', amountMinor: -1200, categoryId: 'food', subcategoryId: 'groceries' }),
+        line({ id: 'home-line', amountMinor: -3400, categoryId: 'housing', subcategoryId: 'rent' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(
+      {
+        ...draft,
+        amount: '12.00',
+        splitLines: [
+          {
+            id: 'food-line',
+            amount: '12.00',
+            categoryId: 'transport',
+            subcategoryId: 'fuel',
+            note: 'Fuel stop',
+          },
+        ],
+      },
+      accounts,
+    );
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        amountMinor: -1200,
+        categoryId: 'transport',
+        subcategoryId: 'fuel',
+        note: 'Fuel stop',
+      }),
+    ]);
+  });
+
+  it('rejects multi-line income drafts for v1', () => {
+    expect(() =>
+      createTransactionEditDraft(
+        snapshot('income', [
+          line({ id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' }),
+          line({ id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus' }),
+        ]),
+        'tx-1',
+      ),
+    ).toThrow('Split income editing is not supported yet.');
+  });
+
+  it('rejects split transfer drafts for v1', () => {
+    expect(() =>
+      createTransactionEditDraft(
+        snapshot('transfer', [
+          line({ id: 'source', accountId: 'a1', amountMinor: -5000, transferPeerAccountId: 'a2' }),
+          line({ id: 'target', accountId: 'a2', amountMinor: 5000, transferPeerAccountId: 'a1' }),
+          line({ id: 'extra', accountId: 'usd', amountMinor: 1000, transferPeerAccountId: 'a1' }),
+        ]),
+        'tx-1',
+      ),
+    ).toThrow('Split transfer editing is not supported.');
+  });
+
   it('preserves and dedupes edited labels', () => {
     const draft = createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1');
     const input = buildTransactionUpdateInput(

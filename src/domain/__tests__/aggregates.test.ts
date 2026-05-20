@@ -319,6 +319,44 @@ describe('aggregates', () => {
     });
   });
 
+  it('calculates split expense category totals from transaction lines', () => {
+    const splitTransactions = [makeTransaction('split_expense', 'expense')];
+    const splitLines = [
+      makeLine({
+        id: 'split_food',
+        transactionId: 'split_expense',
+        amountMinor: -8000,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'split_housing',
+        transactionId: 'split_expense',
+        amountMinor: -2000,
+        categoryId: 'housing',
+      }),
+    ];
+
+    expect(
+      getSpendingByCategory({
+        transactions: splitTransactions,
+        lines: splitLines,
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual([
+      { categoryId: 'food', currencyCode: 'AUD', amountMinor: 8000 },
+      { categoryId: 'housing', currencyCode: 'AUD', amountMinor: 2000 },
+    ]);
+    expect(
+      getCashFlowSummary({
+        transactions: splitTransactions,
+        lines: splitLines,
+        range,
+        currencyCode: 'AUD',
+      }).expenseMinor,
+    ).toBe(10000);
+  });
+
   it.each(['refund', 'reimbursement', 'shared_expense_contribution'] as const)(
     'excludes linked %s income and reduces linked spending',
     (linkType) => {
@@ -544,6 +582,40 @@ describe('aggregates', () => {
     }).filter((entry) => entry.transaction.kind === 'transfer');
 
     expect(entries.map((entry) => entry.amountMinor)).toEqual([-5000, 5000]);
+  });
+
+  it('shows split expenses as one display entry with all split lines', () => {
+    const splitTransactions = [makeTransaction('split_expense', 'expense')];
+    const splitLines = [
+      makeLine({
+        id: 'split_food',
+        transactionId: 'split_expense',
+        amountMinor: -8000,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'split_housing',
+        transactionId: 'split_expense',
+        amountMinor: -2000,
+        categoryId: 'housing',
+      }),
+    ];
+
+    const entries = getTransactionDisplayEntries({
+      transactions: splitTransactions,
+      lines: splitLines,
+      currencyCode: 'AUD',
+    });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual(
+      expect.objectContaining({
+        id: 'split_expense',
+        amountMinor: -10000,
+        accountId: 'acct_aud',
+      }),
+    );
+    expect(entries[0].lines.map((line) => line.id)).toEqual(['split_food', 'split_housing']);
   });
 
   it('filters transfer display entries by selected account', () => {

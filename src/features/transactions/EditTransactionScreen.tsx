@@ -24,6 +24,12 @@ import {
 } from '../../domain/categories';
 import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
 import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
+import { parseMoneyInput } from '../../domain/money';
+import {
+  createSplitExpenseFormLine,
+  formatMinorInput,
+  getSplitExpenseFormSummary,
+} from '../../domain/splitTransactionForm';
 import {
   buildTransactionUpdateInput,
   createTransactionEditDraft,
@@ -32,6 +38,7 @@ import {
   isOutsideAccountId,
   OUTSIDE_MY_ACCOUNTS_LABEL,
   type TransactionEditDraft,
+  type TransactionEditSplitLineDraft,
 } from '../../domain/transactionEdit';
 import type {
   AppSnapshot,
@@ -55,6 +62,9 @@ import {
   type TransactionPickerMode,
 } from './TransactionFormComponents';
 import { DeleteTransactionPanel, TransactionLinkEntryRow } from './TransactionEditActions';
+import { SplitTransactionEditor } from './SplitTransactionEditor';
+
+type EditPage = 'form' | 'split';
 
 type EditTransactionScreenProps = {
   snapshot: AppSnapshot;
@@ -80,9 +90,11 @@ export function EditTransactionScreen({
   onDone,
 }: EditTransactionScreenProps) {
   const [draft, setDraft] = useState<TransactionEditDraft | null>(null);
+  const [page, setPage] = useState<EditPage>('form');
   const [error, setError] = useState('');
   const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
   const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
+  const [splitCategoryLineId, setSplitCategoryLineId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -123,10 +135,17 @@ export function EditTransactionScreen({
       : fromAccount?.currencyCode ?? ''
     : '';
   const selectedCategory = draft?.categoryId ? getCategory(draft.categoryId, categories) : getDefaultCategoryForKind(draft?.kind ?? 'expense', categories);
+  const selectedSplitLine = splitCategoryLineId
+    ? draft?.splitLines?.find((line) => line.id === splitCategoryLineId)
+    : undefined;
+  const pickerCategoryId = selectedSplitLine?.categoryId ?? draft?.categoryId ?? '';
+  const pickerSubcategoryId = selectedSplitLine?.subcategoryId ?? draft?.subcategoryId ?? '';
   const canSave = draft ? canSaveDraft(draft) : false;
 
   useEffect(() => {
     setConfirmDelete(false);
+    setPage('form');
+    setSplitCategoryLineId(null);
     try {
       setDraft(createTransactionEditDraft(snapshot, transactionId));
       setError('');
@@ -145,6 +164,12 @@ export function EditTransactionScreen({
 
       if (pickerMode) {
         setPickerMode(null);
+        setSplitCategoryLineId(null);
+        return true;
+      }
+
+      if (page === 'split') {
+        setPage('form');
         return true;
       }
 
@@ -153,7 +178,7 @@ export function EditTransactionScreen({
     });
 
     return () => subscription.remove();
-  }, [nativePickerMode, onCancel, pickerMode]);
+  }, [nativePickerMode, onCancel, page, pickerMode]);
 
   if (draft && pickerMode) {
     return (
@@ -161,22 +186,34 @@ export function EditTransactionScreen({
         mode={pickerMode}
         accounts={snapshot.accounts}
         selectedAccountId={pickerMode === 'targetAccount' ? draft.targetAccountId : draft.accountId}
-        selectedCategoryId={draft.categoryId}
-        selectedSubcategoryId={draft.subcategoryId}
+        selectedCategoryId={pickerCategoryId}
+        selectedSubcategoryId={pickerSubcategoryId}
         kind={draft.kind}
         categories={categories}
         transactions={snapshot.transactions}
         transactionLines={snapshot.transactionLines}
         showCurrencyCodes={showCurrencyCodes}
         sourceAccountId={draft.accountId}
-        onClose={() => setPickerMode(null)}
+        onClose={() => {
+          setPickerMode(null);
+          setSplitCategoryLineId(null);
+        }}
         onSelectAccount={(accountId) => {
           updateDraft(pickerMode === 'targetAccount' ? { targetAccountId: accountId } : { accountId });
           setPickerMode(null);
+          setSplitCategoryLineId(null);
         }}
-        onSelectCategory={(categoryId, subcategoryId) => {
-          updateDraft({ categoryId, subcategoryId });
+        onSelectCategory={(nextCategoryId, nextSubcategoryId) => {
+          if (splitCategoryLineId) {
+            updateSplitLine(splitCategoryLineId, {
+              categoryId: nextCategoryId,
+              subcategoryId: nextSubcategoryId,
+            });
+          } else {
+            updateDraft({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId });
+          }
           setPickerMode(null);
+          setSplitCategoryLineId(null);
         }}
         onExit={onCancel}
         cancelTestID="cancel-edit-transaction-picker"
@@ -188,8 +225,103 @@ export function EditTransactionScreen({
     setDraft((current) => (current ? { ...current, ...patch } : current));
   }
 
+  function openSplitEditor() {
+    if (!draft || draft.kind !== 'expense') {
+      return;
+    }
+
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            splitLines: getEditableSplitLines(current),
+          }
+        : current,
+    );
+    setError('');
+    setPage('split');
+  }
+
+  function getEditableSplitLines(current: TransactionEditDraft): TransactionEditSplitLineDraft[] {
+    if (current.splitLines?.length) {
+      return current.splitLines;
+    }
+
+    return [
+      createSplitExpenseFormLine({
+        id: `${current.id}-split-1`,
+        amount: current.amount,
+        categoryId: current.categoryId,
+        subcategoryId: current.subcategoryId,
+      }),
+      createSplitExpenseFormLine({
+        id: `${current.id}-split-2`,
+        categoryId: current.categoryId,
+        subcategoryId: current.subcategoryId,
+      }),
+    ];
+  }
+
+  function addSplitLine() {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const splitLines = getEditableSplitLines(current);
+      const totalMinor = getDraftExpenseTotalMinor(current);
+      const remainingMinor = getSplitExpenseFormSummary(totalMinor, splitLines).remainingMinor;
+
+      return {
+        ...current,
+        splitLines: [
+          ...splitLines,
+          createSplitExpenseFormLine({
+            id: `${current.id}-split-${splitLines.length + 1}-${Date.now()}`,
+            amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
+            categoryId: current.categoryId,
+            subcategoryId: current.subcategoryId,
+          }),
+        ],
+      };
+    });
+  }
+
+  function updateSplitLine(lineId: string, patch: Partial<TransactionEditSplitLineDraft>) {
+    setDraft((current) =>
+      current
+        ? {
+            ...current,
+            splitLines: getEditableSplitLines(current).map((line) => (line.id === lineId ? { ...line, ...patch } : line)),
+          }
+        : current,
+    );
+  }
+
+  function removeSplitLine(lineId: string) {
+    setDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const splitLines = getEditableSplitLines(current).filter((line) => line.id !== lineId);
+      const remainingLine = splitLines.length === 1 ? splitLines[0] : undefined;
+
+      return {
+        ...current,
+        categoryId: remainingLine?.categoryId ?? current.categoryId,
+        subcategoryId: remainingLine?.subcategoryId ?? current.subcategoryId,
+        splitLines: splitLines.length ? splitLines : undefined,
+      };
+    });
+  }
+
   function changeKind(kind: TransactionKind) {
     const defaultCategory = getDefaultCategoryForKind(kind, categories);
+    if (kind !== 'expense') {
+      setPage('form');
+      setSplitCategoryLineId(null);
+    }
     setDraft((current) =>
       current
         ? {
@@ -201,6 +333,7 @@ export function EditTransactionScreen({
                 : current.accountId,
             categoryId: kind === 'transfer' ? '' : defaultCategory.id,
             subcategoryId: kind === 'transfer' ? '' : getDefaultSubcategoryId(defaultCategory),
+            splitLines: kind === 'expense' ? current.splitLines : undefined,
           }
         : current,
     );
@@ -301,18 +434,22 @@ export function EditTransactionScreen({
     <View style={styles.screen}>
       <View style={styles.topBar}>
         <View style={styles.headerSide}>
-          <Pressable accessibilityRole="button" onPress={onCancel} style={styles.backIconButton}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={page === 'split' ? () => setPage('form') : onCancel}
+            style={styles.backIconButton}
+          >
             <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
-            <Text style={styles.backButtonText}>Back</Text>
+            <Text style={styles.backButtonText}>{page === 'split' ? 'Edit' : 'Back'}</Text>
           </Pressable>
         </View>
-        <Text style={styles.title}>Edit transaction</Text>
+        <Text style={styles.title}>{page === 'split' ? 'Split expense' : 'Edit transaction'}</Text>
         <View style={styles.headerActions}>
-          {draft && draft.kind !== 'transfer' ? (
+          {draft && draft.kind === 'expense' ? (
             <Pressable
               accessibilityLabel="Split transaction"
               accessibilityRole="button"
-              onPress={() => setError('Split editing will be added later.')}
+              onPress={openSplitEditor}
               style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
               testID="split-edit-transaction"
             >
@@ -347,15 +484,32 @@ export function EditTransactionScreen({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <TransactionTypeTabs kind={draft.kind} onChange={changeKind} />
+            {page === 'split' ? (
+              <SplitTransactionEditor
+                categories={categories}
+                currencyCode={amountCurrencyCode}
+                lines={getEditableSplitLines(draft)}
+                showCurrencyCodes={showCurrencyCodes}
+                totalMinor={getDraftExpenseTotalMinor(draft)}
+                onAddLine={addSplitLine}
+                onPickCategory={(lineId) => {
+                  setSplitCategoryLineId(lineId);
+                  setPickerMode('category');
+                }}
+                onRemoveLine={removeSplitLine}
+                onUpdateLine={updateSplitLine}
+              />
+            ) : (
+              <>
+                <TransactionTypeTabs kind={draft.kind} onChange={changeKind} />
 
-            <AutocompleteField
-              label="Item"
-              value={draft.title}
-              onChange={(title) => updateDraft({ title })}
-              placeholder="Groceries, Salary, Transfer"
-              suggestions={itemSuggestions}
-            />
+                <AutocompleteField
+                  label="Item"
+                  value={draft.title}
+                  onChange={(title) => updateDraft({ title })}
+                  placeholder="Groceries, Salary, Transfer"
+                  suggestions={itemSuggestions}
+                />
 
             <InlineField
               label="Amount"
@@ -475,6 +629,8 @@ export function EditTransactionScreen({
               onCancel={() => setConfirmDelete(false)}
               onDelete={deleteCurrentTransaction}
             />
+              </>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       ) : transactionExists ? (
@@ -492,6 +648,14 @@ export function EditTransactionScreen({
       </View>
     </View>
   );
+}
+
+function getDraftExpenseTotalMinor(draft: TransactionEditDraft): number {
+  try {
+    return Math.abs(parseMoneyInput(draft.amount));
+  } catch {
+    return 0;
+  }
 }
 
 const styles = StyleSheet.create({

@@ -10,6 +10,7 @@ import {
   getTransactionCategoryColor,
   getTransactionCategoryIcon,
   getTransactionItemTitle,
+  getTransactionSplitDisplayMetadata,
   getTransactionSubcategoryLabel,
   type TransactionAmountTone,
 } from '../../domain/transactionDisplay';
@@ -39,6 +40,7 @@ export function CompactTransactionListItem({
   const categoryIcon = getTransactionCategoryIcon(entry, categories);
   const subcategory = getTransactionSubcategoryLabel(entry, categories);
   const title = getTransactionItemTitle(entry, categories);
+  const splitMetadata = getTransactionSplitDisplayMetadata(entry);
 
   return (
     <Pressable
@@ -57,6 +59,11 @@ export function CompactTransactionListItem({
           <Text numberOfLines={1} style={styles.compactSubcategory}>
             {subcategory}
           </Text>
+          {splitMetadata.splitLabel ? (
+            <Text numberOfLines={1} style={styles.compactSplitLabel}>
+              {splitMetadata.splitLabel}
+            </Text>
+          ) : null}
           <TransactionAmountText
             amountMinor={entry.amountMinor}
             currencyCode={entry.currencyCode}
@@ -108,6 +115,7 @@ export function TransactionListItem({
   const title = getTransactionItemTitle(entry, categories);
   const categoryColor = getTransactionCategoryColor(entry, categories);
   const categoryIcon = getTransactionCategoryIcon(entry, categories);
+  const splitMetadata = getTransactionSplitDisplayMetadata(entry);
 
   return (
     <Pressable
@@ -127,6 +135,11 @@ export function TransactionListItem({
             <Text numberOfLines={1} style={styles.fullTitle}>
               {subcategory}
             </Text>
+            {splitMetadata.splitLabel ? (
+              <Text numberOfLines={1} style={styles.fullSplitLabel}>
+                {splitMetadata.splitLabel}
+              </Text>
+            ) : null}
             <TransactionAmountText
               amountMinor={entry.amountMinor}
               currencyCode={entry.currencyCode}
@@ -253,6 +266,16 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     minWidth: 0,
   },
+  compactSplitLabel: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    color: colors.primaryDark,
+    flexShrink: 0,
+    fontSize: typography.small,
+    fontWeight: '800',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+  },
   compactTitle: {
     color: colors.muted,
     flex: 1,
@@ -319,6 +342,16 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '900',
     minWidth: 0,
+  },
+  fullSplitLabel: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    color: colors.primaryDark,
+    flexShrink: 0,
+    fontSize: typography.small,
+    fontWeight: '800',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
   },
   fullNote: {
     color: colors.muted,

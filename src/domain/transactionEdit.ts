@@ -7,11 +7,19 @@ import {
 import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
+import {
+  buildSplitExpenseTransactionLines,
+  isSplitExpenseTransaction,
+  sumSplitExpenseLinesMinor,
+  validateSplitExpenseTransactionLines,
+  type SplitExpenseDraftLine,
+} from './splitTransactions';
 import type {
   Account,
   AppSnapshot,
   NewTransactionInput,
   TransactionKind,
+  TransactionLine,
   UpdateTransactionInput,
 } from './types';
 
@@ -33,6 +41,15 @@ export type TransactionEditDraft = {
   notes: string;
   labels: string;
   groupId: string;
+  splitLines?: TransactionEditSplitLineDraft[];
+};
+
+export type TransactionEditSplitLineDraft = {
+  id: string;
+  amount: string;
+  categoryId: string;
+  subcategoryId: string;
+  note: string;
 };
 
 export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId: string): TransactionEditDraft {
@@ -50,6 +67,10 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
   const defaultCategory = getDefaultCategoryForKind(transaction.kind, snapshot.categories);
 
   if (transaction.kind === 'transfer') {
+    if (lines.length > 2) {
+      throw new Error('Split transfer editing is not supported.');
+    }
+
     const sourceLine = lines.find((line) => line.amountMinor < 0);
     const targetLine = lines.find((line) => line.amountMinor > 0 && line.accountId !== sourceLine?.accountId);
     const amountLine = sourceLine ?? targetLine ?? lines[0];
@@ -72,8 +93,40 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
     };
   }
 
+  if (transaction.kind === 'income' && lines.length !== 1) {
+    throw new Error('Split income editing is not supported yet.');
+  }
+
+  if (isSplitExpenseTransaction(transaction, lines)) {
+    validateSplitExpenseTransactionLines({ kind: transaction.kind, lines });
+    const firstLine = lines[0];
+    const categoryId = normalizeCategoryId(firstLine.categoryId || defaultCategory.id, snapshot.categories);
+
+    return {
+      id: transaction.id,
+      kind: transaction.kind,
+      title: transaction.title,
+      amount: minorToInput(sumSplitExpenseLinesMinor(lines)),
+      date: toDateInputValue(dateValue),
+      time: toTimeInputValue(dateValue),
+      accountId: firstLine.accountId,
+      targetAccountId: OUTSIDE_ACCOUNT_ID,
+      externalParty: firstLine.externalParty || OUTSIDE_MY_ACCOUNTS_LABEL,
+      categoryId,
+      subcategoryId: normalizeSubcategoryId(
+        categoryId,
+        firstLine.subcategoryId || getDefaultSubcategoryId(defaultCategory),
+        snapshot.categories,
+      ),
+      notes: transaction.notes,
+      labels: transaction.labels.join(', '),
+      groupId: transaction.groupId,
+      splitLines: lines.map((line) => toTransactionEditSplitLineDraft(line, snapshot.categories)),
+    };
+  }
+
   if (lines.length !== 1) {
-    throw new Error('Split transaction editing is not supported yet.');
+    throw new Error('Unsupported transaction line structure.');
   }
 
   const line = lines[0];
@@ -136,11 +189,31 @@ export function buildTransactionUpdateInput(
     throw new Error('Choose an account.');
   }
 
-  if (!draft.categoryId || !draft.subcategoryId) {
+  if (draft.kind === 'expense' && (draft.splitLines?.length ?? 0) >= 2) {
+    return {
+      id: draft.id,
+      kind: draft.kind,
+      title: draft.title,
+      datetime,
+      notes: draft.notes,
+      labels,
+      groupId: draft.groupId,
+      lines: buildSplitExpenseTransactionLines({
+        accountId: account.id,
+        currencyCode: account.currencyCode,
+        totalMinor: amountMinor,
+        splitLines: (draft.splitLines ?? []).map(toSplitExpenseDraftLine),
+      }),
+    };
+  }
+
+  const normalSplitLine = draft.kind === 'expense' && draft.splitLines?.length === 1 ? draft.splitLines[0] : undefined;
+  const categoryId = normalizeCategoryId(normalSplitLine?.categoryId ?? draft.categoryId);
+  const subcategoryId = normalizeSubcategoryId(categoryId, normalSplitLine?.subcategoryId ?? draft.subcategoryId);
+
+  if (!categoryId || !subcategoryId) {
     throw new Error('Choose a category and subcategory.');
   }
-  const categoryId = normalizeCategoryId(draft.categoryId);
-  const subcategoryId = normalizeSubcategoryId(categoryId, draft.subcategoryId);
 
   return {
     id: draft.id,
@@ -157,6 +230,7 @@ export function buildTransactionUpdateInput(
         currencyCode: account.currencyCode,
         categoryId,
         subcategoryId,
+        note: normalSplitLine?.note,
       },
     ],
   };
@@ -258,6 +332,33 @@ export function buildTransferTransactionLines({
       transferPeerAccountId: sourceAccount!.id,
     },
   ];
+}
+
+function toSplitExpenseDraftLine(line: TransactionEditSplitLineDraft): SplitExpenseDraftLine {
+  const categoryId = normalizeCategoryId(line.categoryId);
+
+  return {
+    id: line.id,
+    amountMinor: Math.abs(parseMoneyInput(line.amount)),
+    categoryId,
+    subcategoryId: normalizeSubcategoryId(categoryId, line.subcategoryId),
+    note: line.note,
+  };
+}
+
+function toTransactionEditSplitLineDraft(
+  line: TransactionLine,
+  categories: AppSnapshot['categories'],
+): TransactionEditSplitLineDraft {
+  const categoryId = normalizeCategoryId(line.categoryId, categories);
+
+  return {
+    id: line.id,
+    amount: minorToInput(Math.abs(line.amountMinor)),
+    categoryId,
+    subcategoryId: normalizeSubcategoryId(categoryId, line.subcategoryId, categories),
+    note: line.note,
+  };
 }
 
 function minorToInput(amountMinor: number): string {

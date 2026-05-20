@@ -29,6 +29,13 @@ describe('add transaction flow', () => {
     expect(
       getAddTransactionBackAction({
         nativePickerOpen: false,
+        page: 'split',
+        pickerOpen: false,
+      }),
+    ).toBe('show_amount');
+    expect(
+      getAddTransactionBackAction({
+        nativePickerOpen: false,
         page: 'amount',
         pickerOpen: false,
       }),

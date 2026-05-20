@@ -1,4 +1,4 @@
-export type AddTransactionPage = 'amount' | 'details';
+export type AddTransactionPage = 'amount' | 'details' | 'split';
 
 export type AddTransactionBackState = {
   nativePickerOpen: boolean;
@@ -21,7 +21,7 @@ export function getAddTransactionBackAction(state: AddTransactionBackState): Add
     return 'close_picker';
   }
 
-  if (state.page === 'details') {
+  if (state.page !== 'amount') {
     return 'show_amount';
   }
 
