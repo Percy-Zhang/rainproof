@@ -1,5 +1,5 @@
 import { getAccountDisplayName } from './accountThemes';
-import { getCategory, getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from './categories';
+import { getCategory, getSubcategory, getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from './categories';
 import type { TransactionDisplayEntry } from './aggregates';
 import { getTransactionSplitLines, isSplitTransaction } from './splitTransactions';
 import { OUTSIDE_MY_ACCOUNTS_LABEL } from './transactionEdit';
@@ -23,6 +23,11 @@ export type TransactionSplitDisplayMetadata = {
   primaryCategoryId?: string;
   primarySubcategoryId?: string;
   splitLabel?: string;
+};
+
+export type SplitLineChildDisplayText = {
+  title: string;
+  secondaryText?: string;
 };
 
 export function getTransactionSubcategoryLabel(
@@ -146,8 +151,29 @@ export function getTransactionPrimaryLine(entry: TransactionDisplayEntry): Trans
   }, undefined);
 }
 
+export function getSplitLineChildDisplayText(
+  line: Pick<TransactionLine, 'categoryId' | 'subcategoryId' | 'note'>,
+  parentTitle?: string,
+  categories?: CategoryDefinition[],
+): SplitLineChildDisplayText {
+  const category = getCategory(line.categoryId, categories);
+  const title = getSubcategory(line.categoryId, line.subcategoryId, categories)?.name || category.name || 'Split line';
+  const secondaryText = [line.note, parentTitle]
+    .map((value) => value?.trim() ?? '')
+    .find((value) => value && !isSameDisplayText(value, title));
+
+  return {
+    title,
+    secondaryText,
+  };
+}
+
 function formatSplitLabel(splitLineCount: number): string {
   return `Split \u00b7 ${splitLineCount} ${splitLineCount === 1 ? 'line' : 'lines'}`;
+}
+
+function isSameDisplayText(left: string, right: string): boolean {
+  return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
 }
 
 export function formatTransactionShortDate(isoDate: string): string {

@@ -3,10 +3,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { TransactionRelationText } from '../../components/TransactionRelationText';
 import type { TransactionDisplayEntry } from '../../domain/aggregates';
-import { getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from '../../domain/categories';
+import { getSubcategoryColor, getSubcategoryIcon } from '../../domain/categories';
 import { formatMoney, formatMoneyAccounting } from '../../domain/money';
 import {
   formatTransactionShortDate,
+  getSplitLineChildDisplayText,
   getTransactionAmountTone,
   getTransactionCategoryColor,
   getTransactionCategoryIcon,
@@ -92,6 +93,7 @@ export function CompactTransactionListItem({
         categories={categories}
         compact
         lines={splitMetadata.splitLines}
+        parentTitle={title}
         showCurrencyCodes={showCurrencyCodes}
         onPress={onPress}
       />
@@ -184,6 +186,7 @@ export function TransactionListItem({
       <SplitChildRows
         categories={categories}
         lines={splitMetadata.splitLines}
+        parentTitle={title}
         showCurrencyCodes={showCurrencyCodes}
         onPress={onPress}
       />
@@ -195,12 +198,14 @@ function SplitChildRows({
   categories,
   compact = false,
   lines,
+  parentTitle,
   showCurrencyCodes,
   onPress,
 }: {
   categories: CategoryDefinition[];
   compact?: boolean;
   lines: TransactionLine[];
+  parentTitle: string;
   showCurrencyCodes: boolean;
   onPress: () => void;
 }) {
@@ -210,47 +215,51 @@ function SplitChildRows({
 
   return (
     <View style={compact ? styles.compactSplitChildren : styles.fullSplitChildren}>
-      {lines.map((line) => (
-        <Pressable
-          key={line.id}
-          accessibilityRole="button"
-          onPress={onPress}
-          style={({ pressed }) => [compact ? styles.compactSplitChildRow : styles.fullSplitChildRow, pressed && styles.pressed]}
-          testID={`split-line-row-${line.id}`}
-        >
-          <View style={styles.splitConnector}>
-            <Ionicons name="return-down-forward-outline" size={compact ? 13 : 14} color={colors.muted} />
-          </View>
-          <View
-            style={[
-              compact ? styles.compactSplitChildIcon : styles.fullSplitChildIcon,
-              { backgroundColor: getSubcategoryColor(line.categoryId, line.subcategoryId, categories) },
-            ]}
+      {lines.map((line) => {
+        const displayText = getSplitLineChildDisplayText(line, parentTitle, categories);
+
+        return (
+          <Pressable
+            key={line.id}
+            accessibilityRole="button"
+            onPress={onPress}
+            style={({ pressed }) => [compact ? styles.compactSplitChildRow : styles.fullSplitChildRow, pressed && styles.pressed]}
+            testID={`split-line-row-${line.id}`}
           >
-            <Ionicons
-              name={getSubcategoryIcon(line.categoryId, line.subcategoryId, categories) as keyof typeof Ionicons.glyphMap}
-              size={compact ? 12 : 13}
-              color={colors.surface}
-            />
-          </View>
-          <View style={styles.splitChildBody}>
-            <Text numberOfLines={1} style={compact ? styles.compactSplitChildTitle : styles.fullSplitChildTitle}>
-              {getSubcategoryName(line.categoryId, line.subcategoryId, categories)}
-            </Text>
-            {line.note ? (
-              <Text numberOfLines={1} style={styles.splitChildNote}>
-                {line.note}
+            <View style={styles.splitConnector}>
+              <Ionicons name="return-down-forward-outline" size={compact ? 13 : 14} color={colors.muted} />
+            </View>
+            <View
+              style={[
+                compact ? styles.compactSplitChildIcon : styles.fullSplitChildIcon,
+                { backgroundColor: getSubcategoryColor(line.categoryId, line.subcategoryId, categories) },
+              ]}
+            >
+              <Ionicons
+                name={getSubcategoryIcon(line.categoryId, line.subcategoryId, categories) as keyof typeof Ionicons.glyphMap}
+                size={compact ? 12 : 13}
+                color={colors.surface}
+              />
+            </View>
+            <View style={styles.splitChildBody}>
+              <Text numberOfLines={1} style={compact ? styles.compactSplitChildTitle : styles.fullSplitChildTitle}>
+                {displayText.title}
               </Text>
-            ) : null}
-          </View>
-          <TransactionAmountText
-            amountMinor={line.amountMinor}
-            currencyCode={line.currencyCode}
-            showCurrencyCodes={showCurrencyCodes}
-            style={compact ? styles.compactSplitChildAmount : styles.fullSplitChildAmount}
-          />
-        </Pressable>
-      ))}
+              {displayText.secondaryText ? (
+                <Text numberOfLines={1} style={styles.splitChildNote}>
+                  {displayText.secondaryText}
+                </Text>
+              ) : null}
+            </View>
+            <TransactionAmountText
+              amountMinor={line.amountMinor}
+              currencyCode={line.currencyCode}
+              showCurrencyCodes={showCurrencyCodes}
+              style={compact ? styles.compactSplitChildAmount : styles.fullSplitChildAmount}
+            />
+          </Pressable>
+        );
+      })}
     </View>
   );
 }

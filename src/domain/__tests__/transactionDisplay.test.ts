@@ -1,6 +1,7 @@
 import type { TransactionDisplayEntry } from '../aggregates';
 import {
   formatTransactionShortDate,
+  getSplitLineChildDisplayText,
   getTransactionAccountLabel,
   getTransactionCategoryColor,
   getTransactionCategoryIcon,
@@ -169,6 +170,54 @@ describe('transaction display helpers', () => {
         primarySubcategoryId: 'bonus',
       }),
     );
+  });
+
+  it('uses subcategory name as the split child row title', () => {
+    expect(
+      getSplitLineChildDisplayText(
+        { ...baseLine, categoryId: 'food', subcategoryId: 'groceries', note: 'Weekly food shop' },
+        'Woolworths',
+      ),
+    ).toEqual({
+      title: 'Groceries',
+      secondaryText: 'Weekly food shop',
+    });
+  });
+
+  it('falls back to category name for split child row title when no subcategory exists', () => {
+    expect(
+      getSplitLineChildDisplayText(
+        { ...baseLine, categoryId: 'income', subcategoryId: '', note: 'Base pay' },
+        'Apple Pay',
+      ),
+    ).toEqual({
+      title: 'Income',
+      secondaryText: 'Base pay',
+    });
+  });
+
+  it('uses parent title as split child secondary text when the line note is empty', () => {
+    expect(
+      getSplitLineChildDisplayText(
+        { ...baseLine, categoryId: 'income', subcategoryId: 'bonus', note: '' },
+        'Apple Pay',
+      ),
+    ).toEqual({
+      title: 'Bonus',
+      secondaryText: 'Apple Pay',
+    });
+  });
+
+  it('omits duplicate split child secondary text', () => {
+    expect(
+      getSplitLineChildDisplayText(
+        { ...baseLine, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' },
+        'Bonus',
+      ),
+    ).toEqual({
+      title: 'Bonus',
+      secondaryText: undefined,
+    });
   });
 
   it('formats compact dashboard dates as month then day', () => {
