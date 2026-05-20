@@ -206,16 +206,82 @@ describe('transaction edit helpers', () => {
     ]);
   });
 
-  it('rejects multi-line income drafts for v1', () => {
-    expect(() =>
-      createTransactionEditDraft(
-        snapshot('income', [
-          line({ id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' }),
-          line({ id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus' }),
-        ]),
-        'tx-1',
-      ),
-    ).toThrow('Split income editing is not supported yet.');
+  it('loads and preserves a multi-line split income draft', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({ id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary', note: 'Salary' }),
+        line({ id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(draft, accounts);
+
+    expect(draft.amount).toBe('46.00');
+    expect(draft.splitLines).toEqual([
+      {
+        id: 'salary-line',
+        amount: '12.00',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Salary',
+      },
+      {
+        id: 'bonus-line',
+        amount: '34.00',
+        categoryId: 'income',
+        subcategoryId: 'bonus',
+        note: 'Bonus',
+      },
+    ]);
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        amountMinor: 1200,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Salary',
+      }),
+      expect.objectContaining({
+        amountMinor: 3400,
+        categoryId: 'income',
+        subcategoryId: 'bonus',
+        note: 'Bonus',
+      }),
+    ]);
+  });
+
+  it('collapses a split income draft with one remaining line back to a normal income', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({ id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' }),
+        line({ id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(
+      {
+        ...draft,
+        amount: '12.00',
+        splitLines: [
+          {
+            id: 'salary-line',
+            amount: '12.00',
+            categoryId: 'income',
+            subcategoryId: 'interest',
+            note: 'Interest',
+          },
+        ],
+      },
+      accounts,
+    );
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        amountMinor: 1200,
+        categoryId: 'income',
+        subcategoryId: 'interest',
+        note: 'Interest',
+      }),
+    ]);
   });
 
   it('rejects split transfer drafts for v1', () => {

@@ -10,9 +10,9 @@ import {
 } from '../../domain/categories';
 import {
   formatMinorInput,
-  getSplitExpenseFormSummary,
-  getSplitExpenseValidationMessage,
-  type SplitExpenseFormLine,
+  getSplitTransactionFormSummary,
+  getSplitTransactionValidationMessage,
+  type SplitTransactionFormLine,
 } from '../../domain/splitTransactionForm';
 import { formatMoney } from '../../domain/money';
 import type { CategoryDefinition, CurrencyCode } from '../../domain/types';
@@ -22,13 +22,13 @@ import { InlineField, SelectorRow } from './TransactionFormComponents';
 type SplitTransactionEditorProps = {
   categories: CategoryDefinition[];
   currencyCode: CurrencyCode;
-  lines: SplitExpenseFormLine[];
+  lines: SplitTransactionFormLine[];
   showCurrencyCodes: boolean;
   totalMinor: number;
   onAddLine: () => void;
   onPickCategory: (lineId: string) => void;
   onRemoveLine: (lineId: string) => void;
-  onUpdateLine: (lineId: string, patch: Partial<SplitExpenseFormLine>) => void;
+  onUpdateLine: (lineId: string, patch: Partial<SplitTransactionFormLine>) => void;
 };
 
 export function SplitTransactionEditor({
@@ -42,8 +42,8 @@ export function SplitTransactionEditor({
   onRemoveLine,
   onUpdateLine,
 }: SplitTransactionEditorProps) {
-  const summary = getSplitExpenseFormSummary(totalMinor, lines);
-  const validationMessage = getSplitExpenseValidationMessage(totalMinor, lines);
+  const summary = getSplitTransactionFormSummary(totalMinor, lines);
+  const validationMessage = getSplitTransactionValidationMessage(totalMinor, lines);
 
   return (
     <View style={styles.stack}>

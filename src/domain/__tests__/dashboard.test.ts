@@ -191,6 +191,36 @@ describe('dashboard helpers', () => {
     expect(recent.map((entry) => entry.transaction.id)).toEqual(['newest', 'mid-4', 'mid-2', 'mid-1', 'mid-3']);
   });
 
+  it('counts split child lines under a parent transaction outside the recent limit', () => {
+    const accounts = [account('a1', 0)];
+    const transactions = [
+      transaction('newest', new Date(2026, 4, 22, 9).toISOString()),
+      transaction('split-income', new Date(2026, 4, 21, 9).toISOString(), 'income'),
+      transaction('mid-2', new Date(2026, 4, 20, 9).toISOString()),
+      transaction('mid-1', new Date(2026, 4, 19, 9).toISOString()),
+      transaction('mid-3', new Date(2026, 4, 18, 9).toISOString()),
+      transaction('older', new Date(2026, 4, 16, 9).toISOString()),
+    ];
+
+    const recent = getDashboardRecentTransactions({
+      previewAccountIds: ['a1'],
+      snapshot: snapshot(accounts, transactions, [
+        line('newest', 'a1'),
+        line('split-income', 'a1', { id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' }),
+        line('split-income', 'a1', { id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus' }),
+        line('split-income', 'a1', { id: 'interest-line', amountMinor: 400, categoryId: 'income', subcategoryId: 'interest' }),
+        line('mid-2', 'a1'),
+        line('mid-1', 'a1'),
+        line('mid-3', 'a1'),
+        line('older', 'a1'),
+      ]),
+      selectedAccountIds: ['a1'],
+    });
+
+    expect(recent.map((entry) => entry.transaction.id)).toEqual(['newest', 'split-income', 'mid-2', 'mid-1', 'mid-3']);
+    expect(recent[1].lines.map((item) => item.id)).toEqual(['salary-line', 'bonus-line', 'interest-line']);
+  });
+
   it('shows one recent row per transfer and uses the source leg when both accounts are visible', () => {
     const accounts = [account('a1', 0), account('a2', 1)];
     const transfer = transaction('transfer', new Date(2026, 4, 23, 9).toISOString(), 'transfer');

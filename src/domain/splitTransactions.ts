@@ -1,7 +1,7 @@
 import { normalizeCurrencyCode } from './money';
 import type { CurrencyCode, NewTransactionInput, Transaction, TransactionKind, TransactionLine } from './types';
 
-export type SplitExpenseDraftLine = {
+export type SplitTransactionDraftLine = {
   id?: string;
   amountMinor: number;
   categoryId: string;
@@ -9,37 +9,59 @@ export type SplitExpenseDraftLine = {
   note?: string;
 };
 
-type SplitExpenseLine = Pick<
+type SplitLine = Pick<
   TransactionLine,
   'accountId' | 'amountMinor' | 'currencyCode' | 'categoryId' | 'subcategoryId'
 > & {
   note?: string;
 };
 
-export function isSplitExpenseTransaction(
-  transaction: Pick<Transaction, 'kind'>,
-  lines: Pick<TransactionLine, 'amountMinor'>[],
-): boolean {
-  return transaction.kind === 'expense' && lines.filter((line) => line.amountMinor < 0).length > 1;
+export function isSplittableTransactionKind(kind: TransactionKind): boolean {
+  return kind === 'expense' || kind === 'income';
 }
 
-export function sumSplitExpenseLinesMinor(lines: Pick<TransactionLine, 'amountMinor'>[]): number {
+export function getTransactionSplitLines(
+  transaction: Pick<Transaction, 'kind'>,
+  lines: TransactionLine[],
+): TransactionLine[] {
+  if (transaction.kind === 'expense') {
+    return lines.filter((line) => line.amountMinor < 0);
+  }
+
+  if (transaction.kind === 'income') {
+    return lines.filter((line) => line.amountMinor > 0);
+  }
+
+  return [];
+}
+
+export function isSplitTransaction(
+  transaction: Pick<Transaction, 'kind'>,
+  lines: TransactionLine[],
+): boolean {
+  return getTransactionSplitLines(transaction, lines).length > 1;
+}
+
+export function sumSplitTransactionLinesMinor(
+  kind: TransactionKind,
+  lines: Pick<TransactionLine, 'amountMinor'>[],
+): number {
   return lines
-    .filter((line) => line.amountMinor < 0)
+    .filter((line) => (kind === 'expense' ? line.amountMinor < 0 : kind === 'income' ? line.amountMinor > 0 : false))
     .reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
 }
 
-export function validateSplitExpenseTransactionLines({
+export function validateSplitTransactionLines({
   kind,
   lines,
   totalMinor,
 }: {
   kind: TransactionKind;
-  lines: SplitExpenseLine[];
+  lines: SplitLine[];
   totalMinor?: number;
 }): void {
-  if (kind !== 'expense') {
-    throw new Error('Only expense transactions can be split.');
+  if (!isSplittableTransactionKind(kind)) {
+    throw new Error('Transfers cannot be split.');
   }
 
   if (lines.length < 2) {
@@ -56,7 +78,7 @@ export function validateSplitExpenseTransactionLines({
     }
 
     if (line.accountId !== firstAccountId) {
-      throw new Error('Split expense lines must use the same account.');
+      throw new Error('Split lines must use the same account.');
     }
 
     if (!line.currencyCode) {
@@ -64,11 +86,19 @@ export function validateSplitExpenseTransactionLines({
     }
 
     if (normalizeCurrencyCode(line.currencyCode) !== firstCurrencyCode) {
-      throw new Error('Split expense lines must use the same currency.');
+      throw new Error('Split lines must use the same currency.');
     }
 
-    if (!Number.isInteger(line.amountMinor) || line.amountMinor >= 0) {
-      throw new Error('Split expense line amounts must be negative.');
+    if (!Number.isInteger(line.amountMinor) || line.amountMinor === 0) {
+      throw new Error('Split line amounts must be greater than zero.');
+    }
+
+    if (kind === 'expense' && line.amountMinor >= 0) {
+      throw new Error('Expense split line amounts must be negative.');
+    }
+
+    if (kind === 'income' && line.amountMinor <= 0) {
+      throw new Error('Income split line amounts must be positive.');
     }
 
     if (!line.categoryId || !line.subcategoryId) {
@@ -83,29 +113,32 @@ export function validateSplitExpenseTransactionLines({
   }
 }
 
-export function buildSplitExpenseTransactionLines({
+export function buildSplitTransactionLines({
+  kind,
   accountId,
   currencyCode,
   totalMinor,
   splitLines,
 }: {
+  kind: TransactionKind;
   accountId: string;
   currencyCode: CurrencyCode;
   totalMinor: number;
-  splitLines: SplitExpenseDraftLine[];
+  splitLines: SplitTransactionDraftLine[];
 }): NewTransactionInput['lines'] {
   const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  const sign = kind === 'expense' ? -1 : 1;
   const lines = splitLines.map((line) => ({
     accountId,
-    amountMinor: -Math.abs(line.amountMinor),
+    amountMinor: Math.abs(line.amountMinor) * sign,
     currencyCode: normalizedCurrencyCode,
     categoryId: line.categoryId,
     subcategoryId: line.subcategoryId,
     note: line.note?.trim() ?? '',
   }));
 
-  validateSplitExpenseTransactionLines({
-    kind: 'expense',
+  validateSplitTransactionLines({
+    kind,
     lines,
     totalMinor,
   });

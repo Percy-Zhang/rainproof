@@ -26,9 +26,9 @@ import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
 import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
 import {
-  createSplitExpenseFormLine,
+  createSplitTransactionFormLine,
   formatMinorInput,
-  getSplitExpenseFormSummary,
+  getSplitTransactionFormSummary,
 } from '../../domain/splitTransactionForm';
 import {
   buildTransactionUpdateInput,
@@ -226,7 +226,7 @@ export function EditTransactionScreen({
   }
 
   function openSplitEditor() {
-    if (!draft || draft.kind !== 'expense') {
+    if (!draft || draft.kind === 'transfer') {
       return;
     }
 
@@ -248,13 +248,13 @@ export function EditTransactionScreen({
     }
 
     return [
-      createSplitExpenseFormLine({
+      createSplitTransactionFormLine({
         id: `${current.id}-split-1`,
         amount: current.amount,
         categoryId: current.categoryId,
         subcategoryId: current.subcategoryId,
       }),
-      createSplitExpenseFormLine({
+      createSplitTransactionFormLine({
         id: `${current.id}-split-2`,
         categoryId: current.categoryId,
         subcategoryId: current.subcategoryId,
@@ -270,13 +270,13 @@ export function EditTransactionScreen({
 
       const splitLines = getEditableSplitLines(current);
       const totalMinor = getDraftExpenseTotalMinor(current);
-      const remainingMinor = getSplitExpenseFormSummary(totalMinor, splitLines).remainingMinor;
+      const remainingMinor = getSplitTransactionFormSummary(totalMinor, splitLines).remainingMinor;
 
       return {
         ...current,
         splitLines: [
           ...splitLines,
-          createSplitExpenseFormLine({
+          createSplitTransactionFormLine({
             id: `${current.id}-split-${splitLines.length + 1}-${Date.now()}`,
             amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
             categoryId: current.categoryId,
@@ -318,7 +318,7 @@ export function EditTransactionScreen({
 
   function changeKind(kind: TransactionKind) {
     const defaultCategory = getDefaultCategoryForKind(kind, categories);
-    if (kind !== 'expense') {
+    if (kind === 'transfer' || kind !== draft?.kind) {
       setPage('form');
       setSplitCategoryLineId(null);
     }
@@ -333,7 +333,7 @@ export function EditTransactionScreen({
                 : current.accountId,
             categoryId: kind === 'transfer' ? '' : defaultCategory.id,
             subcategoryId: kind === 'transfer' ? '' : getDefaultSubcategoryId(defaultCategory),
-            splitLines: kind === 'expense' ? current.splitLines : undefined,
+            splitLines: kind !== 'transfer' && kind === current.kind ? current.splitLines : undefined,
           }
         : current,
     );
@@ -378,15 +378,19 @@ export function EditTransactionScreen({
       await onUpdateTransaction(input);
 
       if (existingSourceLink && input.kind === 'income') {
-        const positiveLine = input.lines.find((line) => line.amountMinor > 0);
-        if (positiveLine) {
+        const positiveLines = input.lines.filter((line) => line.amountMinor > 0);
+        const currencyCode = positiveLines[0]?.currencyCode;
+        const amountMinor = positiveLines
+          .filter((line) => line.currencyCode === currencyCode)
+          .reduce((sum, line) => sum + line.amountMinor, 0);
+        if (currencyCode && amountMinor > 0) {
           await onUpdateTransactionLink({
             id: existingSourceLink.id,
             sourceTransactionId: existingSourceLink.sourceTransactionId,
             targetTransactionId: existingSourceLink.targetTransactionId,
             linkType: existingSourceLink.linkType,
-            amountMinor: positiveLine.amountMinor,
-            currencyCode: positiveLine.currencyCode,
+            amountMinor,
+            currencyCode,
           });
         }
       } else if (existingSourceLink) {
@@ -443,9 +447,9 @@ export function EditTransactionScreen({
             <Text style={styles.backButtonText}>{page === 'split' ? 'Edit' : 'Back'}</Text>
           </Pressable>
         </View>
-        <Text style={styles.title}>{page === 'split' ? 'Split expense' : 'Edit transaction'}</Text>
+        <Text style={styles.title}>{page === 'split' ? `Split ${draft?.kind ?? 'transaction'}` : 'Edit transaction'}</Text>
         <View style={styles.headerActions}>
-          {draft && draft.kind === 'expense' ? (
+          {draft && draft.kind !== 'transfer' ? (
             <Pressable
               accessibilityLabel="Split transaction"
               accessibilityRole="button"

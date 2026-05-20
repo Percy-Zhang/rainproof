@@ -123,7 +123,7 @@ describe('transaction display helpers', () => {
     expect(getTransactionSubcategoryLabel(splitEntry)).toBe('Groceries');
   });
 
-  it('returns compact split metadata for split expenses only', () => {
+  it('returns compact split metadata for split income and expenses', () => {
     const splitEntry = entry({
       lines: [
         { ...baseLine, id: 'food-line', amountMinor: -1500 },
@@ -137,6 +137,7 @@ describe('transaction display helpers', () => {
       expect.objectContaining({
         isSplit: true,
         splitLineCount: 3,
+        splitLines: splitEntry.lines,
         primaryCategoryId: 'housing',
         primarySubcategoryId: 'rent',
         splitLabel: 'Split · 3 lines',
@@ -146,7 +147,26 @@ describe('transaction display helpers', () => {
       expect.objectContaining({
         isSplit: false,
         splitLineCount: 0,
+        splitLines: [],
         splitLabel: undefined,
+      }),
+    );
+
+    const splitIncomeEntry = entry({
+      transaction: { ...baseTransaction, kind: 'income' },
+      lines: [
+        { ...baseLine, id: 'salary-line', amountMinor: 1500, categoryId: 'income', subcategoryId: 'salary' },
+        { ...baseLine, id: 'bonus-line', amountMinor: 3000, categoryId: 'income', subcategoryId: 'bonus' },
+      ],
+      amountMinor: 4500,
+    });
+
+    expect(getTransactionSplitDisplayMetadata(splitIncomeEntry)).toEqual(
+      expect.objectContaining({
+        isSplit: true,
+        splitLineCount: 2,
+        primaryCategoryId: 'income',
+        primarySubcategoryId: 'bonus',
       }),
     );
   });

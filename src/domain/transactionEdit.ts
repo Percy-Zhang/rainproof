@@ -8,11 +8,11 @@ import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputV
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
 import {
-  buildSplitExpenseTransactionLines,
-  isSplitExpenseTransaction,
-  sumSplitExpenseLinesMinor,
-  validateSplitExpenseTransactionLines,
-  type SplitExpenseDraftLine,
+  buildSplitTransactionLines,
+  isSplitTransaction,
+  sumSplitTransactionLinesMinor,
+  validateSplitTransactionLines,
+  type SplitTransactionDraftLine,
 } from './splitTransactions';
 import type {
   Account,
@@ -93,12 +93,8 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
     };
   }
 
-  if (transaction.kind === 'income' && lines.length !== 1) {
-    throw new Error('Split income editing is not supported yet.');
-  }
-
-  if (isSplitExpenseTransaction(transaction, lines)) {
-    validateSplitExpenseTransactionLines({ kind: transaction.kind, lines });
+  if (isSplitTransaction(transaction, lines)) {
+    validateSplitTransactionLines({ kind: transaction.kind, lines });
     const firstLine = lines[0];
     const categoryId = normalizeCategoryId(firstLine.categoryId || defaultCategory.id, snapshot.categories);
 
@@ -106,7 +102,7 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
       id: transaction.id,
       kind: transaction.kind,
       title: transaction.title,
-      amount: minorToInput(sumSplitExpenseLinesMinor(lines)),
+      amount: minorToInput(sumSplitTransactionLinesMinor(transaction.kind, lines)),
       date: toDateInputValue(dateValue),
       time: toTimeInputValue(dateValue),
       accountId: firstLine.accountId,
@@ -189,7 +185,7 @@ export function buildTransactionUpdateInput(
     throw new Error('Choose an account.');
   }
 
-  if (draft.kind === 'expense' && (draft.splitLines?.length ?? 0) >= 2) {
+  if ((draft.splitLines?.length ?? 0) >= 2) {
     return {
       id: draft.id,
       kind: draft.kind,
@@ -198,16 +194,17 @@ export function buildTransactionUpdateInput(
       notes: draft.notes,
       labels,
       groupId: draft.groupId,
-      lines: buildSplitExpenseTransactionLines({
+      lines: buildSplitTransactionLines({
+        kind: draft.kind,
         accountId: account.id,
         currencyCode: account.currencyCode,
         totalMinor: amountMinor,
-        splitLines: (draft.splitLines ?? []).map(toSplitExpenseDraftLine),
+        splitLines: (draft.splitLines ?? []).map(toSplitTransactionDraftLine),
       }),
     };
   }
 
-  const normalSplitLine = draft.kind === 'expense' && draft.splitLines?.length === 1 ? draft.splitLines[0] : undefined;
+  const normalSplitLine = draft.splitLines?.length === 1 ? draft.splitLines[0] : undefined;
   const categoryId = normalizeCategoryId(normalSplitLine?.categoryId ?? draft.categoryId);
   const subcategoryId = normalizeSubcategoryId(categoryId, normalSplitLine?.subcategoryId ?? draft.subcategoryId);
 
@@ -334,7 +331,7 @@ export function buildTransferTransactionLines({
   ];
 }
 
-function toSplitExpenseDraftLine(line: TransactionEditSplitLineDraft): SplitExpenseDraftLine {
+function toSplitTransactionDraftLine(line: TransactionEditSplitLineDraft): SplitTransactionDraftLine {
   const categoryId = normalizeCategoryId(line.categoryId);
 
   return {

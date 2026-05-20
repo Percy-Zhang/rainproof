@@ -1,7 +1,7 @@
 import { getAccountDisplayName } from './accountThemes';
 import { getCategory, getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from './categories';
 import type { TransactionDisplayEntry } from './aggregates';
-import { isSplitExpenseTransaction } from './splitTransactions';
+import { getTransactionSplitLines, isSplitTransaction } from './splitTransactions';
 import { OUTSIDE_MY_ACCOUNTS_LABEL } from './transactionEdit';
 import type { Account, CategoryDefinition, TransactionLine } from './types';
 
@@ -18,6 +18,7 @@ export type TransactionRelationParts = {
 export type TransactionSplitDisplayMetadata = {
   isSplit: boolean;
   splitLineCount: number;
+  splitLines: TransactionLine[];
   primaryLine?: TransactionLine;
   primaryCategoryId?: string;
   primarySubcategoryId?: string;
@@ -113,16 +114,18 @@ export function getTransactionCategoryIcon(entry: TransactionDisplayEntry, categ
 }
 
 export function getTransactionSplitDisplayMetadata(entry: TransactionDisplayEntry): TransactionSplitDisplayMetadata {
-  const isSplit = isSplitExpenseTransaction(entry.transaction, entry.lines);
+  const splitLines = getTransactionSplitLines(entry.transaction, entry.lines);
+  const isSplit = isSplitTransaction(entry.transaction, entry.lines);
   const primaryLine = getTransactionPrimaryLine(entry);
 
   return {
     isSplit,
-    splitLineCount: isSplit ? entry.lines.filter((line) => line.amountMinor < 0).length : 0,
+    splitLineCount: isSplit ? splitLines.length : 0,
+    splitLines: isSplit ? splitLines : [],
     primaryLine,
     primaryCategoryId: primaryLine?.categoryId,
     primarySubcategoryId: primaryLine?.subcategoryId,
-    splitLabel: isSplit ? formatSplitLabel(entry.lines.filter((line) => line.amountMinor < 0).length) : undefined,
+    splitLabel: isSplit ? formatSplitLabel(splitLines.length) : undefined,
   };
 }
 
@@ -131,7 +134,10 @@ export function getTransactionPrimaryLine(entry: TransactionDisplayEntry): Trans
     return entry.lines[0];
   }
 
-  return entry.lines.reduce<TransactionLine | undefined>((primaryLine, line) => {
+  const displayLines = getTransactionSplitLines(entry.transaction, entry.lines);
+  const candidateLines = displayLines.length ? displayLines : entry.lines;
+
+  return candidateLines.reduce<TransactionLine | undefined>((primaryLine, line) => {
     if (!primaryLine) {
       return line;
     }

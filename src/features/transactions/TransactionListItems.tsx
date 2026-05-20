@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { TransactionRelationText } from '../../components/TransactionRelationText';
 import type { TransactionDisplayEntry } from '../../domain/aggregates';
+import { getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from '../../domain/categories';
 import { formatMoney, formatMoneyAccounting } from '../../domain/money';
 import {
   formatTransactionShortDate,
@@ -14,7 +15,7 @@ import {
   getTransactionSubcategoryLabel,
   type TransactionAmountTone,
 } from '../../domain/transactionDisplay';
-import type { Account, CategoryDefinition, CurrencyCode } from '../../domain/types';
+import type { Account, CategoryDefinition, CurrencyCode, TransactionLine } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type CompactTransactionListItemProps = {
@@ -43,49 +44,58 @@ export function CompactTransactionListItem({
   const splitMetadata = getTransactionSplitDisplayMetadata(entry);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.compactRow,
-        first && styles.compactRowFirst,
-        pressed && styles.pressed,
-      ]}
-      testID={`dashboard-transaction-${entry.transaction.id}`}
-    >
-      <TransactionIconDisplay color={categoryColor} icon={categoryIcon} size="compact" />
-      <View style={styles.compactBody}>
-        <View style={styles.transactionLine}>
-          <Text numberOfLines={1} style={styles.compactSubcategory}>
-            {subcategory}
-          </Text>
-          {splitMetadata.splitLabel ? (
-            <Text numberOfLines={1} style={styles.compactSplitLabel}>
-              {splitMetadata.splitLabel}
+    <View style={[styles.listItemGroup, first && styles.compactRowFirst]}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.compactRow,
+          first && styles.compactRowFirst,
+          pressed && styles.pressed,
+        ]}
+        testID={`dashboard-transaction-${entry.transaction.id}`}
+      >
+        <TransactionIconDisplay color={categoryColor} icon={categoryIcon} size="compact" />
+        <View style={styles.compactBody}>
+          <View style={styles.transactionLine}>
+            <Text numberOfLines={1} style={styles.compactSubcategory}>
+              {subcategory}
             </Text>
-          ) : null}
-          <TransactionAmountText
-            amountMinor={entry.amountMinor}
-            currencyCode={entry.currencyCode}
-            showCurrencyCodes={showCurrencyCodes}
-            style={styles.compactAmount}
+            {splitMetadata.splitLabel ? (
+              <Text numberOfLines={1} style={styles.compactSplitLabel}>
+                {splitMetadata.splitLabel}
+              </Text>
+            ) : null}
+            <TransactionAmountText
+              amountMinor={entry.amountMinor}
+              currencyCode={entry.currencyCode}
+              showCurrencyCodes={showCurrencyCodes}
+              style={styles.compactAmount}
+            />
+          </View>
+          <View style={styles.transactionLine}>
+            <Text numberOfLines={1} style={styles.compactTitle}>
+              {title}
+            </Text>
+            <Text style={styles.compactDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+          </View>
+          <TransactionRelationText
+            accounts={accounts}
+            boldStyle={styles.compactRelationBold}
+            contextAccountId={contextAccountId}
+            entry={entry}
+            style={styles.compactMeta}
           />
         </View>
-        <View style={styles.transactionLine}>
-          <Text numberOfLines={1} style={styles.compactTitle}>
-            {title}
-          </Text>
-          <Text style={styles.compactDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
-        </View>
-        <TransactionRelationText
-          accounts={accounts}
-          boldStyle={styles.compactRelationBold}
-          contextAccountId={contextAccountId}
-          entry={entry}
-          style={styles.compactMeta}
-        />
-      </View>
-    </Pressable>
+      </Pressable>
+      <SplitChildRows
+        categories={categories}
+        compact
+        lines={splitMetadata.splitLines}
+        showCurrencyCodes={showCurrencyCodes}
+        onPress={onPress}
+      />
+    </View>
   );
 }
 
@@ -118,58 +128,130 @@ export function TransactionListItem({
   const splitMetadata = getTransactionSplitDisplayMetadata(entry);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.fullRow,
-        firstInGroup && styles.fullRowFirst,
-        pressed && styles.pressed,
-      ]}
-      testID={`transaction-row-${entry.transaction.id}`}
-    >
-      <View style={styles.fullRowContent}>
-        <TransactionIconDisplay color={categoryColor} icon={categoryIcon} size="full" />
-        <View style={styles.fullBody}>
-          <View style={styles.transactionLine}>
-            <Text numberOfLines={1} style={styles.fullTitle}>
-              {subcategory}
-            </Text>
-            {splitMetadata.splitLabel ? (
-              <Text numberOfLines={1} style={styles.fullSplitLabel}>
-                {splitMetadata.splitLabel}
+    <View style={[styles.listItemGroup, firstInGroup && styles.fullRowFirst]}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onPress}
+        style={({ pressed }) => [
+          styles.fullRow,
+          firstInGroup && styles.fullRowFirst,
+          pressed && styles.pressed,
+        ]}
+        testID={`transaction-row-${entry.transaction.id}`}
+      >
+        <View style={styles.fullRowContent}>
+          <TransactionIconDisplay color={categoryColor} icon={categoryIcon} size="full" />
+          <View style={styles.fullBody}>
+            <View style={styles.transactionLine}>
+              <Text numberOfLines={1} style={styles.fullTitle}>
+                {subcategory}
               </Text>
-            ) : null}
-            <TransactionAmountText
-              amountMinor={entry.amountMinor}
-              currencyCode={entry.currencyCode}
-              showCurrencyCodes={showCurrencyCodes}
-              style={styles.fullAmount}
-            />
-          </View>
-          <View style={styles.transactionLine}>
-            <Text numberOfLines={1} style={styles.fullNote}>
-              {title}
-            </Text>
-            <Text style={styles.balanceAfterText}>
-              {account
-                ? formatMoney(balanceAfterMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes })
-                : ''}
-            </Text>
-          </View>
-          <View style={styles.transactionLine}>
-            <TransactionRelationText
-              accounts={accounts}
-              boldStyle={styles.fullMetaBold}
-              contextAccountId={contextAccountId}
-              entry={entry}
-              style={styles.fullMeta}
-            />
-            <Text style={styles.fullDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+              {splitMetadata.splitLabel ? (
+                <Text numberOfLines={1} style={styles.fullSplitLabel}>
+                  {splitMetadata.splitLabel}
+                </Text>
+              ) : null}
+              <TransactionAmountText
+                amountMinor={entry.amountMinor}
+                currencyCode={entry.currencyCode}
+                showCurrencyCodes={showCurrencyCodes}
+                style={styles.fullAmount}
+              />
+            </View>
+            <View style={styles.transactionLine}>
+              <Text numberOfLines={1} style={styles.fullNote}>
+                {title}
+              </Text>
+              <Text style={styles.balanceAfterText}>
+                {account
+                  ? formatMoney(balanceAfterMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes })
+                  : ''}
+              </Text>
+            </View>
+            <View style={styles.transactionLine}>
+              <TransactionRelationText
+                accounts={accounts}
+                boldStyle={styles.fullMetaBold}
+                contextAccountId={contextAccountId}
+                entry={entry}
+                style={styles.fullMeta}
+              />
+              <Text style={styles.fullDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+            </View>
           </View>
         </View>
-      </View>
-    </Pressable>
+      </Pressable>
+      <SplitChildRows
+        categories={categories}
+        lines={splitMetadata.splitLines}
+        showCurrencyCodes={showCurrencyCodes}
+        onPress={onPress}
+      />
+    </View>
+  );
+}
+
+function SplitChildRows({
+  categories,
+  compact = false,
+  lines,
+  showCurrencyCodes,
+  onPress,
+}: {
+  categories: CategoryDefinition[];
+  compact?: boolean;
+  lines: TransactionLine[];
+  showCurrencyCodes: boolean;
+  onPress: () => void;
+}) {
+  if (!lines.length) {
+    return null;
+  }
+
+  return (
+    <View style={compact ? styles.compactSplitChildren : styles.fullSplitChildren}>
+      {lines.map((line) => (
+        <Pressable
+          key={line.id}
+          accessibilityRole="button"
+          onPress={onPress}
+          style={({ pressed }) => [compact ? styles.compactSplitChildRow : styles.fullSplitChildRow, pressed && styles.pressed]}
+          testID={`split-line-row-${line.id}`}
+        >
+          <View style={styles.splitConnector}>
+            <Ionicons name="return-down-forward-outline" size={compact ? 13 : 14} color={colors.muted} />
+          </View>
+          <View
+            style={[
+              compact ? styles.compactSplitChildIcon : styles.fullSplitChildIcon,
+              { backgroundColor: getSubcategoryColor(line.categoryId, line.subcategoryId, categories) },
+            ]}
+          >
+            <Ionicons
+              name={getSubcategoryIcon(line.categoryId, line.subcategoryId, categories) as keyof typeof Ionicons.glyphMap}
+              size={compact ? 12 : 13}
+              color={colors.surface}
+            />
+          </View>
+          <View style={styles.splitChildBody}>
+            <Text numberOfLines={1} style={compact ? styles.compactSplitChildTitle : styles.fullSplitChildTitle}>
+              {getSubcategoryName(line.categoryId, line.subcategoryId, categories)}
+            </Text>
+            {line.note ? (
+              <Text numberOfLines={1} style={styles.splitChildNote}>
+                {line.note}
+              </Text>
+            ) : null}
+          </View>
+          <TransactionAmountText
+            amountMinor={line.amountMinor}
+            currencyCode={line.currencyCode}
+            showCurrencyCodes={showCurrencyCodes}
+            style={compact ? styles.compactSplitChildAmount : styles.fullSplitChildAmount}
+          />
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
@@ -233,6 +315,9 @@ function getAmountStyle(tone: TransactionAmountTone) {
 }
 
 const styles = StyleSheet.create({
+  listItemGroup: {
+    gap: 0,
+  },
   compactRow: {
     alignItems: 'flex-start',
     borderTopColor: colors.faint,
@@ -299,6 +384,41 @@ const styles = StyleSheet.create({
   compactAmount: {
     flexShrink: 0,
     fontSize: typography.body,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  compactSplitChildren: {
+    gap: 2,
+    paddingBottom: spacing.sm,
+    paddingLeft: 44,
+  },
+  compactSplitChildRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minHeight: 32,
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 4,
+  },
+  compactSplitChildIcon: {
+    alignItems: 'center',
+    borderRadius: 6,
+    height: 22,
+    justifyContent: 'center',
+    width: 22,
+  },
+  compactSplitChildTitle: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  compactSplitChildAmount: {
+    flexShrink: 0,
+    fontSize: typography.small,
     fontWeight: '900',
     textAlign: 'right',
   },
@@ -381,6 +501,53 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '900',
     textAlign: 'right',
+  },
+  fullSplitChildren: {
+    gap: spacing.xs,
+    paddingBottom: spacing.sm,
+    paddingLeft: 48,
+  },
+  fullSplitChildRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minHeight: 38,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  fullSplitChildIcon: {
+    alignItems: 'center',
+    borderRadius: 6,
+    height: 24,
+    justifyContent: 'center',
+    width: 24,
+  },
+  fullSplitChildTitle: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  fullSplitChildAmount: {
+    flexShrink: 0,
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  splitConnector: {
+    alignItems: 'center',
+    width: 16,
+  },
+  splitChildBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  splitChildNote: {
+    color: colors.muted,
+    fontSize: typography.small,
   },
   balanceAfterText: {
     color: colors.muted,

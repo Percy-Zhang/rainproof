@@ -357,6 +357,33 @@ describe('aggregates', () => {
     ).toBe(10000);
   });
 
+  it('calculates split income totals from transaction lines', () => {
+    const splitTransactions = [makeTransaction('split_income', 'income')];
+    const splitLines = [
+      makeLine({
+        id: 'split_salary',
+        transactionId: 'split_income',
+        amountMinor: 8000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'split_bonus',
+        transactionId: 'split_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+    ];
+
+    expect(
+      getCashFlowSummary({
+        transactions: splitTransactions,
+        lines: splitLines,
+        range,
+        currencyCode: 'AUD',
+      }).incomeMinor,
+    ).toBe(10000);
+  });
+
   it.each(['refund', 'reimbursement', 'shared_expense_contribution'] as const)(
     'excludes linked %s income and reduces linked spending',
     (linkType) => {
@@ -616,6 +643,40 @@ describe('aggregates', () => {
       }),
     );
     expect(entries[0].lines.map((line) => line.id)).toEqual(['split_food', 'split_housing']);
+  });
+
+  it('shows split income as one display entry with all split lines', () => {
+    const splitTransactions = [makeTransaction('split_income', 'income')];
+    const splitLines = [
+      makeLine({
+        id: 'split_salary',
+        transactionId: 'split_income',
+        amountMinor: 8000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'split_bonus',
+        transactionId: 'split_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+    ];
+
+    const entries = getTransactionDisplayEntries({
+      transactions: splitTransactions,
+      lines: splitLines,
+      currencyCode: 'AUD',
+    });
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual(
+      expect.objectContaining({
+        id: 'split_income',
+        amountMinor: 10000,
+        accountId: 'acct_aud',
+      }),
+    );
+    expect(entries[0].lines.map((line) => line.id)).toEqual(['split_salary', 'split_bonus']);
   });
 
   it('filters transfer display entries by selected account', () => {

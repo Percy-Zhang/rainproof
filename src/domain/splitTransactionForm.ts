@@ -1,8 +1,8 @@
 import { parseMoneyInput } from './money';
-import { buildSplitExpenseTransactionLines } from './splitTransactions';
-import type { CurrencyCode, NewTransactionInput } from './types';
+import { buildSplitTransactionLines } from './splitTransactions';
+import type { CurrencyCode, NewTransactionInput, TransactionKind } from './types';
 
-export type SplitExpenseFormLine = {
+export type SplitTransactionFormLine = {
   id: string;
   amount: string;
   categoryId: string;
@@ -10,14 +10,14 @@ export type SplitExpenseFormLine = {
   note: string;
 };
 
-export type SplitExpenseFormSummary = {
+export type SplitTransactionFormSummary = {
   allocatedMinor: number;
   remainingMinor: number;
   invalidLineCount: number;
   isBalanced: boolean;
 };
 
-export function createSplitExpenseFormLine({
+export function createSplitTransactionFormLine({
   id,
   amount = '',
   categoryId,
@@ -29,7 +29,7 @@ export function createSplitExpenseFormLine({
   categoryId: string;
   subcategoryId: string;
   note?: string;
-}): SplitExpenseFormLine {
+}): SplitTransactionFormLine {
   return {
     id,
     amount,
@@ -39,22 +39,25 @@ export function createSplitExpenseFormLine({
   };
 }
 
-export function updateSplitExpenseFormLine(
-  lines: SplitExpenseFormLine[],
+export function updateSplitTransactionFormLine(
+  lines: SplitTransactionFormLine[],
   lineId: string,
-  patch: Partial<SplitExpenseFormLine>,
-): SplitExpenseFormLine[] {
+  patch: Partial<SplitTransactionFormLine>,
+): SplitTransactionFormLine[] {
   return lines.map((line) => (line.id === lineId ? { ...line, ...patch } : line));
 }
 
-export function removeSplitExpenseFormLine(lines: SplitExpenseFormLine[], lineId: string): SplitExpenseFormLine[] {
+export function removeSplitTransactionFormLine(
+  lines: SplitTransactionFormLine[],
+  lineId: string,
+): SplitTransactionFormLine[] {
   return lines.filter((line) => line.id !== lineId);
 }
 
-export function getSplitExpenseFormSummary(
+export function getSplitTransactionFormSummary(
   totalMinor: number,
-  lines: SplitExpenseFormLine[],
-): SplitExpenseFormSummary {
+  lines: SplitTransactionFormLine[],
+): SplitTransactionFormSummary {
   let allocatedMinor = 0;
   let invalidLineCount = 0;
 
@@ -78,12 +81,12 @@ export function getSplitExpenseFormSummary(
   };
 }
 
-export function getSplitExpenseValidationMessage(totalMinor: number, lines: SplitExpenseFormLine[]): string {
+export function getSplitTransactionValidationMessage(totalMinor: number, lines: SplitTransactionFormLine[]): string {
   if (lines.length < 2) {
     return 'Add at least two split lines.';
   }
 
-  const summary = getSplitExpenseFormSummary(totalMinor, lines);
+  const summary = getSplitTransactionFormSummary(totalMinor, lines);
 
   if (summary.invalidLineCount > 0) {
     return 'Enter an amount, category, and subcategory for every split line.';
@@ -96,18 +99,21 @@ export function getSplitExpenseValidationMessage(totalMinor: number, lines: Spli
   return '';
 }
 
-export function buildSplitExpenseLinesFromForm({
+export function buildSplitLinesFromForm({
+  kind,
   accountId,
   currencyCode,
   totalMinor,
   lines,
 }: {
+  kind: Extract<TransactionKind, 'expense' | 'income'>;
   accountId: string;
   currencyCode: CurrencyCode;
   totalMinor: number;
-  lines: SplitExpenseFormLine[];
+  lines: SplitTransactionFormLine[];
 }): NewTransactionInput['lines'] {
-  return buildSplitExpenseTransactionLines({
+  return buildSplitTransactionLines({
+    kind,
     accountId,
     currencyCode,
     totalMinor,

@@ -28,11 +28,11 @@ import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputV
 import { applyLabelSuggestion, getLabelAutocompleteOptions, parseLabelsInput } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
 import {
-  buildSplitExpenseLinesFromForm,
-  createSplitExpenseFormLine,
+  buildSplitLinesFromForm,
+  createSplitTransactionFormLine,
   formatMinorInput,
-  getSplitExpenseFormSummary,
-  type SplitExpenseFormLine,
+  getSplitTransactionFormSummary,
+  type SplitTransactionFormLine,
 } from '../../domain/splitTransactionForm';
 import {
   buildTransferTransactionLines,
@@ -96,7 +96,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   const [subcategoryId, setSubcategoryId] = useState(getDefaultSubcategoryId(getDefaultCategoryForKind('expense')));
   const [labels, setLabels] = useState('');
   const [groupId, setGroupId] = useState('');
-  const [splitLines, setSplitLines] = useState<SplitExpenseFormLine[]>([]);
+  const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>([]);
   const [splitCategoryLineId, setSplitCategoryLineId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
@@ -117,7 +117,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   const previewAmountMinor = parsePreviewAmount(displayAmount, kind, fromAccountId);
   const splitTotalMinor = Math.abs(previewAmountMinor);
   const splitSummary = useMemo(
-    () => getSplitExpenseFormSummary(splitTotalMinor, splitLines),
+    () => getSplitTransactionFormSummary(splitTotalMinor, splitLines),
     [splitLines, splitTotalMinor],
   );
   const amountCurrencyCode =
@@ -179,7 +179,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   function changeKind(nextKind: TransactionKind) {
     const defaultCategory = getDefaultCategoryForKind(nextKind, categories);
     setKind(nextKind);
-    if (nextKind !== 'expense') {
+    if (nextKind === 'transfer' || nextKind !== kind) {
       setSplitLines([]);
       setSplitCategoryLineId(null);
       if (page === 'split') {
@@ -307,7 +307,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
       throw new Error('Amount must be greater than zero.');
     }
 
-    const normalLine = kind === 'expense' && splitLines.length === 1 ? splitLines[0] : undefined;
+    const normalLine = splitLines.length === 1 ? splitLines[0] : undefined;
     const effectiveCategoryId = normalLine?.categoryId ?? categoryId;
     const effectiveSubcategoryId = normalLine?.subcategoryId ?? subcategoryId;
 
@@ -315,8 +315,9 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
       throw new Error('Choose a category and subcategory.');
     }
 
-    if (kind === 'expense' && splitLines.length >= 2) {
-      return buildSplitExpenseLinesFromForm({
+    if (splitLines.length >= 2) {
+      return buildSplitLinesFromForm({
+        kind,
         accountId: fromAccount.id,
         currencyCode: fromAccount.currencyCode,
         totalMinor: minor,
@@ -337,7 +338,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   }
 
   function openSplitEditor() {
-    if (kind !== 'expense') {
+    if (kind === 'transfer') {
       return;
     }
 
@@ -348,13 +349,13 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
 
       const totalMinor = Math.abs(parsePreviewAmount(displayAmount, kind, fromAccountId));
       return [
-        createSplitExpenseFormLine({
+        createSplitTransactionFormLine({
           id: createSplitLineId(),
           amount: totalMinor > 0 ? formatMinorInput(totalMinor) : '',
           categoryId,
           subcategoryId,
         }),
-        createSplitExpenseFormLine({
+        createSplitTransactionFormLine({
           id: createSplitLineId(),
           categoryId,
           subcategoryId,
@@ -367,10 +368,10 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
 
   function addSplitLine() {
     setSplitLines((current) => {
-      const remainingMinor = getSplitExpenseFormSummary(splitTotalMinor, current).remainingMinor;
+      const remainingMinor = getSplitTransactionFormSummary(splitTotalMinor, current).remainingMinor;
       return [
         ...current,
-        createSplitExpenseFormLine({
+        createSplitTransactionFormLine({
           id: createSplitLineId(),
           amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
           categoryId,
@@ -380,7 +381,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
     });
   }
 
-  function updateSplitLine(lineId: string, patch: Partial<SplitExpenseFormLine>) {
+  function updateSplitLine(lineId: string, patch: Partial<SplitTransactionFormLine>) {
     setSplitLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
   }
 
@@ -522,7 +523,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             )}
           </View>
 
-          {kind === 'expense' ? (
+          {kind !== 'transfer' ? (
             <Pressable
               accessibilityRole="button"
               onPress={openSplitEditor}
@@ -533,7 +534,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
               <Text style={styles.optionsButtonText}>
                 {splitLines.length >= 2
                   ? `Split · ${splitLines.length} lines · ${splitSummary.isBalanced ? 'Ready' : 'Needs total'}`
-                  : 'Split expense'}
+                  : `Split ${kind}`}
               </Text>
             </Pressable>
           ) : null}
@@ -562,7 +563,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             showsVerticalScrollIndicator={false}
             testID="add-transaction-split-page"
           >
-            <Text style={styles.detailsTitle}>Split expense</Text>
+            <Text style={styles.detailsTitle}>Split {kind}</Text>
             <SplitTransactionEditor
               categories={categories}
               currencyCode={fromAccount?.currencyCode ?? amountCurrencyCode}
