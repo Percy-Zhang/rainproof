@@ -34,12 +34,14 @@ export async function addTransactionLinkStorage(
 
     await db.runAsync(
       `INSERT INTO transaction_links (
-        id, source_transaction_id, target_transaction_id, link_type, amount_minor,
-        currency_code, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, source_transaction_id, target_transaction_id, source_line_id, target_line_id,
+        link_type, amount_minor, currency_code, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       createLocalId('link'),
       validated.sourceTransactionId,
       validated.targetTransactionId,
+      validated.sourceLineId,
+      validated.targetLineId,
       validated.linkType,
       validated.amountMinor,
       validated.currencyCode,
@@ -75,11 +77,13 @@ export async function updateTransactionLinkStorage(
 
     await db.runAsync(
       `UPDATE transaction_links
-       SET source_transaction_id = ?, target_transaction_id = ?, link_type = ?,
-           amount_minor = ?, currency_code = ?, updated_at = ?
+       SET source_transaction_id = ?, target_transaction_id = ?, source_line_id = ?, target_line_id = ?,
+           link_type = ?, amount_minor = ?, currency_code = ?, updated_at = ?
        WHERE id = ?`,
       validated.sourceTransactionId,
       validated.targetTransactionId,
+      validated.sourceLineId,
+      validated.targetLineId,
       validated.linkType,
       validated.amountMinor,
       validated.currencyCode,

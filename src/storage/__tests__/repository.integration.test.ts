@@ -1266,6 +1266,7 @@ describe('SQLite finance repository integration', () => {
 
       let links = await repository.getTransactionLinks();
       expect(links).toHaveLength(1);
+      expect(links[0]).toEqual(expect.objectContaining({ sourceLineId: null, targetLineId: null }));
       expect(await repository.getTransactionLinksForSourceTransaction(income.id)).toHaveLength(1);
       expect(await repository.getTransactionLinksForTargetTransaction(expense.id)).toHaveLength(1);
       expect(await repository.getTransactionLinksForTransaction(income.id)).toHaveLength(1);
@@ -1321,6 +1322,192 @@ describe('SQLite finance repository integration', () => {
           currencyCode: 'AUD',
         }),
       ).rejects.toThrow();
+    });
+  });
+
+  it('persists line-level transaction link references and allows multiple links from one source transaction', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Split payback',
+        lines: [
+          { accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' },
+          { accountId: everyday.id, amountMinor: 2000, categoryId: 'income', subcategoryId: 'refund' },
+        ],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Split expense target',
+        lines: [
+          { accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' },
+          { accountId: everyday.id, amountMinor: -2000, categoryId: 'food-dining', subcategoryId: 'groceries' },
+        ],
+      });
+      const secondExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Second target',
+        lines: [{ accountId: everyday.id, amountMinor: -2000, categoryId: 'transport', subcategoryId: 'fuel' }],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const incomeLines = getLinesForTransaction(snapshot, income.id);
+      const reimbursementLine = getLineBySubcategory(snapshot, income.id, 'reimbursement');
+      const refundLine = getLineBySubcategory(snapshot, income.id, 'refund');
+      const restaurantsLine = getLineBySubcategory(snapshot, expense.id, 'restaurants');
+      const groceriesLine = getLineBySubcategory(snapshot, expense.id, 'groceries');
+      const fuelLine = getLineBySubcategory(snapshot, secondExpense.id, 'fuel');
+
+      await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        sourceLineId: reimbursementLine.id,
+        targetTransactionId: expense.id,
+        targetLineId: restaurantsLine.id,
+        linkType: 'reimbursement',
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+      });
+      await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        sourceLineId: refundLine.id,
+        targetTransactionId: secondExpense.id,
+        targetLineId: fuelLine.id,
+        linkType: 'refund',
+        amountMinor: 2000,
+        currencyCode: 'AUD',
+      });
+
+      let links = await repository.getTransactionLinksForSourceTransaction(income.id);
+      expect(links).toHaveLength(2);
+      expect(links).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceLineId: reimbursementLine.id,
+            targetLineId: restaurantsLine.id,
+            amountMinor: 3000,
+          }),
+          expect.objectContaining({
+            sourceLineId: refundLine.id,
+            targetLineId: fuelLine.id,
+            amountMinor: 2000,
+          }),
+        ]),
+      );
+
+      await repository.updateTransactionLink({
+        id: links[0].id,
+        sourceTransactionId: income.id,
+        sourceLineId: reimbursementLine.id,
+        targetTransactionId: expense.id,
+        targetLineId: groceriesLine.id,
+        linkType: 'shared_expense_contribution',
+        amountMinor: 2000,
+        currencyCode: 'AUD',
+      });
+      links = await repository.getTransactionLinksForTargetTransaction(expense.id);
+      expect(links).toEqual([
+        expect.objectContaining({
+          linkType: 'shared_expense_contribution',
+          sourceLineId: reimbursementLine.id,
+          targetLineId: groceriesLine.id,
+        }),
+      ]);
+
+      await repository.updateTransaction({
+        id: expense.id,
+        kind: 'expense',
+        title: 'Reduced split expense target',
+        datetime: '2026-05-18T12:00:00.000Z',
+        lines: [
+          {
+            id: restaurantsLine.id,
+            accountId: everyday.id,
+            amountMinor: -5000,
+            currencyCode: 'AUD',
+            categoryId: 'food-dining',
+            subcategoryId: 'restaurants',
+          },
+        ],
+      });
+      expect(await repository.getTransactionLinksForTargetTransaction(expense.id)).toEqual([]);
+      expect(await repository.getTransactionLinksForSourceTransaction(income.id)).toHaveLength(1);
+
+      await repository.updateTransaction({
+        id: income.id,
+        kind: 'income',
+        title: 'Reduced split payback',
+        datetime: '2026-05-18T13:00:00.000Z',
+        lines: [
+          {
+            id: incomeLines[0].id,
+            accountId: everyday.id,
+            amountMinor: 5000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'reimbursement',
+          },
+        ],
+      });
+      expect(await repository.getTransactionLinksForSourceTransaction(income.id)).toEqual([]);
+    });
+  });
+
+  it('rejects line-level link allocations that exceed source or target capacity', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Partial payback',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Small target',
+        lines: [{ accountId: everyday.id, amountMinor: -2000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const largeExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Large target',
+        lines: [{ accountId: everyday.id, amountMinor: -5000, categoryId: 'housing', subcategoryId: 'rent' }],
+      });
+      const snapshot = await repository.getSnapshot();
+      const sourceLine = getLineBySubcategory(snapshot, income.id, 'reimbursement');
+      const smallTargetLine = getLineBySubcategory(snapshot, expense.id, 'restaurants');
+      const largeTargetLine = getLineBySubcategory(snapshot, largeExpense.id, 'rent');
+
+      await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        sourceLineId: sourceLine.id,
+        targetTransactionId: expense.id,
+        targetLineId: smallTargetLine.id,
+        linkType: 'reimbursement',
+        amountMinor: 1500,
+        currencyCode: 'AUD',
+      });
+
+      await expect(
+        repository.addTransactionLink({
+          sourceTransactionId: income.id,
+          sourceLineId: sourceLine.id,
+          targetTransactionId: expense.id,
+          targetLineId: smallTargetLine.id,
+          linkType: 'refund',
+          amountMinor: 600,
+          currencyCode: 'AUD',
+        }),
+      ).rejects.toThrow('Linked amounts cannot exceed the target expense transaction.');
+
+      await expect(
+        repository.addTransactionLink({
+          sourceTransactionId: income.id,
+          sourceLineId: sourceLine.id,
+          targetTransactionId: largeExpense.id,
+          targetLineId: largeTargetLine.id,
+          linkType: 'refund',
+          amountMinor: 2000,
+          currencyCode: 'AUD',
+        }),
+      ).rejects.toThrow('Linked amounts cannot exceed the source income transaction.');
     });
   });
 
@@ -1407,8 +1594,139 @@ describe('SQLite finance repository integration', () => {
         expect.arrayContaining(['icon_name', 'theme_color', 'show_on_dashboard', 'sort_order']),
       );
       expect(await getColumnNames(fixture.db, 'transaction_links')).toEqual(
-        expect.arrayContaining(['source_transaction_id', 'target_transaction_id', 'link_type']),
+        expect.arrayContaining(['source_transaction_id', 'target_transaction_id', 'source_line_id', 'target_line_id', 'link_type']),
       );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('migrates legacy transaction links to nullable line references without the one-source unique constraint', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.db.execAsync(`
+        CREATE TABLE accounts (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          nickname TEXT NOT NULL DEFAULT '',
+          type TEXT NOT NULL,
+          currency_code TEXT NOT NULL,
+          opening_balance_minor INTEGER NOT NULL,
+          notes TEXT NOT NULL DEFAULT '',
+          institution_name TEXT NOT NULL DEFAULT '',
+          include_in_rainy_day INTEGER NOT NULL DEFAULT 0,
+          theme_color TEXT NOT NULL DEFAULT '#1876A8',
+          icon_name TEXT NOT NULL DEFAULT '',
+          show_on_dashboard INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE transactions (
+          id TEXT PRIMARY KEY NOT NULL,
+          kind TEXT NOT NULL,
+          title TEXT NOT NULL,
+          datetime TEXT NOT NULL,
+          notes TEXT NOT NULL DEFAULT '',
+          labels_json TEXT NOT NULL DEFAULT '[]',
+          group_id TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE transaction_lines (
+          id TEXT PRIMARY KEY NOT NULL,
+          transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+          account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          amount_minor INTEGER NOT NULL,
+          currency_code TEXT NOT NULL,
+          category_id TEXT NOT NULL DEFAULT '',
+          subcategory_id TEXT NOT NULL DEFAULT '',
+          external_party TEXT NOT NULL DEFAULT '',
+          transfer_peer_account_id TEXT NOT NULL DEFAULT '',
+          note TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE transaction_links (
+          id TEXT PRIMARY KEY NOT NULL,
+          source_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+          target_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+          link_type TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency_code TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (source_transaction_id <> target_transaction_id),
+          CHECK (link_type IN ('refund', 'reimbursement', 'shared_expense_contribution')),
+          CHECK (amount_minor > 0),
+          UNIQUE(source_transaction_id),
+          UNIQUE(source_transaction_id, target_transaction_id, link_type, amount_minor, currency_code)
+        );
+
+        INSERT INTO accounts (
+          id, name, nickname, type, currency_code, opening_balance_minor, notes, institution_name,
+          include_in_rainy_day, theme_color, icon_name, show_on_dashboard, sort_order, is_archived, created_at, updated_at
+        ) VALUES (
+          'acct_1', 'Everyday', '', 'checking', 'AUD', 0, '', '', 0, '#1876A8', '', 1, 0, 0,
+          '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'
+        );
+
+        INSERT INTO transactions (
+          id, kind, title, datetime, notes, labels_json, group_id, created_at, updated_at
+        ) VALUES
+          ('income_1', 'income', 'Paid back', '2026-05-18T10:00:00.000Z', '', '[]', '', '2026-05-18T10:00:00.000Z', '2026-05-18T10:00:00.000Z'),
+          ('expense_1', 'expense', 'Dinner', '2026-05-18T09:00:00.000Z', '', '[]', '', '2026-05-18T09:00:00.000Z', '2026-05-18T09:00:00.000Z'),
+          ('expense_2', 'expense', 'Groceries', '2026-05-18T08:00:00.000Z', '', '[]', '', '2026-05-18T08:00:00.000Z', '2026-05-18T08:00:00.000Z');
+
+        INSERT INTO transaction_lines (
+          id, transaction_id, account_id, amount_minor, currency_code, category_id,
+          subcategory_id, external_party, transfer_peer_account_id, note, created_at
+        ) VALUES
+          ('income_line_1', 'income_1', 'acct_1', 5000, 'AUD', 'income', 'reimbursement', '', '', '', '2026-05-18T10:00:00.000Z'),
+          ('expense_line_1', 'expense_1', 'acct_1', -3000, 'AUD', 'food-dining', 'restaurants', '', '', '', '2026-05-18T09:00:00.000Z'),
+          ('expense_line_2', 'expense_2', 'acct_1', -2000, 'AUD', 'food-dining', 'groceries', '', '', '', '2026-05-18T08:00:00.000Z');
+
+        INSERT INTO transaction_links (
+          id, source_transaction_id, target_transaction_id, link_type, amount_minor, currency_code, created_at, updated_at
+        ) VALUES (
+          'link_1', 'income_1', 'expense_1', 'reimbursement', 3000, 'AUD',
+          '2026-05-18T11:00:00.000Z', '2026-05-18T11:00:00.000Z'
+        );
+
+        PRAGMA user_version = 4;
+      `);
+
+      await fixture.repository.initialize('AUD');
+
+      let links = await fixture.repository.getTransactionLinks();
+      expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      expect(await getColumnNames(fixture.db, 'transaction_links')).toEqual(
+        expect.arrayContaining(['source_line_id', 'target_line_id']),
+      );
+      expect(links).toEqual([
+        expect.objectContaining({
+          id: 'link_1',
+          sourceTransactionId: 'income_1',
+          targetTransactionId: 'expense_1',
+          sourceLineId: null,
+          targetLineId: null,
+        }),
+      ]);
+
+      await fixture.repository.addTransactionLink({
+        sourceTransactionId: 'income_1',
+        targetTransactionId: 'expense_2',
+        linkType: 'refund',
+        amountMinor: 2000,
+        currencyCode: 'AUD',
+      });
+
+      links = await fixture.repository.getTransactionLinksForSourceTransaction('income_1');
+      expect(links).toHaveLength(2);
+      expect(links.map((link) => link.targetTransactionId)).toEqual(expect.arrayContaining(['expense_1', 'expense_2']));
     } finally {
       fixture.cleanup();
     }

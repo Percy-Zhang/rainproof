@@ -4,6 +4,10 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatMoney } from '../../domain/money';
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import {
+  getCategory,
+  getSubcategoryName,
+} from '../../domain/categories';
+import {
   getExpenseLinkTargetMoney,
   getIncomeLinkSourceCandidates,
   type IncomeLinkSourceCandidate,
@@ -12,6 +16,7 @@ import type {
   AppSnapshot,
   NewTransactionLinkInput,
   Transaction,
+  TransactionLink,
   TransactionLinkType,
   UpdateTransactionLinkInput,
 } from '../../domain/types';
@@ -71,7 +76,11 @@ export function ExpenseLinkManager({
 
     try {
       const existingLink = snapshot.transactionLinks.find(
-        (link) => link.sourceTransactionId === candidate.transaction.id,
+        (link) =>
+          link.sourceTransactionId === candidate.transaction.id &&
+          link.targetTransactionId === transaction.id &&
+          !link.sourceLineId &&
+          !link.targetLineId,
       );
       const input = {
         sourceTransactionId: candidate.transaction.id,
@@ -117,6 +126,7 @@ export function ExpenseLinkManager({
                     </Text>
                     <Text numberOfLines={1} style={styles.linkSummaryMeta}>
                       {source?.title || 'Income'}{source ? ` / ${formatTransactionShortDate(source.datetime)}` : ''}
+                      {getLinkLineDetail(link, snapshot)}
                     </Text>
                   </View>
                   <Pressable
@@ -169,6 +179,22 @@ export function ExpenseLinkManager({
       </View>
     </>
   );
+}
+
+function getLinkLineDetail(link: TransactionLink, snapshot: AppSnapshot): string {
+  const targetLine = link.targetLineId
+    ? snapshot.transactionLines.find((line) => line.id === link.targetLineId)
+    : undefined;
+  if (!targetLine) {
+    return '';
+  }
+
+  const category = getCategory(targetLine.categoryId, snapshot.categories);
+  const lineLabel =
+    getSubcategoryName(targetLine.categoryId, targetLine.subcategoryId, snapshot.categories) ||
+    category.name ||
+    'split line';
+  return ` / ${lineLabel}`;
 }
 
 const styles = StyleSheet.create({

@@ -157,7 +157,7 @@ export function getIncomeLinkSourceCandidates({
   targetCurrencyCode,
   transactions,
   lines,
-  transactionLinks,
+  transactionLinks: _transactionLinks,
   query,
 }: {
   targetTransactionId: string;
@@ -169,9 +169,6 @@ export function getIncomeLinkSourceCandidates({
 }): IncomeLinkSourceCandidate[] {
   const normalizedQuery = query.trim().toLowerCase();
   const normalizedTargetCurrencyCode = targetCurrencyCode ? normalizeCurrencyCode(targetCurrencyCode) : null;
-  const sourceLinkByTransactionId = new Map(
-    transactionLinks.map((link) => [link.sourceTransactionId, link]),
-  );
 
   return transactions
     .filter((transaction) => transaction.kind === 'income' && transaction.id !== targetTransactionId)
@@ -190,22 +187,15 @@ export function getIncomeLinkSourceCandidates({
       const amountMinor = displayLines
         .filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode)
         .reduce((sum, line) => sum + line.amountMinor, 0);
-      const existingSourceLink = sourceLinkByTransactionId.get(transaction.id);
       const currencyMatches = !!normalizedTargetCurrencyCode && currencyCode === normalizedTargetCurrencyCode;
-      const alreadyLinkedElsewhere =
-        !!existingSourceLink && existingSourceLink.targetTransactionId !== targetTransactionId;
 
       return {
         transaction,
         amountMinor,
         currencyCode,
         accountId: firstLine?.accountId ?? '',
-        eligible: currencyMatches && !alreadyLinkedElsewhere,
-        disabledReason: !currencyMatches
-          ? 'Different currency'
-          : alreadyLinkedElsewhere
-            ? 'Already linked'
-            : '',
+        eligible: currencyMatches,
+        disabledReason: currencyMatches ? '' : 'Different currency',
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)
@@ -241,8 +231,8 @@ export function getTransactionLinkEditSummary({
   const transaction = transactions.find((item) => item.id === transactionId);
 
   if (transaction?.kind === 'income') {
-    const sourceLink = transactionLinks.find((link) => link.sourceTransactionId === transactionId);
-    if (!sourceLink) {
+    const sourceLinks = transactionLinks.filter((link) => link.sourceTransactionId === transactionId);
+    if (!sourceLinks.length) {
       return {
         linked: false,
         title: 'Link to expense',
@@ -251,12 +241,19 @@ export function getTransactionLinkEditSummary({
       };
     }
 
+    const sourceLink = sourceLinks[0];
+    const currencyCode = sourceLink.currencyCode;
+    const linkedAmountMinor = sourceLinks
+      .filter((link) => normalizeCurrencyCode(link.currencyCode) === normalizeCurrencyCode(currencyCode))
+      .reduce((sum, link) => sum + link.amountMinor, 0);
     const target = transactions.find((item) => item.id === sourceLink.targetTransactionId);
     return {
       linked: true,
-      title: `${incomeLinkPrefixes[sourceLink.linkType]}: ${target?.title || 'expense'}`,
-      detail: `Linked amount: ${formatAmount(sourceLink.amountMinor, sourceLink.currencyCode)}`,
-      secondaryDetail: '',
+      title: sourceLinks.length === 1
+        ? `${incomeLinkPrefixes[sourceLink.linkType]}: ${target?.title || 'expense'}`
+        : `Linked to ${sourceLinks.length} expenses`,
+      detail: `Linked amount: ${formatAmount(linkedAmountMinor, currencyCode)}`,
+      secondaryDetail: sourceLinks.length > 1 ? getLinkTypeAmountSummary(sourceLinks, currencyCode, formatAmount) : '',
     };
   }
 

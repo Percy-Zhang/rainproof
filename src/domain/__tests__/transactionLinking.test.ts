@@ -130,7 +130,7 @@ describe('transaction linking helpers', () => {
     ).toEqual(['expense-usd']);
   });
 
-  it('returns income sources for an expense and marks already-linked sources disabled', () => {
+  it('returns already-linked same-currency income sources as eligible for additional allocations', () => {
     const candidates = getIncomeLinkSourceCandidates({
       targetTransactionId: 'expense-aud',
       targetCurrencyCode: 'AUD',
@@ -142,7 +142,7 @@ describe('transaction linking helpers', () => {
 
     expect(candidates.map((candidate) => candidate.transaction.id)).toEqual(['income']);
     expect(candidates[0]).toEqual(
-      expect.objectContaining({ eligible: false, disabledReason: 'Already linked' }),
+      expect.objectContaining({ eligible: true, disabledReason: '' }),
     );
   });
 
@@ -180,6 +180,26 @@ describe('transaction linking helpers', () => {
       title: 'Paid back for: Groceries',
       detail: 'Linked amount: AUD $25.00',
       secondaryDetail: '',
+    });
+  });
+
+  it('summarizes income linked to multiple expense allocations', () => {
+    expect(
+      getTransactionLinkEditSummary({
+        transactionId: 'income',
+        transactions,
+        lines,
+        transactionLinks: [
+          link({ id: 'link-1', amountMinor: 1000, linkType: 'refund' }),
+          link({ id: 'link-2', amountMinor: 1500, targetTransactionId: 'expense-usd', linkType: 'reimbursement' }),
+        ],
+        formatAmount: formatTestMoney,
+      }),
+    ).toEqual({
+      linked: true,
+      title: 'Linked to 2 expenses',
+      detail: 'Linked amount: AUD $25.00',
+      secondaryDetail: 'Refund: AUD $10.00 / Reimbursement: AUD $15.00',
     });
   });
 

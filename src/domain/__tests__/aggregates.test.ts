@@ -214,6 +214,8 @@ function makeLink({
   id = 'link_1',
   sourceTransactionId = 'linked_income',
   targetTransactionId = 'linked_expense',
+  sourceLineId = null,
+  targetLineId = null,
   linkType = 'refund',
   amountMinor = 4000,
   currencyCode = 'AUD',
@@ -222,6 +224,8 @@ function makeLink({
     id,
     sourceTransactionId,
     targetTransactionId,
+    sourceLineId,
+    targetLineId,
     linkType,
     amountMinor,
     currencyCode,
@@ -548,6 +552,225 @@ describe('aggregates', () => {
       { categoryId: 'food', currencyCode: 'AUD', amountMinor: 4000 },
       { categoryId: 'housing', currencyCode: 'AUD', amountMinor: 1000 },
     ]);
+  });
+
+  it('reduces only the selected target expense line for line-level target links', () => {
+    const linkedTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('linked_expense', 'expense'),
+    ];
+    const linkedLines = [
+      makeLine({
+        id: 'linked_income_line',
+        transactionId: 'linked_income',
+        amountMinor: 1000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'split_food',
+        transactionId: 'linked_expense',
+        amountMinor: -8000,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'split_housing',
+        transactionId: 'linked_expense',
+        amountMinor: -2000,
+        categoryId: 'housing',
+      }),
+    ];
+
+    expect(
+      getSpendingByCategory({
+        transactions: linkedTransactions,
+        lines: linkedLines,
+        transactionLinks: [makeLink({ amountMinor: 1000, targetLineId: 'split_housing' })],
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual([
+      { categoryId: 'food', currencyCode: 'AUD', amountMinor: 8000 },
+      { categoryId: 'housing', currencyCode: 'AUD', amountMinor: 1000 },
+    ]);
+  });
+
+  it('excludes only the selected source income line amount for line-level source links', () => {
+    const linkedTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('linked_expense', 'expense'),
+    ];
+    const linkedLines = [
+      makeLine({
+        id: 'salary_line',
+        transactionId: 'linked_income',
+        amountMinor: 3000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'bonus_line',
+        transactionId: 'linked_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'linked_expense_line',
+        transactionId: 'linked_expense',
+        amountMinor: -5000,
+        categoryId: 'food',
+      }),
+    ];
+
+    expect(
+      getCashFlowSummary({
+        transactions: linkedTransactions,
+        lines: linkedLines,
+        transactionLinks: [makeLink({ amountMinor: 1500, sourceLineId: 'bonus_line' })],
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual({
+      currencyCode: 'AUD',
+      incomeMinor: 3500,
+      expenseMinor: 3500,
+      netMinor: 0,
+    });
+  });
+
+  it('excludes transaction-level source income proportionally when sourceLineId is null', () => {
+    const linkedTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('linked_expense', 'expense'),
+    ];
+    const linkedLines = [
+      makeLine({
+        id: 'salary_line',
+        transactionId: 'linked_income',
+        amountMinor: 3000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'bonus_line',
+        transactionId: 'linked_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'linked_expense_line',
+        transactionId: 'linked_expense',
+        amountMinor: -5000,
+        categoryId: 'food',
+      }),
+    ];
+
+    expect(
+      getCashFlowSummary({
+        transactions: linkedTransactions,
+        lines: linkedLines,
+        transactionLinks: [makeLink({ amountMinor: 2500 })],
+        range,
+        currencyCode: 'AUD',
+      }).incomeMinor,
+    ).toBe(2500);
+  });
+
+  it('supports multiple line-level links from one source transaction to multiple target lines', () => {
+    const linkedTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('linked_expense', 'expense'),
+    ];
+    const linkedLines = [
+      makeLine({
+        id: 'linked_income_line',
+        transactionId: 'linked_income',
+        amountMinor: 5000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'split_food',
+        transactionId: 'linked_expense',
+        amountMinor: -3000,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'split_housing',
+        transactionId: 'linked_expense',
+        amountMinor: -2000,
+        categoryId: 'housing',
+      }),
+    ];
+    const transactionLinks = [
+      makeLink({ id: 'link_1', amountMinor: 1000, targetLineId: 'split_food' }),
+      makeLink({ id: 'link_2', amountMinor: 1500, targetLineId: 'split_housing' }),
+    ];
+
+    expect(
+      getSpendingByCategory({
+        transactions: linkedTransactions,
+        lines: linkedLines,
+        transactionLinks,
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual([
+      { categoryId: 'food', currencyCode: 'AUD', amountMinor: 2000 },
+      { categoryId: 'housing', currencyCode: 'AUD', amountMinor: 500 },
+    ]);
+    expect(
+      getCashFlowSummary({
+        transactions: linkedTransactions,
+        lines: linkedLines,
+        transactionLinks,
+        range,
+        currencyCode: 'AUD',
+      }).incomeMinor,
+    ).toBe(2500);
+  });
+
+  it('supports multiple links to one target line while clamping counted spending', () => {
+    const linkedTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('second_income', 'income'),
+      makeTransaction('linked_expense', 'expense'),
+    ];
+    const linkedLines = [
+      makeLine({
+        id: 'linked_income_line',
+        transactionId: 'linked_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'second_income_line',
+        transactionId: 'second_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'split_food',
+        transactionId: 'linked_expense',
+        amountMinor: -5000,
+        categoryId: 'food',
+      }),
+    ];
+    const transactionLinks = [
+      makeLink({ id: 'link_1', amountMinor: 1000, targetLineId: 'split_food' }),
+      makeLink({
+        id: 'link_2',
+        sourceTransactionId: 'second_income',
+        amountMinor: 1500,
+        targetLineId: 'split_food',
+      }),
+    ];
+
+    expect(
+      getSpendingByCategory({
+        transactions: linkedTransactions,
+        lines: linkedLines,
+        transactionLinks,
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual([{ categoryId: 'food', currencyCode: 'AUD', amountMinor: 2500 }]);
   });
 
   it('ignores mismatched link currencies safely', () => {

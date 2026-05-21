@@ -11,8 +11,12 @@ const transactions: Transaction[] = [
 
 const lines: TransactionLine[] = [
   line('income-1', 5000, 'AUD'),
+  line('income-1', 4000, 'AUD', 'acct-side-income'),
+  line('income-1', -500, 'AUD', 'acct-adjustment'),
   line('income-2', 2500, 'AUD'),
   line('expense-1', -7000, 'AUD'),
+  line('expense-1', -3000, 'AUD', 'acct-side-expense'),
+  line('expense-1', 500, 'AUD', 'acct-refund'),
   line('expense-2', -3000, 'AUD'),
   line('transfer-1', -1000, 'AUD'),
   line('transfer-1', 1000, 'AUD', 'acct-2'),
@@ -69,6 +73,8 @@ function existingLink(overrides: Partial<TransactionLink> = {}): TransactionLink
     id: 'link-1',
     sourceTransactionId: 'income-1',
     targetTransactionId: 'expense-1',
+    sourceLineId: null,
+    targetLineId: null,
     linkType: 'refund',
     amountMinor: 1500,
     currencyCode: 'AUD',
@@ -167,7 +173,7 @@ describe('transaction link validation', () => {
     ).toThrow('This transaction link already exists.');
   });
 
-  it('prevents one source income transaction from linking to multiple expenses', () => {
+  it('allows one source income transaction to link to multiple expenses', () => {
     expect(() =>
       validateTransactionLinkInput({
         input: input({ targetTransactionId: 'expense-2' }),
@@ -175,7 +181,7 @@ describe('transaction link validation', () => {
         lines,
         existingLinks: [existingLink()],
       }),
-    ).toThrow('This income transaction is already linked to another expense.');
+    ).not.toThrow();
   });
 
   it('allows multiple income source transactions to link to one target expense', () => {
@@ -187,6 +193,111 @@ describe('transaction link validation', () => {
         existingLinks: [existingLink()],
       }),
     ).not.toThrow();
+  });
+
+  it('accepts line-level source and target references when they belong to the linked transactions', () => {
+    expect(
+      validateTransactionLinkInput({
+        input: input({
+          sourceLineId: 'income-1-acct-1-5000',
+          targetLineId: 'expense-1-acct-1--7000',
+        }),
+        transactions,
+        lines,
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        sourceLineId: 'income-1-acct-1-5000',
+        targetLineId: 'expense-1-acct-1--7000',
+      }),
+    );
+  });
+
+  it('rejects line-level references that do not belong to the linked transactions', () => {
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ sourceLineId: 'income-2-acct-1-2500' }),
+        transactions,
+        lines,
+      }),
+    ).toThrow('Source transaction line does not belong to the source transaction.');
+
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ targetLineId: 'expense-2-acct-1--3000' }),
+        transactions,
+        lines,
+      }),
+    ).toThrow('Target transaction line does not belong to the target transaction.');
+  });
+
+  it('rejects source and target line references with the wrong sign', () => {
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ sourceLineId: 'income-1-acct-adjustment--500' }),
+        transactions,
+        lines,
+      }),
+    ).toThrow('Source transaction line must be income.');
+
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ targetLineId: 'expense-1-acct-refund-500' }),
+        transactions,
+        lines,
+      }),
+    ).toThrow('Target transaction line must be expense.');
+  });
+
+  it('uses line IDs when checking duplicate identical links', () => {
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ targetLineId: 'expense-1-acct-1--7000' }),
+        transactions,
+        lines,
+        existingLinks: [existingLink({ targetLineId: 'expense-2-acct-1--3000' })],
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects allocations above source transaction and source line amounts', () => {
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ amountMinor: 8000 }),
+        transactions,
+        lines,
+        existingLinks: [existingLink({ amountMinor: 1500 })],
+      }),
+    ).toThrow('Linked amounts cannot exceed the source income transaction.');
+
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ sourceLineId: 'income-1-acct-1-5000', amountMinor: 1000 }),
+        transactions,
+        lines,
+        existingLinks: [existingLink({ sourceLineId: 'income-1-acct-1-5000', amountMinor: 4500 })],
+      }),
+    ).toThrow('Linked amounts cannot exceed the source income line.');
+  });
+
+  it('rejects allocations above target transaction and target line amounts', () => {
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ amountMinor: 1500 }),
+        transactions,
+        lines,
+        existingLinks: [existingLink({ sourceTransactionId: 'income-2', amountMinor: 9000 })],
+      }),
+    ).toThrow('Linked amounts cannot exceed the target expense transaction.');
+
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ targetLineId: 'expense-1-acct-1--7000', amountMinor: 1000 }),
+        transactions,
+        lines,
+        existingLinks: [existingLink({ targetLineId: 'expense-1-acct-1--7000', amountMinor: 6500 })],
+      }),
+    ).toThrow('Linked amounts cannot exceed the target expense line.');
   });
 
   it('allows an update to keep its own source transaction', () => {

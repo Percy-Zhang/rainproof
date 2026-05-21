@@ -74,6 +74,8 @@ export type TransactionLink = {
   id: string;
   sourceTransactionId: string;
   targetTransactionId: string;
+  sourceLineId?: string | null;
+  targetLineId?: string | null;
   linkType: TransactionLinkType;
   amountMinor: number;
   currencyCode: CurrencyCode;
@@ -248,6 +250,8 @@ export type UpdateTransactionInput = NewTransactionInput & {
 export type NewTransactionLinkInput = {
   sourceTransactionId: string;
   targetTransactionId: string;
+  sourceLineId?: string | null;
+  targetLineId?: string | null;
   linkType: TransactionLinkType;
   amountMinor: number;
   currencyCode: CurrencyCode;

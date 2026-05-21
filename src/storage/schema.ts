@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -63,6 +63,8 @@ CREATE TABLE IF NOT EXISTS transaction_links (
   id TEXT PRIMARY KEY NOT NULL,
   source_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
   target_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  source_line_id TEXT REFERENCES transaction_lines(id) ON DELETE CASCADE,
+  target_line_id TEXT REFERENCES transaction_lines(id) ON DELETE CASCADE,
   link_type TEXT NOT NULL,
   amount_minor INTEGER NOT NULL,
   currency_code TEXT NOT NULL,
@@ -70,9 +72,7 @@ CREATE TABLE IF NOT EXISTS transaction_links (
   updated_at TEXT NOT NULL,
   CHECK (source_transaction_id <> target_transaction_id),
   CHECK (link_type IN ('refund', 'reimbursement', 'shared_expense_contribution')),
-  CHECK (amount_minor > 0),
-  UNIQUE(source_transaction_id),
-  UNIQUE(source_transaction_id, target_transaction_id, link_type, amount_minor, currency_code)
+  CHECK (amount_minor > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transaction_links_source_transaction_id

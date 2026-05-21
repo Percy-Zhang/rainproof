@@ -35,9 +35,12 @@ export function getLinkedStatsAdjustments({
   transactionLinks?: TransactionLink[];
 }): LinkedStatsAdjustments {
   const transactionById = new Map(transactions.map((transaction) => [transaction.id, transaction]));
+  const lineById = new Map(lines.map((line) => [line.id, line]));
   const linesByTransactionId = groupLinesByTransaction(lines);
-  const targetReductions = new Map<string, AdjustmentGroup>();
-  const sourceExclusions = new Map<string, AdjustmentGroup>();
+  const targetTransactionReductions = new Map<string, AdjustmentGroup>();
+  const sourceTransactionExclusions = new Map<string, AdjustmentGroup>();
+  const targetLineReductions = new Map<string, number>();
+  const sourceLineExclusions = new Map<string, number>();
   const ignoredCurrencyMismatchLinkIds: string[] = [];
 
   for (const link of transactionLinks) {
@@ -52,37 +55,40 @@ export function getLinkedStatsAdjustments({
     }
 
     const currencyCode = normalizeCurrencyCode(link.currencyCode);
-    const targetExpenseLines = getSignedCurrencyLines(
-      linesByTransactionId,
-      target.id,
-      currencyCode,
-      (amountMinor) => amountMinor < 0,
-    );
-    if (!targetExpenseLines.length) {
+    const targetScope = getLinkedTargetScope({ link, target, lineById, linesByTransactionId, currencyCode });
+    const sourceScope = getLinkedSourceScope({ link, source, lineById, linesByTransactionId, currencyCode });
+
+    if (!targetScope || !sourceScope) {
       ignoredCurrencyMismatchLinkIds.push(link.id);
       continue;
     }
 
-    const sourceIncomeLines = getSignedCurrencyLines(
-      linesByTransactionId,
-      source.id,
-      currencyCode,
-      (amountMinor) => amountMinor > 0,
-    );
-    if (!sourceIncomeLines.length) {
-      ignoredCurrencyMismatchLinkIds.push(link.id);
-      continue;
+    if (targetScope.lineId) {
+      addLineAdjustment(targetLineReductions, targetScope.lineId, link.amountMinor);
+    } else {
+      addAdjustment(targetTransactionReductions, target.id, currencyCode, link.amountMinor);
     }
 
-    addAdjustment(targetReductions, target.id, currencyCode, link.amountMinor);
-    addAdjustment(sourceExclusions, source.id, currencyCode, link.amountMinor);
+    if (sourceScope.lineId) {
+      addLineAdjustment(sourceLineExclusions, sourceScope.lineId, link.amountMinor);
+    } else {
+      addAdjustment(sourceTransactionExclusions, source.id, currencyCode, link.amountMinor);
+    }
   }
 
   const expenseLineReductionMinorByLineId = new Map<string, number>();
   const incomeLineExclusionMinorByLineId = new Map<string, number>();
   const overpayments: LinkedStatsOverpayment[] = [];
 
-  for (const group of targetReductions.values()) {
+  applyDirectLineAdjustments({
+    target: expenseLineReductionMinorByLineId,
+    directAdjustments: targetLineReductions,
+    lineById,
+    getLineGrossMinor: (line) => Math.abs(Math.min(0, line.amountMinor)),
+    overpayments,
+  });
+
+  for (const group of targetTransactionReductions.values()) {
     const targetExpenseLines = getSignedCurrencyLines(
       linesByTransactionId,
       group.transactionId,
@@ -91,7 +97,10 @@ export function getLinkedStatsAdjustments({
     );
     const grossItems = targetExpenseLines.map((line) => ({
       id: line.id,
-      amountMinor: Math.abs(line.amountMinor),
+      amountMinor: Math.max(
+        0,
+        Math.abs(line.amountMinor) - (expenseLineReductionMinorByLineId.get(line.id) ?? 0),
+      ),
     }));
     const grossTotal = sumAllocationItems(grossItems);
 
@@ -109,7 +118,14 @@ export function getLinkedStatsAdjustments({
     );
   }
 
-  for (const group of sourceExclusions.values()) {
+  applyDirectLineAdjustments({
+    target: incomeLineExclusionMinorByLineId,
+    directAdjustments: sourceLineExclusions,
+    lineById,
+    getLineGrossMinor: (line) => Math.max(0, line.amountMinor),
+  });
+
+  for (const group of sourceTransactionExclusions.values()) {
     const sourceIncomeLines = getSignedCurrencyLines(
       linesByTransactionId,
       group.transactionId,
@@ -118,7 +134,10 @@ export function getLinkedStatsAdjustments({
     );
     const grossItems = sourceIncomeLines.map((line) => ({
       id: line.id,
-      amountMinor: line.amountMinor,
+      amountMinor: Math.max(
+        0,
+        line.amountMinor - (incomeLineExclusionMinorByLineId.get(line.id) ?? 0),
+      ),
     }));
     const grossTotal = sumAllocationItems(grossItems);
 
@@ -134,6 +153,78 @@ export function getLinkedStatsAdjustments({
     overpayments,
     ignoredCurrencyMismatchLinkIds,
   };
+}
+
+function getLinkedTargetScope({
+  link,
+  target,
+  lineById,
+  linesByTransactionId,
+  currencyCode,
+}: {
+  link: TransactionLink;
+  target: Transaction;
+  lineById: Map<string, TransactionLine>;
+  linesByTransactionId: Map<string, TransactionLine[]>;
+  currencyCode: CurrencyCode;
+}): { lineId?: string } | null {
+  if (link.targetLineId) {
+    const targetLine = lineById.get(link.targetLineId);
+    if (
+      !targetLine ||
+      targetLine.transactionId !== target.id ||
+      targetLine.amountMinor >= 0 ||
+      normalizeCurrencyCode(targetLine.currencyCode) !== currencyCode
+    ) {
+      return null;
+    }
+
+    return { lineId: targetLine.id };
+  }
+
+  const targetExpenseLines = getSignedCurrencyLines(
+    linesByTransactionId,
+    target.id,
+    currencyCode,
+    (amountMinor) => amountMinor < 0,
+  );
+  return targetExpenseLines.length ? {} : null;
+}
+
+function getLinkedSourceScope({
+  link,
+  source,
+  lineById,
+  linesByTransactionId,
+  currencyCode,
+}: {
+  link: TransactionLink;
+  source: Transaction;
+  lineById: Map<string, TransactionLine>;
+  linesByTransactionId: Map<string, TransactionLine[]>;
+  currencyCode: CurrencyCode;
+}): { lineId?: string } | null {
+  if (link.sourceLineId) {
+    const sourceLine = lineById.get(link.sourceLineId);
+    if (
+      !sourceLine ||
+      sourceLine.transactionId !== source.id ||
+      sourceLine.amountMinor <= 0 ||
+      normalizeCurrencyCode(sourceLine.currencyCode) !== currencyCode
+    ) {
+      return null;
+    }
+
+    return { lineId: sourceLine.id };
+  }
+
+  const sourceIncomeLines = getSignedCurrencyLines(
+    linesByTransactionId,
+    source.id,
+    currencyCode,
+    (amountMinor) => amountMinor > 0,
+  );
+  return sourceIncomeLines.length ? {} : null;
 }
 
 function groupLinesByTransaction(lines: TransactionLine[]): Map<string, TransactionLine[]> {
@@ -176,6 +267,10 @@ function addAdjustment(
   });
 }
 
+function addLineAdjustment(adjustments: Map<string, number>, lineId: string, amountMinor: number) {
+  adjustments.set(lineId, (adjustments.get(lineId) ?? 0) + amountMinor);
+}
+
 function sumAllocationItems(items: AllocationItem[]): number {
   return items.reduce((sum, item) => sum + item.amountMinor, 0);
 }
@@ -215,5 +310,37 @@ function allocateReduction(items: AllocationItem[], reductionMinor: number): Map
 function mergeAllocations(target: Map<string, number>, source: Map<string, number>) {
   for (const [id, amountMinor] of source.entries()) {
     target.set(id, (target.get(id) ?? 0) + amountMinor);
+  }
+}
+
+function applyDirectLineAdjustments({
+  target,
+  directAdjustments,
+  lineById,
+  getLineGrossMinor,
+  overpayments,
+}: {
+  target: Map<string, number>;
+  directAdjustments: Map<string, number>;
+  lineById: Map<string, TransactionLine>;
+  getLineGrossMinor: (line: TransactionLine) => number;
+  overpayments?: LinkedStatsOverpayment[];
+}) {
+  for (const [lineId, amountMinor] of directAdjustments.entries()) {
+    const line = lineById.get(lineId);
+    if (!line) {
+      continue;
+    }
+
+    const grossMinor = getLineGrossMinor(line);
+    if (amountMinor > grossMinor && overpayments) {
+      overpayments.push({
+        targetTransactionId: line.transactionId,
+        currencyCode: normalizeCurrencyCode(line.currencyCode),
+        overpaidMinor: amountMinor - grossMinor,
+      });
+    }
+
+    target.set(lineId, Math.min(amountMinor, grossMinor));
   }
 }

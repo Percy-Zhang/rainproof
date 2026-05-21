@@ -85,6 +85,8 @@ describe('storage mappers', () => {
         id: 'link-1',
         source_transaction_id: 'income-1',
         target_transaction_id: 'expense-1',
+        source_line_id: 'income-line-1',
+        target_line_id: 'expense-line-1',
         link_type: 'refund',
         amount_minor: 500,
         currency_code: 'aud',
@@ -95,6 +97,8 @@ describe('storage mappers', () => {
       expect.objectContaining({
         sourceTransactionId: 'income-1',
         targetTransactionId: 'expense-1',
+        sourceLineId: 'income-line-1',
+        targetLineId: 'expense-line-1',
         linkType: 'refund',
         currencyCode: 'AUD',
       }),

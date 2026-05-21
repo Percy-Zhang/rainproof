@@ -1,26 +1,45 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CategoryIconBadge } from '../../components/CategoryDisplay';
+import { getAccountDisplayName } from '../../domain/accountThemes';
+import {
+  getCategory,
+  getSubcategoryColor,
+  getSubcategoryIcon,
+  getSubcategoryName,
+} from '../../domain/categories';
+import { formatMoney } from '../../domain/money';
+import {
+  createTransactionLinkAllocationDrafts,
+  formatMinorInput,
+  getAllocatedAmountMinor,
+  getAllocationAmountMinor,
+  getTransactionLinkAllocationChanges,
+  getTransactionLinkSourceScopes,
+  getTransactionLinkTargetOptions,
+  type TransactionLinkAllocationDraft,
+  type TransactionLinkSourceScope,
+  type TransactionLinkTargetOption,
+} from '../../domain/transactionLinkAllocationForm';
+import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import {
   getExpenseLinkTargetCandidates,
-  getExpenseLinkTargetMoney,
-  getIncomeLinkTreatment,
-  getTransactionLinkSourceAmount,
   type ExpenseLinkTargetCandidate,
-  type IncomeLinkTreatment,
 } from '../../domain/transactionLinking';
 import type {
   AppSnapshot,
   NewTransactionLinkInput,
   Transaction,
-  TransactionLink,
   TransactionLinkType,
   UpdateTransactionLinkInput,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { InlineField } from './TransactionFormComponents';
-import { ExpenseTargetRow } from './TransactionLinkCandidateRows';
-import { transactionLinkTypeOptions } from './TransactionLinkLabels';
+import {
+  getTransactionLinkTypeShortLabel,
+  transactionLinkTypeOptions,
+} from './TransactionLinkLabels';
 
 type IncomeLinkManagerProps = {
   snapshot: AppSnapshot;
@@ -39,228 +58,435 @@ export function IncomeLinkManager({
   onDeleteTransactionLink,
   onError,
 }: IncomeLinkManagerProps) {
-  const sourceLink = snapshot.transactionLinks.find((link) => link.sourceTransactionId === transaction.id);
-  const [treatment, setTreatment] = useState<IncomeLinkTreatment>(
-    getIncomeLinkTreatment(transaction.id, snapshot.transactionLinks),
-  );
+  const [linkType, setLinkType] = useState<TransactionLinkType>('reimbursement');
+  const [selectedSourceScopeId, setSelectedSourceScopeId] = useState('source:whole');
   const [query, setQuery] = useState('');
-  const [confirmUnlink, setConfirmUnlink] = useState(false);
-  const sourceAmount = getTransactionLinkSourceAmount(transaction.id, snapshot.transactionLines);
-  const selectedTarget = sourceLink
-    ? snapshot.transactions.find((item) => item.id === sourceLink.targetTransactionId)
-    : undefined;
-  const selectedTargetMoney = sourceLink
-    ? getExpenseLinkTargetMoney(sourceLink.targetTransactionId, snapshot.transactionLines, sourceLink.currencyCode)
-    : null;
-  const selectedTargetLinkedTotal =
-    (sourceAmount?.amountMinor ?? sourceLink?.amountMinor ?? 0) +
-    (sourceLink
-      ? snapshot.transactionLinks
-          .filter((link) => link.targetTransactionId === sourceLink.targetTransactionId && link.id !== sourceLink.id)
-          .reduce((sum, link) => sum + link.amountMinor, 0)
-      : 0);
-  const selectedTargetOverpaid =
-    !!selectedTargetMoney && selectedTargetLinkedTotal > selectedTargetMoney.amountMinor;
+  const [allocations, setAllocations] = useState<TransactionLinkAllocationDraft[]>(() =>
+    createTransactionLinkAllocationDrafts(transaction.id, snapshot.transactionLinks),
+  );
+  const [saving, setSaving] = useState(false);
+  const sourceScopes = useMemo(
+    () => getTransactionLinkSourceScopes(transaction, snapshot.transactionLines),
+    [snapshot.transactionLines, transaction],
+  );
+  const selectedSourceScope =
+    sourceScopes.find((scope) => scope.id === selectedSourceScopeId) ?? sourceScopes[0];
+  const allocatedMinor = selectedSourceScope
+    ? getAllocatedAmountMinor(allocations, selectedSourceScope.sourceLineId)
+    : 0;
+  const remainingMinor = Math.max(0, (selectedSourceScope?.amountMinor ?? 0) - allocatedMinor);
   const candidates = useMemo(
     () =>
       getExpenseLinkTargetCandidates({
         sourceTransactionId: transaction.id,
-        sourceCurrencyCode: sourceAmount?.currencyCode ?? null,
+        sourceCurrencyCode: selectedSourceScope?.currencyCode ?? null,
         transactions: snapshot.transactions,
         lines: snapshot.transactionLines,
         query,
       }).slice(0, 12),
-    [query, snapshot.transactionLines, snapshot.transactions, sourceAmount?.currencyCode, transaction.id],
+    [
+      query,
+      selectedSourceScope?.currencyCode,
+      snapshot.transactionLines,
+      snapshot.transactions,
+      transaction.id,
+    ],
   );
 
   useEffect(() => {
-    setTreatment(getIncomeLinkTreatment(transaction.id, snapshot.transactionLinks));
-    setConfirmUnlink(false);
+    setAllocations(createTransactionLinkAllocationDrafts(transaction.id, snapshot.transactionLinks));
   }, [snapshot.transactionLinks, transaction.id]);
 
-  async function selectTreatment(nextTreatment: TransactionLinkType) {
-    setConfirmUnlink(false);
-    setTreatment(nextTreatment);
-
-    if (sourceLink) {
-      await saveLink(sourceLink.targetTransactionId, nextTreatment, sourceLink.id);
+  useEffect(() => {
+    if (sourceScopes.length && !sourceScopes.some((scope) => scope.id === selectedSourceScopeId)) {
+      setSelectedSourceScopeId(sourceScopes[0].id);
     }
+  }, [selectedSourceScopeId, sourceScopes]);
+
+  function updateAllocation(allocationId: string, patch: Partial<TransactionLinkAllocationDraft>) {
+    setAllocations((current) =>
+      current.map((allocation) => (allocation.id === allocationId ? { ...allocation, ...patch } : allocation)),
+    );
   }
 
-  async function saveLink(targetTransactionId: string, linkType: TransactionLinkType, linkId = sourceLink?.id) {
-    if (!sourceAmount) {
+  function removeAllocation(allocationId: string) {
+    setAllocations((current) => current.filter((allocation) => allocation.id !== allocationId));
+  }
+
+  function addAllocation(option: TransactionLinkTargetOption) {
+    if (!selectedSourceScope) {
       onError('This income transaction needs a positive amount before linking.');
       return;
     }
 
-    try {
-      const input = {
-        sourceTransactionId: transaction.id,
-        targetTransactionId,
+    if (!option.eligible) {
+      onError(option.disabledReason || 'This expense cannot be linked.');
+      return;
+    }
+
+    const duplicate = allocations.some(
+      (allocation) =>
+        allocation.sourceLineId === selectedSourceScope.sourceLineId &&
+        allocation.targetTransactionId === option.transaction.id &&
+        allocation.targetLineId === option.targetLineId &&
+        allocation.linkType === linkType,
+    );
+    if (duplicate) {
+      onError('This allocation is already listed.');
+      return;
+    }
+
+    const amountMinor = Math.min(remainingMinor, option.amountMinor);
+    if (amountMinor <= 0) {
+      onError('No unallocated source amount remains for this selection.');
+      return;
+    }
+
+    setAllocations((current) => [
+      ...current,
+      {
+        id: `draft-${Date.now()}-${option.id}`,
+        sourceLineId: selectedSourceScope.sourceLineId,
+        targetTransactionId: option.transaction.id,
+        targetLineId: option.targetLineId,
         linkType,
-        amountMinor: sourceAmount.amountMinor,
-        currencyCode: sourceAmount.currencyCode,
-      };
-      if (linkId) {
-        await onUpdateTransactionLink({ id: linkId, ...input });
-      } else {
+        amount: formatMinorInput(amountMinor),
+        currencyCode: option.currencyCode,
+      },
+    ]);
+    onError('');
+  }
+
+  async function saveAllocations() {
+    setSaving(true);
+    try {
+      const changes = getTransactionLinkAllocationChanges({
+        sourceTransactionId: transaction.id,
+        existingLinks: snapshot.transactionLinks,
+        allocations,
+      });
+
+      for (const linkId of changes.deleteIds) {
+        await onDeleteTransactionLink(linkId);
+      }
+      for (const input of changes.toUpdate) {
+        await onUpdateTransactionLink(input);
+      }
+      for (const input of changes.toAdd) {
         await onAddTransactionLink(input);
       }
       onError('');
     } catch (caught) {
-      onError(caught instanceof Error ? caught.message : 'Could not update transaction link.');
+      onError(caught instanceof Error ? caught.message : 'Could not save transaction links.');
+    } finally {
+      setSaving(false);
     }
   }
 
-  async function unlink() {
-    if (!sourceLink) {
-      setConfirmUnlink(false);
-      setTreatment('normal');
-      return;
-    }
-
-    try {
-      await onDeleteTransactionLink(sourceLink.id);
-      setConfirmUnlink(false);
-      setTreatment('normal');
-      onError('');
-    } catch (caught) {
-      onError(caught instanceof Error ? caught.message : 'Could not unlink transaction.');
-    }
+  if (!selectedSourceScope) {
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>This income transaction needs a positive amount before linking.</Text>
+      </View>
+    );
   }
 
   return (
     <>
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>What is this money for?</Text>
+        <Text style={styles.sectionTitle}>Allocate this incoming money</Text>
+        <View style={styles.summaryRow}>
+          <SummaryItem label="Source" value={formatMoney(selectedSourceScope.amountMinor, selectedSourceScope.currencyCode)} />
+          <SummaryItem label="Allocated" value={formatMoney(allocatedMinor, selectedSourceScope.currencyCode)} />
+          <SummaryItem label="Remaining" value={formatMoney(remainingMinor, selectedSourceScope.currencyCode)} />
+        </View>
+
+        {sourceScopes.length > 1 ? (
+          <View style={styles.optionList}>
+            <Text style={styles.selectedLabel}>Source</Text>
+            {sourceScopes.map((scope) => (
+              <SourceScopeRow
+                key={scope.id}
+                scope={scope}
+                snapshot={snapshot}
+                selected={scope.id === selectedSourceScope.id}
+                onPress={() => setSelectedSourceScopeId(scope.id)}
+              />
+            ))}
+          </View>
+        ) : null}
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Allocations</Text>
+        {allocations.length ? (
+          <View style={styles.allocationList}>
+            {allocations.map((allocation) => (
+              <AllocationRow
+                key={allocation.id}
+                allocation={allocation}
+                snapshot={snapshot}
+                sourceTransaction={transaction}
+                onChangeAmount={(amount) => updateAllocation(allocation.id, { amount })}
+                onRemove={() => removeAllocation(allocation.id)}
+              />
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>No allocations yet.</Text>
+        )}
+        <Pressable
+          accessibilityRole="button"
+          disabled={saving}
+          onPress={saveAllocations}
+          style={({ pressed }) => [styles.saveButton, (pressed || saving) && styles.pressed]}
+        >
+          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save allocations'}</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Add allocation</Text>
         <View style={styles.optionList}>
           {transactionLinkTypeOptions.map((option) => (
             <Pressable
               accessibilityRole="button"
               key={option.value}
-              onPress={() => selectTreatment(option.value)}
+              onPress={() => setLinkType(option.value)}
               style={({ pressed }) => [
                 styles.treatmentOption,
-                treatment === option.value && styles.treatmentOptionSelected,
+                linkType === option.value && styles.treatmentOptionSelected,
                 pressed && styles.pressed,
               ]}
             >
-              <View style={[styles.radio, treatment === option.value && styles.radioSelected]} />
-              <Text style={[styles.optionText, treatment === option.value && styles.optionTextSelected]}>
+              <View style={[styles.radio, linkType === option.value && styles.radioSelected]} />
+              <Text style={[styles.optionText, linkType === option.value && styles.optionTextSelected]}>
                 {option.label}
               </Text>
             </Pressable>
           ))}
         </View>
-        {sourceLink ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setConfirmUnlink(true)}
-            style={({ pressed }) => [styles.unlinkButton, pressed && styles.pressed]}
-          >
-            <Text style={styles.unlinkButtonText}>Unlink transaction</Text>
-          </Pressable>
-        ) : null}
-      </View>
-
-      {confirmUnlink ? <ConfirmUnlinkPanel onCancel={() => setConfirmUnlink(false)} onUnlink={unlink} /> : null}
-
-      {treatment !== 'normal' ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Choose the original expense</Text>
-          {selectedTarget && sourceLink ? (
-            <View style={styles.selectedTarget}>
-              <Text style={styles.selectedLabel}>Linked expense</Text>
-              <ExpenseTargetRow
-                candidate={buildExpenseCandidateFromLink(selectedTarget, sourceLink, snapshot)}
-                snapshot={snapshot}
-                selected
-                onPress={() => undefined}
-              />
-              {selectedTargetOverpaid ? (
-                <Text style={styles.warningText}>
-                  Linked money is more than this expense. Stats will clamp spending at $0.
-                </Text>
-              ) : null}
-            </View>
-          ) : null}
-
-          <InlineField
-            label={sourceLink ? 'Change linked expense' : 'Find expense'}
-            value={query}
-            onChange={setQuery}
-            placeholder="Search by item, category, currency"
-          />
-          <View style={styles.searchResults}>
-            {candidates.map((candidate) => (
-              <ExpenseTargetRow
-                key={candidate.transaction.id}
-                candidate={candidate}
-                snapshot={snapshot}
-                selected={sourceLink?.targetTransactionId === candidate.transaction.id}
-                onPress={() => {
-                  if (candidate.eligible) {
-                    saveLink(candidate.transaction.id, treatment);
-                  }
-                }}
-              />
-            ))}
-            {!candidates.length ? <Text style={styles.emptyText}>No matching expenses.</Text> : null}
-          </View>
+        <InlineField label="Find expense" value={query} onChange={setQuery} placeholder="Search by item, category, currency" />
+        <View style={styles.searchResults}>
+          {candidates.map((candidate) => (
+            <TargetCandidateOptions
+              key={candidate.transaction.id}
+              candidate={candidate}
+              snapshot={snapshot}
+              currencyCode={selectedSourceScope.currencyCode}
+              onSelect={addAllocation}
+            />
+          ))}
+          {!candidates.length ? <Text style={styles.emptyText}>No matching expenses.</Text> : null}
         </View>
-      ) : null}
+      </View>
     </>
   );
 }
 
-function ConfirmUnlinkPanel({ onCancel, onUnlink }: { onCancel: () => void; onUnlink: () => void }) {
+function SummaryItem({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.warningPanel}>
-      <Text style={styles.warningText}>Unlink this transaction? Both transactions will stay in your ledger.</Text>
-      <View style={styles.confirmActions}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onCancel}
-          style={({ pressed }) => [styles.secondaryButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.secondaryButtonText}>Cancel</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onUnlink}
-          style={({ pressed }) => [styles.dangerButton, pressed && styles.pressed]}
-        >
-          <Text style={styles.dangerButtonText}>Unlink</Text>
-        </Pressable>
-      </View>
+    <View style={styles.summaryItem}>
+      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text style={styles.summaryValue}>{value}</Text>
     </View>
   );
 }
 
-function buildExpenseCandidateFromLink(
-  transaction: Transaction,
-  link: TransactionLink,
-  snapshot: AppSnapshot,
-): ExpenseLinkTargetCandidate {
-  const lines = snapshot.transactionLines.filter(
-    (line) =>
-      line.transactionId === transaction.id &&
-      line.amountMinor < 0 &&
-      line.currencyCode === link.currencyCode,
-  );
-  const firstLine = lines[0];
-  const amountMinor = lines.reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
+function SourceScopeRow({
+  scope,
+  snapshot,
+  selected,
+  onPress,
+}: {
+  scope: TransactionLinkSourceScope;
+  snapshot: AppSnapshot;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const account = scope.line ? snapshot.accounts.find((item) => item.id === scope.line?.accountId) : undefined;
+  const label = scope.line ? getLineLabel(scope.line, snapshot) : 'Whole income transaction';
+  const detail = scope.line?.note || (account ? getAccountDisplayName(account) : 'All income lines');
 
-  return {
-    transaction,
-    amountMinor,
-    currencyCode: link.currencyCode,
-    accountId: firstLine?.accountId ?? '',
-    categoryId: firstLine?.categoryId ?? '',
-    subcategoryId: firstLine?.subcategoryId ?? '',
-    eligible: true,
-    disabledReason: '',
-  };
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.scopeRow,
+        selected && styles.scopeRowSelected,
+        pressed && styles.pressed,
+      ]}
+    >
+      {scope.line ? <LineIcon line={scope.line} snapshot={snapshot} size="sm" /> : null}
+      <View style={styles.scopeText}>
+        <Text numberOfLines={1} style={styles.scopeTitle}>{label}</Text>
+        <Text numberOfLines={1} style={styles.scopeMeta}>{detail}</Text>
+      </View>
+      <Text style={styles.incomeAmount}>{formatMoney(scope.amountMinor, scope.currencyCode)}</Text>
+    </Pressable>
+  );
+}
+
+function AllocationRow({
+  allocation,
+  snapshot,
+  sourceTransaction,
+  onChangeAmount,
+  onRemove,
+}: {
+  allocation: TransactionLinkAllocationDraft;
+  snapshot: AppSnapshot;
+  sourceTransaction: Transaction;
+  onChangeAmount: (amount: string) => void;
+  onRemove: () => void;
+}) {
+  const targetTransaction = snapshot.transactions.find((transaction) => transaction.id === allocation.targetTransactionId);
+  const targetLine = allocation.targetLineId
+    ? snapshot.transactionLines.find((line) => line.id === allocation.targetLineId)
+    : undefined;
+  const sourceLine = allocation.sourceLineId
+    ? snapshot.transactionLines.find((line) => line.id === allocation.sourceLineId)
+    : undefined;
+  const title = targetTransaction?.title || 'Expense';
+  const targetDetail = targetLine ? getLineLabel(targetLine, snapshot) : 'Whole transaction';
+  const sourceDetail = sourceLine ? getLineLabel(sourceLine, snapshot) : sourceTransaction.title || 'Whole income';
+
+  return (
+    <View style={styles.allocationRow}>
+      <View style={styles.allocationHeader}>
+        {targetLine ? <LineIcon line={targetLine} snapshot={snapshot} size="sm" /> : null}
+        <View style={styles.allocationText}>
+          <Text numberOfLines={1} style={styles.allocationTitle}>{title}</Text>
+          <Text numberOfLines={1} style={styles.allocationMeta}>
+            {targetDetail} / From {sourceDetail} / {getTransactionLinkTypeShortLabel(allocation.linkType)}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onRemove}
+          style={({ pressed }) => [styles.smallDangerButton, pressed && styles.pressed]}
+        >
+          <Text style={styles.smallDangerText}>Remove</Text>
+        </Pressable>
+      </View>
+      <InlineField
+        label="Amount"
+        value={allocation.amount}
+        onChange={onChangeAmount}
+        placeholder="0.00"
+        keyboardType="decimal-pad"
+        rightLabel={formatMoney(getAllocationAmountMinor(allocation), allocation.currencyCode)}
+      />
+    </View>
+  );
+}
+
+function TargetCandidateOptions({
+  candidate,
+  snapshot,
+  currencyCode,
+  onSelect,
+}: {
+  candidate: ExpenseLinkTargetCandidate;
+  snapshot: AppSnapshot;
+  currencyCode: string;
+  onSelect: (option: TransactionLinkTargetOption) => void;
+}) {
+  const options = candidate.eligible
+    ? getTransactionLinkTargetOptions({
+        transaction: candidate.transaction,
+        lines: snapshot.transactionLines,
+        currencyCode,
+      })
+    : [
+        {
+          id: `${candidate.transaction.id}:disabled`,
+          transaction: candidate.transaction,
+          targetLineId: null,
+          amountMinor: candidate.amountMinor,
+          currencyCode: candidate.currencyCode,
+          accountId: candidate.accountId,
+          categoryId: candidate.categoryId,
+          subcategoryId: candidate.subcategoryId,
+          eligible: false,
+          disabledReason: candidate.disabledReason,
+        },
+      ];
+
+  return (
+    <View style={styles.targetGroup}>
+      <Text numberOfLines={1} style={styles.targetGroupTitle}>
+        {candidate.transaction.title || 'Expense'} / {formatTransactionShortDate(candidate.transaction.datetime)}
+      </Text>
+      {options.map((option) => (
+        <TargetOptionRow key={option.id} option={option} snapshot={snapshot} onPress={() => onSelect(option)} />
+      ))}
+    </View>
+  );
+}
+
+function TargetOptionRow({
+  option,
+  snapshot,
+  onPress,
+}: {
+  option: TransactionLinkTargetOption;
+  snapshot: AppSnapshot;
+  onPress: () => void;
+}) {
+  const account = snapshot.accounts.find((item) => item.id === option.accountId);
+  const title = option.line ? getLineLabel(option.line, snapshot) : 'Whole transaction';
+  const detail = option.line?.note || (account ? getAccountDisplayName(account) : option.disabledReason || 'Expense');
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={!option.eligible}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.targetOptionRow,
+        option.line && styles.targetOptionChild,
+        !option.eligible && styles.targetOptionDisabled,
+        pressed && option.eligible && styles.pressed,
+      ]}
+    >
+      <LineIcon line={option.line} snapshot={snapshot} fallbackCategoryId={option.categoryId} fallbackSubcategoryId={option.subcategoryId} size="sm" />
+      <View style={styles.targetOptionText}>
+        <Text numberOfLines={1} style={styles.targetOptionTitle}>{title}</Text>
+        <Text numberOfLines={1} style={styles.targetOptionMeta}>
+          {option.eligible ? detail : option.disabledReason}
+        </Text>
+      </View>
+      <Text style={styles.expenseAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
+    </Pressable>
+  );
+}
+
+function LineIcon({
+  line,
+  snapshot,
+  fallbackCategoryId = '',
+  fallbackSubcategoryId = '',
+  size = 'sm',
+}: {
+  line?: { categoryId: string; subcategoryId: string };
+  snapshot: AppSnapshot;
+  fallbackCategoryId?: string;
+  fallbackSubcategoryId?: string;
+  size?: 'sm' | 'md';
+}) {
+  const categoryId = line?.categoryId || fallbackCategoryId;
+  const subcategoryId = line?.subcategoryId || fallbackSubcategoryId;
+  const color = getSubcategoryColor(categoryId, subcategoryId, snapshot.categories);
+  const icon = getSubcategoryIcon(categoryId, subcategoryId, snapshot.categories);
+
+  return <CategoryIconBadge color={color} icon={icon} size={size} />;
+}
+
+function getLineLabel(line: { categoryId: string; subcategoryId: string }, snapshot: AppSnapshot): string {
+  const category = getCategory(line.categoryId, snapshot.categories);
+  return getSubcategoryName(line.categoryId, line.subcategoryId, snapshot.categories) || category.name || 'Split line';
 }
 
 const styles = StyleSheet.create({
@@ -275,6 +501,30 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: colors.ink,
     fontSize: typography.body,
+    fontWeight: '900',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  summaryItem: {
+    backgroundColor: colors.background,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    gap: spacing.xs,
+    padding: spacing.sm,
+  },
+  summaryLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  summaryValue: {
+    color: colors.ink,
+    fontSize: typography.small,
     fontWeight: '900',
   },
   optionList: {
@@ -314,76 +564,147 @@ const styles = StyleSheet.create({
   optionTextSelected: {
     color: colors.primaryDark,
   },
-  selectedTarget: {
-    gap: spacing.xs,
-  },
   selectedLabel: {
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-  searchResults: {
-    gap: spacing.xs,
+  scopeRow: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    padding: spacing.sm,
   },
-  warningPanel: {
-    backgroundColor: '#FFF7E8',
-    borderColor: '#E5C27D',
+  scopeRowSelected: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.primary,
+  },
+  scopeText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  scopeTitle: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  scopeMeta: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  allocationList: {
+    gap: spacing.sm,
+  },
+  allocationRow: {
+    backgroundColor: colors.background,
+    borderColor: colors.faint,
     borderRadius: 8,
     borderWidth: 1,
     gap: spacing.sm,
     padding: spacing.sm,
   },
-  warningText: {
+  allocationHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  allocationText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  allocationTitle: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  allocationMeta: {
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',
-    lineHeight: 17,
   },
-  confirmActions: {
+  searchResults: {
+    gap: spacing.sm,
+  },
+  targetGroup: {
+    gap: spacing.xs,
+  },
+  targetGroupTitle: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  targetOptionRow: {
+    alignItems: 'center',
+    backgroundColor: colors.background,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.sm,
-    justifyContent: 'flex-end',
+    padding: spacing.sm,
   },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
+  targetOptionChild: {
+    marginLeft: spacing.md,
   },
-  secondaryButtonText: {
-    color: colors.primaryDark,
+  targetOptionDisabled: {
+    opacity: 0.55,
+  },
+  targetOptionText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  targetOptionTitle: {
+    color: colors.ink,
     fontSize: typography.small,
     fontWeight: '900',
   },
-  dangerButton: {
+  targetOptionMeta: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  incomeAmount: {
+    color: colors.success,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  expenseAmount: {
+    color: colors.danger,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  saveButton: {
     alignItems: 'center',
-    backgroundColor: colors.danger,
+    backgroundColor: colors.primary,
     borderRadius: 8,
     justifyContent: 'center',
-    minHeight: 36,
+    minHeight: 42,
     paddingHorizontal: spacing.md,
   },
-  dangerButtonText: {
+  saveButtonText: {
     color: colors.surface,
-    fontSize: typography.small,
+    fontSize: typography.body,
     fontWeight: '900',
   },
-  unlinkButton: {
+  smallDangerButton: {
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    borderColor: colors.faint,
+    borderColor: '#E4C3C3',
     borderRadius: 8,
     borderWidth: 1,
     justifyContent: 'center',
-    minHeight: 36,
-    paddingHorizontal: spacing.md,
+    minHeight: 34,
+    paddingHorizontal: spacing.sm,
   },
-  unlinkButtonText: {
+  smallDangerText: {
     color: colors.danger,
     fontSize: typography.small,
     fontWeight: '900',

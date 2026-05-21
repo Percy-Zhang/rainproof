@@ -68,6 +68,8 @@ export type TransactionLinkRow = {
   id: string;
   source_transaction_id: string;
   target_transaction_id: string;
+  source_line_id: string | null;
+  target_line_id: string | null;
   link_type: TransactionLinkType;
   amount_minor: number;
   currency_code: string;
@@ -170,6 +172,8 @@ export function mapTransactionLink(row: TransactionLinkRow): TransactionLink {
     id: row.id,
     sourceTransactionId: row.source_transaction_id,
     targetTransactionId: row.target_transaction_id,
+    sourceLineId: row.source_line_id || null,
+    targetLineId: row.target_line_id || null,
     linkType: row.link_type,
     amountMinor: row.amount_minor,
     currencyCode: normalizeCurrencyCode(row.currency_code),

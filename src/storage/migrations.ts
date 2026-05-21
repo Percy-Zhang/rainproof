@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS transaction_links (
   id TEXT PRIMARY KEY NOT NULL,
   source_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
   target_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  source_line_id TEXT REFERENCES transaction_lines(id) ON DELETE CASCADE,
+  target_line_id TEXT REFERENCES transaction_lines(id) ON DELETE CASCADE,
   link_type TEXT NOT NULL,
   amount_minor INTEGER NOT NULL,
   currency_code TEXT NOT NULL,
@@ -33,9 +35,7 @@ CREATE TABLE IF NOT EXISTS transaction_links (
   updated_at TEXT NOT NULL,
   CHECK (source_transaction_id <> target_transaction_id),
   CHECK (link_type IN ('refund', 'reimbursement', 'shared_expense_contribution')),
-  CHECK (amount_minor > 0),
-  UNIQUE(source_transaction_id),
-  UNIQUE(source_transaction_id, target_transaction_id, link_type, amount_minor, currency_code)
+  CHECK (amount_minor > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_transaction_links_source_transaction_id
@@ -43,6 +43,12 @@ ON transaction_links(source_transaction_id);
 
 CREATE INDEX IF NOT EXISTS idx_transaction_links_target_transaction_id
 ON transaction_links(target_transaction_id);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_links_source_line_id
+ON transaction_links(source_line_id);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_links_target_line_id
+ON transaction_links(target_line_id);
 
 CREATE INDEX IF NOT EXISTS idx_transaction_links_link_type
 ON transaction_links(link_type);
@@ -124,6 +130,12 @@ const migrations: Migration[] = [
       await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
     },
   },
+  {
+    version: 5,
+    migrate: async (db) => {
+      await ensureLineLevelTransactionLinkSchema(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -152,8 +164,60 @@ async function ensureCurrentSchemaCompatibility(db: MigrationDatabase): Promise<
   await db.execAsync(SCHEMA_SQL);
   await ensureAccountCompatibilityColumns(db);
   await ensureTransactionCompatibilityColumns(db);
-  await db.execAsync(TRANSACTION_LINKS_SCHEMA_SQL);
+  await ensureLineLevelTransactionLinkSchema(db);
   await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
+}
+
+async function ensureLineLevelTransactionLinkSchema(db: MigrationDatabase): Promise<void> {
+  const columns = await db.getAllAsync<TableColumnRow>('PRAGMA table_info(transaction_links)');
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (!columnNames.has('source_line_id') || !columnNames.has('target_line_id')) {
+    await rebuildTransactionLinksForLineLevelAllocation(db);
+    return;
+  }
+
+  await db.execAsync(TRANSACTION_LINKS_SCHEMA_SQL);
+}
+
+async function rebuildTransactionLinksForLineLevelAllocation(db: MigrationDatabase): Promise<void> {
+  await db.execAsync(`
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS transaction_links_line_level_next;
+
+CREATE TABLE transaction_links_line_level_next (
+  id TEXT PRIMARY KEY NOT NULL,
+  source_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  target_transaction_id TEXT NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+  source_line_id TEXT REFERENCES transaction_lines(id) ON DELETE CASCADE,
+  target_line_id TEXT REFERENCES transaction_lines(id) ON DELETE CASCADE,
+  link_type TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  currency_code TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (source_transaction_id <> target_transaction_id),
+  CHECK (link_type IN ('refund', 'reimbursement', 'shared_expense_contribution')),
+  CHECK (amount_minor > 0)
+);
+
+INSERT INTO transaction_links_line_level_next (
+  id, source_transaction_id, target_transaction_id, source_line_id, target_line_id,
+  link_type, amount_minor, currency_code, created_at, updated_at
+)
+SELECT
+  id, source_transaction_id, target_transaction_id, NULL, NULL,
+  link_type, amount_minor, currency_code, created_at, updated_at
+FROM transaction_links;
+
+DROP TABLE transaction_links;
+ALTER TABLE transaction_links_line_level_next RENAME TO transaction_links;
+
+PRAGMA foreign_keys = ON;
+`);
+
+  await db.execAsync(TRANSACTION_LINKS_SCHEMA_SQL);
 }
 
 async function ensureAccountCompatibilityColumns(db: MigrationDatabase): Promise<void> {
