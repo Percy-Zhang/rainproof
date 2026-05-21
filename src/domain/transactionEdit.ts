@@ -41,6 +41,9 @@ export type TransactionEditDraft = {
   notes: string;
   labels: string;
   groupId: string;
+  lineId?: string;
+  sourceLineId?: string;
+  targetLineId?: string;
   splitLines?: TransactionEditSplitLineDraft[];
 };
 
@@ -90,6 +93,8 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
       notes: transaction.notes,
       labels: transaction.labels.join(', '),
       groupId: transaction.groupId,
+      sourceLineId: sourceLine?.id,
+      targetLineId: targetLine?.id,
     };
   }
 
@@ -146,6 +151,7 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
     notes: transaction.notes,
     labels: transaction.labels.join(', '),
     groupId: transaction.groupId,
+    lineId: line.id,
   };
 }
 
@@ -175,7 +181,9 @@ export function buildTransactionUpdateInput(
         accounts,
         externalParty: draft.externalParty,
         sourceAccountId: draft.accountId,
+        sourceLineId: draft.sourceLineId,
         targetAccountId: draft.targetAccountId,
+        targetLineId: draft.targetLineId,
       }),
     };
   }
@@ -222,6 +230,7 @@ export function buildTransactionUpdateInput(
     groupId: draft.groupId,
     lines: [
       {
+        id: normalSplitLine?.id ?? draft.lineId,
         accountId: account.id,
         amountMinor: draft.kind === 'expense' ? -amountMinor : amountMinor,
         currencyCode: account.currencyCode,
@@ -265,13 +274,17 @@ export function buildTransferTransactionLines({
   accounts,
   externalParty,
   sourceAccountId,
+  sourceLineId,
   targetAccountId,
+  targetLineId,
 }: {
   amountMinor: number;
   accounts: Account[];
   externalParty: string;
   sourceAccountId: string;
+  sourceLineId?: string;
   targetAccountId: string;
+  targetLineId?: string;
 }): NewTransactionInput['lines'] {
   const sourceAccount = isOutsideAccountId(sourceAccountId)
     ? undefined
@@ -296,6 +309,7 @@ export function buildTransferTransactionLines({
   if (sourceAccount && !targetAccount) {
     return [
       {
+        id: sourceLineId,
         accountId: sourceAccount.id,
         amountMinor: -amountMinor,
         currencyCode: sourceAccount.currencyCode,
@@ -307,6 +321,7 @@ export function buildTransferTransactionLines({
   if (!sourceAccount && targetAccount) {
     return [
       {
+        id: targetLineId,
         accountId: targetAccount.id,
         amountMinor,
         currencyCode: targetAccount.currencyCode,
@@ -317,12 +332,14 @@ export function buildTransferTransactionLines({
 
   return [
     {
+      id: sourceLineId,
       accountId: sourceAccount!.id,
       amountMinor: -amountMinor,
       currencyCode: sourceAccount!.currencyCode,
       transferPeerAccountId: targetAccount!.id,
     },
     {
+      id: targetLineId,
       accountId: targetAccount!.id,
       amountMinor,
       currencyCode: targetAccount!.currencyCode,

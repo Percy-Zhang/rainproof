@@ -129,6 +129,7 @@ export function buildSplitTransactionLines({
   const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
   const sign = kind === 'expense' ? -1 : 1;
   const lines = splitLines.map((line) => ({
+    id: line.id,
     accountId,
     amountMinor: Math.abs(line.amountMinor) * sign,
     currencyCode: normalizedCurrencyCode,

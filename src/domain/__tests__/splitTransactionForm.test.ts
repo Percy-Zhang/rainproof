@@ -33,6 +33,7 @@ describe('split transaction form helpers', () => {
 
     expect(lines).toEqual([
       expect.objectContaining({
+        id: 'food-line',
         accountId: 'a1',
         amountMinor: -1000,
         currencyCode: 'AUD',
@@ -41,6 +42,7 @@ describe('split transaction form helpers', () => {
         note: 'Food',
       }),
       expect.objectContaining({
+        id: 'home-line',
         accountId: 'a1',
         amountMinor: -2000,
         currencyCode: 'AUD',
@@ -75,6 +77,7 @@ describe('split transaction form helpers', () => {
 
     expect(lines).toEqual([
       expect.objectContaining({
+        id: 'salary-line',
         accountId: 'a1',
         amountMinor: 1000,
         currencyCode: 'AUD',
@@ -83,6 +86,7 @@ describe('split transaction form helpers', () => {
         note: 'Salary',
       }),
       expect.objectContaining({
+        id: 'bonus-line',
         accountId: 'a1',
         amountMinor: 2000,
         currencyCode: 'AUD',

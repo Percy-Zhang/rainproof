@@ -103,6 +103,7 @@ describe('transaction edit helpers', () => {
     expect(input.kind).toBe('expense');
     expect(input.lines).toEqual([
       expect.objectContaining({
+        id: 'line-1',
         accountId: 'a2',
         amountMinor: -4567,
         categoryId: 'transport',
@@ -141,6 +142,7 @@ describe('transaction edit helpers', () => {
     ]);
     expect(input.lines).toEqual([
       expect.objectContaining({
+        id: 'food-line',
         accountId: 'a1',
         amountMinor: -1200,
         categoryId: 'food',
@@ -148,6 +150,7 @@ describe('transaction edit helpers', () => {
         note: 'Food',
       }),
       expect.objectContaining({
+        id: 'home-line',
         accountId: 'a1',
         amountMinor: -3400,
         categoryId: 'housing',
@@ -198,6 +201,7 @@ describe('transaction edit helpers', () => {
 
     expect(input.lines).toEqual([
       expect.objectContaining({
+        id: 'food-line',
         amountMinor: -1200,
         categoryId: 'transport',
         subcategoryId: 'fuel',
@@ -235,12 +239,14 @@ describe('transaction edit helpers', () => {
     ]);
     expect(input.lines).toEqual([
       expect.objectContaining({
+        id: 'salary-line',
         amountMinor: 1200,
         categoryId: 'income',
         subcategoryId: 'salary',
         note: 'Salary',
       }),
       expect.objectContaining({
+        id: 'bonus-line',
         amountMinor: 3400,
         categoryId: 'income',
         subcategoryId: 'bonus',
@@ -276,6 +282,7 @@ describe('transaction edit helpers', () => {
 
     expect(input.lines).toEqual([
       expect.objectContaining({
+        id: 'salary-line',
         amountMinor: 1200,
         categoryId: 'income',
         subcategoryId: 'interest',
@@ -361,8 +368,8 @@ describe('transaction edit helpers', () => {
     );
 
     expect(input.lines).toEqual([
-      expect.objectContaining({ accountId: 'a2', amountMinor: -750, currencyCode: 'AUD' }),
-      expect.objectContaining({ accountId: 'a1', amountMinor: 750, currencyCode: 'AUD' }),
+      expect.objectContaining({ id: 'source', accountId: 'a2', amountMinor: -750, currencyCode: 'AUD' }),
+      expect.objectContaining({ id: 'target', accountId: 'a1', amountMinor: 750, currencyCode: 'AUD' }),
     ]);
   });
 

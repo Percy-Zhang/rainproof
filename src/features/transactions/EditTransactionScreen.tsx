@@ -249,7 +249,7 @@ export function EditTransactionScreen({
 
     return [
       createSplitTransactionFormLine({
-        id: `${current.id}-split-1`,
+        id: current.lineId ?? `${current.id}-split-1`,
         amount: current.amount,
         categoryId: current.categoryId,
         subcategoryId: current.subcategoryId,

@@ -237,6 +237,14 @@ function getLinesForTransaction(snapshot: AppSnapshot, transactionId: string): T
   return snapshot.transactionLines.filter((item) => item.transactionId === transactionId);
 }
 
+function getLineBySubcategory(snapshot: AppSnapshot, transactionId: string, subcategoryId: string): TransactionLine {
+  const line = getLinesForTransaction(snapshot, transactionId).find((item) => item.subcategoryId === subcategoryId);
+  if (!line) {
+    throw new Error(`Missing ${subcategoryId} line for transaction ${transactionId}`);
+  }
+  return line;
+}
+
 async function getStoredTransactionLineCount(
   db: NodeSQLiteRepositoryDatabase,
   transactionId: string,
@@ -546,6 +554,108 @@ describe('SQLite finance repository integration', () => {
     });
   });
 
+  it('preserves one-line transaction line IDs during edits', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const savings = await addAccount(repository, { name: 'Savings', type: 'savings' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Line ID expense',
+        lines: [{ accountId: everyday.id, amountMinor: -2500, categoryId: 'food-dining', subcategoryId: 'groceries' }],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Line ID income',
+        lines: [{ accountId: everyday.id, amountMinor: 80000, categoryId: 'income', subcategoryId: 'salary' }],
+      });
+      const transfer = await addTransaction(repository, {
+        kind: 'transfer',
+        title: 'Line ID transfer',
+        lines: [
+          { accountId: everyday.id, amountMinor: -5000, transferPeerAccountId: savings.id },
+          { accountId: savings.id, amountMinor: 5000, transferPeerAccountId: everyday.id },
+        ],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const expenseLine = getLineForTransaction(snapshot, expense.id);
+      const incomeLine = getLineForTransaction(snapshot, income.id);
+      const transferLines = getLinesForTransaction(snapshot, transfer.id);
+      const transferSourceLine = transferLines.find((line) => line.amountMinor < 0);
+      const transferTargetLine = transferLines.find((line) => line.amountMinor > 0);
+
+      expect(transferSourceLine).toBeDefined();
+      expect(transferTargetLine).toBeDefined();
+
+      await repository.updateTransaction({
+        id: expense.id,
+        kind: 'expense',
+        title: 'Line ID expense updated',
+        datetime: '2026-05-18T12:00:00.000Z',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: -3000,
+            currencyCode: 'AUD',
+            categoryId: 'food-dining',
+            subcategoryId: 'groceries',
+            note: 'Still same line',
+          },
+        ],
+      });
+      await repository.updateTransaction({
+        id: income.id,
+        kind: 'income',
+        title: 'Line ID income updated',
+        datetime: '2026-05-18T13:00:00.000Z',
+        lines: [
+          {
+            id: incomeLine.id,
+            accountId: everyday.id,
+            amountMinor: 90000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Still same line',
+          },
+        ],
+      });
+      await repository.updateTransaction({
+        id: transfer.id,
+        kind: 'transfer',
+        title: 'Line ID transfer updated',
+        datetime: '2026-05-18T14:00:00.000Z',
+        lines: [
+          {
+            id: transferSourceLine!.id,
+            accountId: everyday.id,
+            amountMinor: -6000,
+            currencyCode: 'AUD',
+            transferPeerAccountId: savings.id,
+          },
+          {
+            id: transferTargetLine!.id,
+            accountId: savings.id,
+            amountMinor: 6000,
+            currencyCode: 'AUD',
+            transferPeerAccountId: everyday.id,
+          },
+        ],
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(getLineForTransaction(snapshot, expense.id)).toEqual(
+        expect.objectContaining({ id: expenseLine.id, amountMinor: -3000, note: 'Still same line' }),
+      );
+      expect(getLineForTransaction(snapshot, income.id)).toEqual(
+        expect.objectContaining({ id: incomeLine.id, amountMinor: 90000, note: 'Still same line' }),
+      );
+      expect(getLinesForTransaction(snapshot, transfer.id).map((line) => line.id)).toEqual(
+        expect.arrayContaining([transferSourceLine!.id, transferTargetLine!.id]),
+      );
+    });
+  });
+
   it('persists a split expense as one parent transaction with multiple lines', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });
@@ -698,6 +808,9 @@ describe('SQLite finance repository integration', () => {
         title: 'One-line income',
         lines: [{ accountId: everyday.id, amountMinor: 150000, categoryId: 'income', subcategoryId: 'salary' }],
       });
+      let snapshot = await repository.getSnapshot();
+      const originalExpenseLine = getLineForTransaction(snapshot, expense.id);
+      const originalIncomeLine = getLineForTransaction(snapshot, income.id);
 
       await repository.updateTransaction({
         id: expense.id,
@@ -748,7 +861,16 @@ describe('SQLite finance repository integration', () => {
         ],
       });
 
-      const snapshot = await repository.getSnapshot();
+      snapshot = await repository.getSnapshot();
+      const updatedExpenseGroceries = getLineBySubcategory(snapshot, expense.id, 'groceries');
+      const updatedExpenseRent = getLineBySubcategory(snapshot, expense.id, 'rent');
+      const updatedIncomeSalary = getLineBySubcategory(snapshot, income.id, 'salary');
+      const updatedIncomeBonus = getLineBySubcategory(snapshot, income.id, 'bonus');
+
+      expect(updatedExpenseGroceries.id).toBe(originalExpenseLine.id);
+      expect(updatedExpenseRent.id).not.toBe(originalExpenseLine.id);
+      expect(updatedIncomeSalary.id).toBe(originalIncomeLine.id);
+      expect(updatedIncomeBonus.id).not.toBe(originalIncomeLine.id);
       expect(getLinesForTransaction(snapshot, expense.id)).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ amountMinor: -5000, categoryId: 'food', subcategoryId: 'groceries' }),
@@ -786,6 +908,11 @@ describe('SQLite finance repository integration', () => {
           { accountId: everyday.id, amountMinor: 20000, categoryId: 'income', subcategoryId: 'bonus' },
         ],
       });
+      let snapshot = await repository.getSnapshot();
+      const originalExpenseGroceries = getLineBySubcategory(snapshot, expense.id, 'groceries');
+      const originalExpenseRent = getLineBySubcategory(snapshot, expense.id, 'rent');
+      const originalIncomeSalary = getLineBySubcategory(snapshot, income.id, 'salary');
+      const originalIncomeBonus = getLineBySubcategory(snapshot, income.id, 'bonus');
 
       await repository.updateTransaction({
         id: expense.id,
@@ -793,9 +920,33 @@ describe('SQLite finance repository integration', () => {
         title: 'Updated split expense',
         datetime: '2026-05-18T12:00:00.000Z',
         lines: [
-          { accountId: everyday.id, amountMinor: -6000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
-          { accountId: everyday.id, amountMinor: -1000, currencyCode: 'AUD', categoryId: 'transport', subcategoryId: 'fuel' },
-          { accountId: everyday.id, amountMinor: -1000, currencyCode: 'AUD', categoryId: 'health', subcategoryId: 'doctor' },
+          {
+            id: originalExpenseGroceries.id,
+            accountId: everyday.id,
+            amountMinor: -6000,
+            currencyCode: 'AUD',
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: 'Updated food',
+          },
+          {
+            id: originalExpenseRent.id,
+            accountId: everyday.id,
+            amountMinor: -1000,
+            currencyCode: 'AUD',
+            categoryId: 'transport',
+            subcategoryId: 'fuel',
+            note: 'Changed category',
+          },
+          {
+            id: 'temporary-new-expense-line',
+            accountId: everyday.id,
+            amountMinor: -1000,
+            currencyCode: 'AUD',
+            categoryId: 'health',
+            subcategoryId: 'doctor',
+            note: 'New line',
+          },
         ],
       });
       await repository.updateTransaction({
@@ -804,13 +955,52 @@ describe('SQLite finance repository integration', () => {
         title: 'Updated split income',
         datetime: '2026-05-18T13:00:00.000Z',
         lines: [
-          { accountId: everyday.id, amountMinor: 120000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
-          { accountId: everyday.id, amountMinor: 20000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'bonus' },
-          { accountId: everyday.id, amountMinor: 10000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'freelance' },
+          {
+            id: originalIncomeSalary.id,
+            accountId: everyday.id,
+            amountMinor: 120000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Updated salary',
+          },
+          {
+            id: originalIncomeBonus.id,
+            accountId: everyday.id,
+            amountMinor: 20000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'bonus',
+            note: 'Still bonus',
+          },
+          {
+            id: 'temporary-new-income-line',
+            accountId: everyday.id,
+            amountMinor: 10000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'freelance',
+            note: 'New income line',
+          },
         ],
       });
 
-      let snapshot = await repository.getSnapshot();
+      snapshot = await repository.getSnapshot();
+      const updatedExpenseGroceries = getLineBySubcategory(snapshot, expense.id, 'groceries');
+      const updatedExpenseFuel = getLineBySubcategory(snapshot, expense.id, 'fuel');
+      const updatedExpenseDoctor = getLineBySubcategory(snapshot, expense.id, 'doctor');
+      const updatedIncomeSalary = getLineBySubcategory(snapshot, income.id, 'salary');
+      const updatedIncomeBonus = getLineBySubcategory(snapshot, income.id, 'bonus');
+      const updatedIncomeFreelance = getLineBySubcategory(snapshot, income.id, 'freelance');
+
+      expect(updatedExpenseGroceries).toEqual(expect.objectContaining({ id: originalExpenseGroceries.id, note: 'Updated food' }));
+      expect(updatedExpenseFuel).toEqual(expect.objectContaining({ id: originalExpenseRent.id, note: 'Changed category' }));
+      expect([originalExpenseGroceries.id, originalExpenseRent.id]).not.toContain(updatedExpenseDoctor.id);
+      expect(updatedExpenseDoctor.id).not.toBe('temporary-new-expense-line');
+      expect(updatedIncomeSalary).toEqual(expect.objectContaining({ id: originalIncomeSalary.id, note: 'Updated salary' }));
+      expect(updatedIncomeBonus).toEqual(expect.objectContaining({ id: originalIncomeBonus.id, note: 'Still bonus' }));
+      expect([originalIncomeSalary.id, originalIncomeBonus.id]).not.toContain(updatedIncomeFreelance.id);
+      expect(updatedIncomeFreelance.id).not.toBe('temporary-new-income-line');
       expect(getLinesForTransaction(snapshot, expense.id)).toHaveLength(3);
       expect(getLinesForTransaction(snapshot, income.id)).toHaveLength(3);
       expect(await getStoredTransactionLineCount(db, expense.id)).toBe(3);
@@ -822,7 +1012,14 @@ describe('SQLite finance repository integration', () => {
         title: 'Reduced expense',
         datetime: '2026-05-18T14:00:00.000Z',
         lines: [
-          { accountId: everyday.id, amountMinor: -8000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+          {
+            id: updatedExpenseDoctor.id,
+            accountId: everyday.id,
+            amountMinor: -8000,
+            currencyCode: 'AUD',
+            categoryId: 'health',
+            subcategoryId: 'doctor',
+          },
         ],
       });
       await repository.updateTransaction({
@@ -831,17 +1028,28 @@ describe('SQLite finance repository integration', () => {
         title: 'Reduced income',
         datetime: '2026-05-18T15:00:00.000Z',
         lines: [
-          { accountId: everyday.id, amountMinor: 150000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+          {
+            id: updatedIncomeFreelance.id,
+            accountId: everyday.id,
+            amountMinor: 150000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'freelance',
+          },
         ],
       });
 
       snapshot = await repository.getSnapshot();
       expect(getLinesForTransaction(snapshot, expense.id)).toEqual([
-        expect.objectContaining({ amountMinor: -8000, categoryId: 'food', subcategoryId: 'groceries' }),
+        expect.objectContaining({ id: updatedExpenseDoctor.id, amountMinor: -8000, categoryId: 'health', subcategoryId: 'doctor' }),
       ]);
       expect(getLinesForTransaction(snapshot, income.id)).toEqual([
-        expect.objectContaining({ amountMinor: 150000, categoryId: 'income', subcategoryId: 'salary' }),
+        expect.objectContaining({ id: updatedIncomeFreelance.id, amountMinor: 150000, categoryId: 'income', subcategoryId: 'freelance' }),
       ]);
+      expect(snapshot.transactionLines.some((line) => line.id === updatedExpenseGroceries.id)).toBe(false);
+      expect(snapshot.transactionLines.some((line) => line.id === updatedExpenseFuel.id)).toBe(false);
+      expect(snapshot.transactionLines.some((line) => line.id === updatedIncomeSalary.id)).toBe(false);
+      expect(snapshot.transactionLines.some((line) => line.id === updatedIncomeBonus.id)).toBe(false);
       expect(await getStoredTransactionLineCount(db, expense.id)).toBe(1);
       expect(await getStoredTransactionLineCount(db, income.id)).toBe(1);
       expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(142000);
@@ -867,9 +1075,14 @@ describe('SQLite finance repository integration', () => {
           { accountId: everyday.id, amountMinor: 20000, categoryId: 'income', subcategoryId: 'bonus' },
         ],
       });
+      let snapshot = await repository.getSnapshot();
+      const deletedLineIds = [
+        ...getLinesForTransaction(snapshot, expense.id),
+        ...getLinesForTransaction(snapshot, income.id),
+      ].map((line) => line.id);
 
       await repository.deleteTransaction(expense.id);
-      let snapshot = await repository.getSnapshot();
+      snapshot = await repository.getSnapshot();
       expect(snapshot.transactions.some((transaction) => transaction.id === expense.id)).toBe(false);
       expect(getLinesForTransaction(snapshot, expense.id)).toEqual([]);
       expect(await getStoredTransactionLineCount(db, expense.id)).toBe(0);
@@ -880,6 +1093,9 @@ describe('SQLite finance repository integration', () => {
       expect(snapshot.transactions.some((transaction) => transaction.id === income.id)).toBe(false);
       expect(getLinesForTransaction(snapshot, income.id)).toEqual([]);
       expect(await getStoredTransactionLineCount(db, income.id)).toBe(0);
+      for (const lineId of deletedLineIds) {
+        expect(snapshot.transactionLines.some((line) => line.id === lineId)).toBe(false);
+      }
       expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(0);
     });
   });

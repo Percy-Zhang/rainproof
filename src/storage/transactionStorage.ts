@@ -3,8 +3,15 @@ import { validateSplitTransactionLines } from '../domain/splitTransactions';
 import type { NewTransactionInput, TransactionKind, UpdateTransactionInput } from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
-import type { TableColumnRow, TransactionRow } from './mappers';
+import type { TableColumnRow, TransactionLineRow, TransactionRow } from './mappers';
 import { removeTransactionLinksForTransactionStorage } from './transactionLinkStorage';
+
+type TransactionLineInput = NewTransactionInput['lines'][number];
+
+type TransactionLinePersistencePlan = {
+  existingLineId?: string;
+  line: TransactionLineInput;
+};
 
 export async function addTransactionStorage(
   db: RepositoryDatabase,
@@ -75,26 +82,25 @@ export async function updateTransactionStorage(
       input.id,
     );
 
-    await db.runAsync('DELETE FROM transaction_lines WHERE transaction_id = ?', input.id);
+    const existingLines = await db.getAllAsync<TransactionLineRow>(
+      'SELECT * FROM transaction_lines WHERE transaction_id = ? ORDER BY created_at ASC, id ASC',
+      input.id,
+    );
+    const plans = getTransactionLinePersistencePlans(input.lines, existingLines);
+    const keptLineIds = new Set(plans.flatMap((plan) => (plan.existingLineId ? [plan.existingLineId] : [])));
 
-    for (const line of input.lines) {
-      await db.runAsync(
-        `INSERT INTO transaction_lines (
-          id, transaction_id, account_id, amount_minor, currency_code, category_id,
-          subcategory_id, external_party, transfer_peer_account_id, note, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        createLocalId('line'),
-        input.id,
-        line.accountId,
-        line.amountMinor,
-        normalizeCurrencyCode(line.currencyCode),
-        line.categoryId ?? '',
-        line.subcategoryId ?? '',
-        line.externalParty?.trim() ?? '',
-        line.transferPeerAccountId ?? '',
-        line.note?.trim() ?? '',
-        now,
-      );
+    for (const existingLine of existingLines) {
+      if (!keptLineIds.has(existingLine.id)) {
+        await db.runAsync('DELETE FROM transaction_lines WHERE id = ? AND transaction_id = ?', existingLine.id, input.id);
+      }
+    }
+
+    for (const plan of plans) {
+      if (plan.existingLineId) {
+        await updateTransactionLineStorage(db, plan.existingLineId, input.id, plan.line);
+      } else {
+        await insertTransactionLineStorage(db, input.id, plan.line, now);
+      }
     }
   });
 }
@@ -160,9 +166,84 @@ function fallbackTransactionTitle(kind: TransactionKind): string {
   return 'Expense';
 }
 
+async function insertTransactionLineStorage(
+  db: RepositoryDatabase,
+  transactionId: string,
+  line: TransactionLineInput,
+  createdAt: string,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO transaction_lines (
+      id, transaction_id, account_id, amount_minor, currency_code, category_id,
+      subcategory_id, external_party, transfer_peer_account_id, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    createLocalId('line'),
+    transactionId,
+    line.accountId,
+    line.amountMinor,
+    normalizeCurrencyCode(line.currencyCode),
+    line.categoryId ?? '',
+    line.subcategoryId ?? '',
+    line.externalParty?.trim() ?? '',
+    line.transferPeerAccountId ?? '',
+    line.note?.trim() ?? '',
+    createdAt,
+  );
+}
+
+async function updateTransactionLineStorage(
+  db: RepositoryDatabase,
+  lineId: string,
+  transactionId: string,
+  line: TransactionLineInput,
+): Promise<void> {
+  await db.runAsync(
+    `UPDATE transaction_lines
+     SET account_id = ?, amount_minor = ?, currency_code = ?, category_id = ?,
+         subcategory_id = ?, external_party = ?, transfer_peer_account_id = ?, note = ?
+     WHERE id = ? AND transaction_id = ?`,
+    line.accountId,
+    line.amountMinor,
+    normalizeCurrencyCode(line.currencyCode),
+    line.categoryId ?? '',
+    line.subcategoryId ?? '',
+    line.externalParty?.trim() ?? '',
+    line.transferPeerAccountId ?? '',
+    line.note?.trim() ?? '',
+    lineId,
+    transactionId,
+  );
+}
+
+function getTransactionLinePersistencePlans(
+  lines: TransactionLineInput[],
+  existingLines: TransactionLineRow[],
+): TransactionLinePersistencePlan[] {
+  const existingLineIds = new Set(existingLines.map((line) => line.id));
+  const usedExistingLineIds = new Set<string>();
+  const plans: TransactionLinePersistencePlan[] = lines.map((line) => ({ line }));
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const requestedLineId = lines[index].id?.trim() ?? '';
+    if (requestedLineId && existingLineIds.has(requestedLineId) && !usedExistingLineIds.has(requestedLineId)) {
+      plans[index].existingLineId = requestedLineId;
+      usedExistingLineIds.add(requestedLineId);
+    }
+  }
+
+  if (usedExistingLineIds.size > 0) {
+    return plans;
+  }
+
+  return plans.map((plan, index) => ({
+    ...plan,
+    existingLineId: existingLines[index]?.id,
+  }));
+}
+
 function validateTransactionLinesForStorage(
   kind: TransactionKind,
-  lines: NewTransactionInput['lines'],
+  lines: TransactionLineInput[],
 ): void {
   if (!lines.length) {
     throw new Error('Add at least one transaction line.');

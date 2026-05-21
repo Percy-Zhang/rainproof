@@ -229,6 +229,7 @@ export type NewTransactionInput = {
   labels?: string[];
   groupId?: string;
   lines: {
+    id?: string;
     accountId: string;
     amountMinor: number;
     currencyCode: CurrencyCode;
