@@ -1,5 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import type { ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, FormError } from '../../components/ui';
 import {
@@ -30,6 +33,65 @@ type SplitTransactionEditorProps = {
   onRemoveLine: (lineId: string) => void;
   onUpdateLine: (lineId: string, patch: Partial<SplitTransactionFormLine>) => void;
 };
+
+type SplitTransactionEditorScrollContainerProps = {
+  children: ReactNode;
+  testID?: string;
+};
+
+export function SplitTransactionEditorScrollContainer({
+  children,
+  testID,
+}: SplitTransactionEditorScrollContainerProps) {
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+  const keyboardBottomPadding = Math.max(0, keyboardHeight - insets.bottom);
+
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={spacing.xl}
+      style={styles.keyboardPane}
+    >
+      <ScrollView
+        contentContainerStyle={[
+          styles.keyboardScrollContent,
+          { paddingBottom: insets.bottom + keyboardBottomPadding + spacing.xxl },
+        ]}
+        keyboardDismissMode="none"
+        keyboardShouldPersistTaps="always"
+        nestedScrollEnabled
+        showsVerticalScrollIndicator={false}
+        style={styles.keyboardScroll}
+        testID={testID}
+      >
+        {children}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+function useKeyboardHeight(): number {
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  return keyboardHeight;
+}
 
 export function SplitTransactionEditor({
   categories,
@@ -137,6 +199,16 @@ function SummaryCell({
 }
 
 const styles = StyleSheet.create({
+  keyboardPane: {
+    flex: 1,
+  },
+  keyboardScroll: {
+    flex: 1,
+  },
+  keyboardScrollContent: {
+    flexGrow: 1,
+    gap: spacing.sm,
+  },
   stack: {
     gap: spacing.sm,
   },

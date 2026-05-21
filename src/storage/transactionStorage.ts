@@ -1,4 +1,5 @@
 import { normalizeCurrencyCode } from '../domain/money';
+import { validateSplitTransactionLines } from '../domain/splitTransactions';
 import type { NewTransactionInput, TransactionKind, UpdateTransactionInput } from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
@@ -9,9 +10,7 @@ export async function addTransactionStorage(
   db: RepositoryDatabase,
   input: NewTransactionInput,
 ): Promise<void> {
-  if (!input.lines.length) {
-    throw new Error('Add at least one transaction line.');
-  }
+  validateTransactionLinesForStorage(input.kind, input.lines);
 
   const now = new Date().toISOString();
   const transactionId = createLocalId('txn');
@@ -58,9 +57,7 @@ export async function updateTransactionStorage(
   db: RepositoryDatabase,
   input: UpdateTransactionInput,
 ): Promise<void> {
-  if (!input.lines.length) {
-    throw new Error('Add at least one transaction line.');
-  }
+  validateTransactionLinesForStorage(input.kind, input.lines);
 
   const now = new Date().toISOString();
   await db.withTransactionAsync(async () => {
@@ -161,4 +158,39 @@ function fallbackTransactionTitle(kind: TransactionKind): string {
   }
 
   return 'Expense';
+}
+
+function validateTransactionLinesForStorage(
+  kind: TransactionKind,
+  lines: NewTransactionInput['lines'],
+): void {
+  if (!lines.length) {
+    throw new Error('Add at least one transaction line.');
+  }
+
+  if (kind === 'transfer') {
+    if (lines.length > 2) {
+      throw new Error('Transfers cannot be split.');
+    }
+
+    if (lines.some((line) => line.categoryId?.trim() || line.subcategoryId?.trim())) {
+      throw new Error('Transfers cannot use categories.');
+    }
+
+    return;
+  }
+
+  if (lines.length > 1) {
+    validateSplitTransactionLines({
+      kind,
+      lines: lines.map((line) => ({
+        accountId: line.accountId,
+        amountMinor: line.amountMinor,
+        currencyCode: line.currencyCode,
+        categoryId: line.categoryId ?? '',
+        subcategoryId: line.subcategoryId ?? '',
+        note: line.note,
+      })),
+    });
+  }
 }

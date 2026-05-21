@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 
-import { getAccountBalances, getCashFlowSummary, getRainyDayProgress, getSpendingByCategory } from '../../domain/aggregates';
+import {
+  getAccountBalances,
+  getCashFlowSummary,
+  getRainyDayProgress,
+  getSpendingByCategory,
+  getTransactionDisplayEntries,
+} from '../../domain/aggregates';
 import type {
   Account,
   AppSnapshot,
@@ -181,9 +187,12 @@ async function addTransaction(
     lines: {
       accountId: string;
       amountMinor: number;
+      currencyCode?: string;
       transferPeerAccountId?: string;
       categoryId?: string;
       subcategoryId?: string;
+      externalParty?: string;
+      note?: string;
     }[];
   },
 ): Promise<Transaction> {
@@ -193,7 +202,7 @@ async function addTransaction(
     datetime: `2026-05-18T0${Math.min(input.title.length, 9)}:00:00.000Z`,
     lines: input.lines.map((line) => ({
       ...line,
-      currencyCode: 'AUD',
+      currencyCode: line.currencyCode ?? 'AUD',
     })),
   });
 
@@ -222,6 +231,21 @@ function getLineForTransaction(snapshot: AppSnapshot, transactionId: string): Tr
     throw new Error(`Missing line for transaction ${transactionId}`);
   }
   return line;
+}
+
+function getLinesForTransaction(snapshot: AppSnapshot, transactionId: string): TransactionLine[] {
+  return snapshot.transactionLines.filter((item) => item.transactionId === transactionId);
+}
+
+async function getStoredTransactionLineCount(
+  db: NodeSQLiteRepositoryDatabase,
+  transactionId: string,
+): Promise<number> {
+  const row = await db.getFirstAsync<{ count: number }>(
+    'SELECT COUNT(*) as count FROM transaction_lines WHERE transaction_id = ?',
+    transactionId,
+  );
+  return row?.count ?? 0;
 }
 
 function getBalanceByAccountId(snapshot: AppSnapshot): Record<string, number> {
@@ -519,6 +543,462 @@ describe('SQLite finance repository integration', () => {
       snapshot = await repository.getSnapshot();
       expect(snapshot.transactions.some((transaction) => transaction.id === income.id)).toBe(false);
       expect(snapshot.transactionLines.some((line) => line.transactionId === income.id)).toBe(false);
+    });
+  });
+
+  it('persists a split expense as one parent transaction with multiple lines', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });
+
+      const splitExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Split shop',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: -5000,
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: 'Weekly food shop',
+          },
+          {
+            accountId: everyday.id,
+            amountMinor: -3000,
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+            note: 'Rent share',
+          },
+        ],
+      });
+
+      const snapshot = await repository.getSnapshot();
+      const lines = getLinesForTransaction(snapshot, splitExpense.id);
+      const entries = getTransactionDisplayEntries({
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        currencyCode: 'AUD',
+      }).filter((entry) => entry.transaction.id === splitExpense.id);
+
+      expect(snapshot.transactions.filter((transaction) => transaction.id === splitExpense.id)).toHaveLength(1);
+      expect(lines).toHaveLength(2);
+      expect(new Set(lines.map((line) => line.accountId))).toEqual(new Set([everyday.id]));
+      expect(new Set(lines.map((line) => line.currencyCode))).toEqual(new Set(['AUD']));
+      expect(lines).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            amountMinor: -5000,
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: 'Weekly food shop',
+          }),
+          expect.objectContaining({
+            amountMinor: -3000,
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+            note: 'Rent share',
+          }),
+        ]),
+      );
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(2000);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toEqual(expect.objectContaining({ amountMinor: -8000 }));
+      expect(entries[0].lines).toHaveLength(2);
+      expect(
+        getSpendingByCategory({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'AUD',
+        }),
+      ).toEqual([
+        { categoryId: 'food', currencyCode: 'AUD', amountMinor: 5000 },
+        { categoryId: 'housing', currencyCode: 'AUD', amountMinor: 3000 },
+      ]);
+    });
+  });
+
+  it('persists a split income as one parent transaction with multiple lines', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });
+
+      const splitIncome = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Apple Pay',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: 130000,
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Base pay',
+          },
+          {
+            accountId: everyday.id,
+            amountMinor: 20000,
+            categoryId: 'income',
+            subcategoryId: 'bonus',
+            note: 'Quarterly bonus',
+          },
+        ],
+      });
+
+      const snapshot = await repository.getSnapshot();
+      const lines = getLinesForTransaction(snapshot, splitIncome.id);
+      const entries = getTransactionDisplayEntries({
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        currencyCode: 'AUD',
+      }).filter((entry) => entry.transaction.id === splitIncome.id);
+
+      expect(snapshot.transactions.filter((transaction) => transaction.id === splitIncome.id)).toHaveLength(1);
+      expect(lines).toHaveLength(2);
+      expect(new Set(lines.map((line) => line.accountId))).toEqual(new Set([everyday.id]));
+      expect(new Set(lines.map((line) => line.currencyCode))).toEqual(new Set(['AUD']));
+      expect(lines).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            amountMinor: 130000,
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Base pay',
+          }),
+          expect.objectContaining({
+            amountMinor: 20000,
+            categoryId: 'income',
+            subcategoryId: 'bonus',
+            note: 'Quarterly bonus',
+          }),
+        ]),
+      );
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(160000);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toEqual(expect.objectContaining({ amountMinor: 150000 }));
+      expect(entries[0].lines).toHaveLength(2);
+      expect(
+        getCashFlowSummary({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'AUD',
+        }).incomeMinor,
+      ).toBe(150000);
+    });
+  });
+
+  it('edits one-line income and expense transactions into splits without orphaning old lines', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'One-line expense',
+        lines: [{ accountId: everyday.id, amountMinor: -8000, categoryId: 'other', subcategoryId: 'miscellaneous' }],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'One-line income',
+        lines: [{ accountId: everyday.id, amountMinor: 150000, categoryId: 'income', subcategoryId: 'salary' }],
+      });
+
+      await repository.updateTransaction({
+        id: expense.id,
+        kind: 'expense',
+        title: 'Split expense',
+        datetime: '2026-05-18T12:00:00.000Z',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: -5000,
+            currencyCode: 'AUD',
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: 'Food',
+          },
+          {
+            accountId: everyday.id,
+            amountMinor: -3000,
+            currencyCode: 'AUD',
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+            note: 'Rent',
+          },
+        ],
+      });
+      await repository.updateTransaction({
+        id: income.id,
+        kind: 'income',
+        title: 'Split income',
+        datetime: '2026-05-18T13:00:00.000Z',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: 130000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Base pay',
+          },
+          {
+            accountId: everyday.id,
+            amountMinor: 20000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'bonus',
+            note: 'Bonus',
+          },
+        ],
+      });
+
+      const snapshot = await repository.getSnapshot();
+      expect(getLinesForTransaction(snapshot, expense.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amountMinor: -5000, categoryId: 'food', subcategoryId: 'groceries' }),
+          expect.objectContaining({ amountMinor: -3000, categoryId: 'housing', subcategoryId: 'rent' }),
+        ]),
+      );
+      expect(getLinesForTransaction(snapshot, income.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amountMinor: 130000, categoryId: 'income', subcategoryId: 'salary' }),
+          expect.objectContaining({ amountMinor: 20000, categoryId: 'income', subcategoryId: 'bonus' }),
+        ]),
+      );
+      expect(await getStoredTransactionLineCount(db, expense.id)).toBe(2);
+      expect(await getStoredTransactionLineCount(db, income.id)).toBe(2);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(142000);
+    });
+  });
+
+  it('edits existing split transactions and reduces them back to one line', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Split expense',
+        lines: [
+          { accountId: everyday.id, amountMinor: -5000, categoryId: 'food', subcategoryId: 'groceries' },
+          { accountId: everyday.id, amountMinor: -3000, categoryId: 'housing', subcategoryId: 'rent' },
+        ],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Split income',
+        lines: [
+          { accountId: everyday.id, amountMinor: 130000, categoryId: 'income', subcategoryId: 'salary' },
+          { accountId: everyday.id, amountMinor: 20000, categoryId: 'income', subcategoryId: 'bonus' },
+        ],
+      });
+
+      await repository.updateTransaction({
+        id: expense.id,
+        kind: 'expense',
+        title: 'Updated split expense',
+        datetime: '2026-05-18T12:00:00.000Z',
+        lines: [
+          { accountId: everyday.id, amountMinor: -6000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+          { accountId: everyday.id, amountMinor: -1000, currencyCode: 'AUD', categoryId: 'transport', subcategoryId: 'fuel' },
+          { accountId: everyday.id, amountMinor: -1000, currencyCode: 'AUD', categoryId: 'health', subcategoryId: 'doctor' },
+        ],
+      });
+      await repository.updateTransaction({
+        id: income.id,
+        kind: 'income',
+        title: 'Updated split income',
+        datetime: '2026-05-18T13:00:00.000Z',
+        lines: [
+          { accountId: everyday.id, amountMinor: 120000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+          { accountId: everyday.id, amountMinor: 20000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'bonus' },
+          { accountId: everyday.id, amountMinor: 10000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'freelance' },
+        ],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      expect(getLinesForTransaction(snapshot, expense.id)).toHaveLength(3);
+      expect(getLinesForTransaction(snapshot, income.id)).toHaveLength(3);
+      expect(await getStoredTransactionLineCount(db, expense.id)).toBe(3);
+      expect(await getStoredTransactionLineCount(db, income.id)).toBe(3);
+
+      await repository.updateTransaction({
+        id: expense.id,
+        kind: 'expense',
+        title: 'Reduced expense',
+        datetime: '2026-05-18T14:00:00.000Z',
+        lines: [
+          { accountId: everyday.id, amountMinor: -8000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+        ],
+      });
+      await repository.updateTransaction({
+        id: income.id,
+        kind: 'income',
+        title: 'Reduced income',
+        datetime: '2026-05-18T15:00:00.000Z',
+        lines: [
+          { accountId: everyday.id, amountMinor: 150000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+        ],
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(getLinesForTransaction(snapshot, expense.id)).toEqual([
+        expect.objectContaining({ amountMinor: -8000, categoryId: 'food', subcategoryId: 'groceries' }),
+      ]);
+      expect(getLinesForTransaction(snapshot, income.id)).toEqual([
+        expect.objectContaining({ amountMinor: 150000, categoryId: 'income', subcategoryId: 'salary' }),
+      ]);
+      expect(await getStoredTransactionLineCount(db, expense.id)).toBe(1);
+      expect(await getStoredTransactionLineCount(db, income.id)).toBe(1);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(142000);
+    });
+  });
+
+  it('deletes split transactions with all lines and updates balances', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Split expense',
+        lines: [
+          { accountId: everyday.id, amountMinor: -5000, categoryId: 'food', subcategoryId: 'groceries' },
+          { accountId: everyday.id, amountMinor: -3000, categoryId: 'housing', subcategoryId: 'rent' },
+        ],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Split income',
+        lines: [
+          { accountId: everyday.id, amountMinor: 130000, categoryId: 'income', subcategoryId: 'salary' },
+          { accountId: everyday.id, amountMinor: 20000, categoryId: 'income', subcategoryId: 'bonus' },
+        ],
+      });
+
+      await repository.deleteTransaction(expense.id);
+      let snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.some((transaction) => transaction.id === expense.id)).toBe(false);
+      expect(getLinesForTransaction(snapshot, expense.id)).toEqual([]);
+      expect(await getStoredTransactionLineCount(db, expense.id)).toBe(0);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(150000);
+
+      await repository.deleteTransaction(income.id);
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.some((transaction) => transaction.id === income.id)).toBe(false);
+      expect(getLinesForTransaction(snapshot, income.id)).toEqual([]);
+      expect(await getStoredTransactionLineCount(db, income.id)).toBe(0);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(0);
+    });
+  });
+
+  it('keeps transfer persistence unsplit, uncategorized, and excluded from core stats', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });
+      const savings = await addAccount(repository, { name: 'Savings', type: 'savings', openingBalanceMinor: 5000 });
+      const transfer = await addTransaction(repository, {
+        kind: 'transfer',
+        title: 'Move to savings',
+        lines: [
+          { accountId: everyday.id, amountMinor: -5000, transferPeerAccountId: savings.id },
+          { accountId: savings.id, amountMinor: 5000, transferPeerAccountId: everyday.id },
+        ],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      expect(getLinesForTransaction(snapshot, transfer.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amountMinor: -5000, categoryId: '', subcategoryId: '' }),
+          expect.objectContaining({ amountMinor: 5000, categoryId: '', subcategoryId: '' }),
+        ]),
+      );
+      expect(
+        getCashFlowSummary({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'AUD',
+        }),
+      ).toEqual({ currencyCode: 'AUD', incomeMinor: 0, expenseMinor: 0, netMinor: 0 });
+
+      await expect(
+        repository.addTransaction({
+          kind: 'transfer',
+          title: 'Invalid split transfer',
+          datetime: '2026-05-18T12:00:00.000Z',
+          lines: [
+            { accountId: everyday.id, amountMinor: -5000, currencyCode: 'AUD', transferPeerAccountId: savings.id },
+            { accountId: savings.id, amountMinor: 3000, currencyCode: 'AUD', transferPeerAccountId: everyday.id },
+            { accountId: savings.id, amountMinor: 2000, currencyCode: 'AUD', transferPeerAccountId: everyday.id },
+          ],
+        }),
+      ).rejects.toThrow('Transfers cannot be split.');
+      await expect(
+        repository.updateTransaction({
+          id: transfer.id,
+          kind: 'transfer',
+          title: 'Categorized transfer',
+          datetime: '2026-05-18T13:00:00.000Z',
+          lines: [
+            {
+              accountId: everyday.id,
+              amountMinor: -5000,
+              currencyCode: 'AUD',
+              transferPeerAccountId: savings.id,
+              categoryId: 'food',
+              subcategoryId: 'groceries',
+            },
+            { accountId: savings.id, amountMinor: 5000, currencyCode: 'AUD', transferPeerAccountId: everyday.id },
+          ],
+        }),
+      ).rejects.toThrow('Transfers cannot use categories.');
+
+      snapshot = await repository.getSnapshot();
+      expect(getLinesForTransaction(snapshot, transfer.id)).toHaveLength(2);
+    });
+  });
+
+  it('nets linked reimbursements proportionally against persisted split expenses', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Shared groceries',
+        lines: [
+          { accountId: everyday.id, amountMinor: -8000, categoryId: 'food', subcategoryId: 'groceries' },
+          { accountId: everyday.id, amountMinor: -2000, categoryId: 'housing', subcategoryId: 'rent' },
+        ],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Alex paid back',
+        lines: [{ accountId: everyday.id, amountMinor: 5000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const beforeBalances = getBalanceByAccountId(await repository.getSnapshot());
+
+      await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'reimbursement',
+        amountMinor: 5000,
+        currencyCode: 'AUD',
+      });
+
+      const snapshot = await repository.getSnapshot();
+      expect(getBalanceByAccountId(snapshot)).toEqual(beforeBalances);
+      expect(
+        getSpendingByCategory({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'AUD',
+        }),
+      ).toEqual([
+        { categoryId: 'food', currencyCode: 'AUD', amountMinor: 4000 },
+        { categoryId: 'housing', currencyCode: 'AUD', amountMinor: 1000 },
+      ]);
+      expect(
+        getCashFlowSummary({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'AUD',
+        }),
+      ).toEqual({ currencyCode: 'AUD', incomeMinor: 0, expenseMinor: 5000, netMinor: -5000 });
     });
   });
 

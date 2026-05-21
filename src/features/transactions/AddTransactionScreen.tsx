@@ -62,7 +62,7 @@ import {
 } from './TransactionFormComponents';
 import { TransactionAmountCard } from './TransactionAmountCard';
 import { TransactionCalculator, type CalculatorKey } from './TransactionCalculator';
-import { SplitTransactionEditor } from './SplitTransactionEditor';
+import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from './SplitTransactionEditor';
 
 type AddTransactionScreenProps = {
   snapshot: AppSnapshot;
@@ -552,34 +552,23 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
           <TransactionCalculator onPressKey={pressCalculatorKey} />
         </View>
       ) : page === 'split' ? (
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={spacing.xl}
-          style={styles.keyboardPane}
-        >
-          <ScrollView
-            contentContainerStyle={styles.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
-            testID="add-transaction-split-page"
-          >
-            <Text style={styles.detailsTitle}>Split {kind}</Text>
-            <SplitTransactionEditor
-              categories={categories}
-              currencyCode={fromAccount?.currencyCode ?? amountCurrencyCode}
-              lines={splitLines}
-              showCurrencyCodes={showCurrencyCodes}
-              totalMinor={splitTotalMinor}
-              onAddLine={addSplitLine}
-              onPickCategory={(lineId) => {
-                setSplitCategoryLineId(lineId);
-                setPickerMode('category');
-              }}
-              onRemoveLine={removeSplitLine}
-              onUpdateLine={updateSplitLine}
-            />
-          </ScrollView>
-        </KeyboardAvoidingView>
+        <SplitTransactionEditorScrollContainer testID="add-transaction-split-page">
+          <Text style={styles.detailsTitle}>Split {kind}</Text>
+          <SplitTransactionEditor
+            categories={categories}
+            currencyCode={fromAccount?.currencyCode ?? amountCurrencyCode}
+            lines={splitLines}
+            showCurrencyCodes={showCurrencyCodes}
+            totalMinor={splitTotalMinor}
+            onAddLine={addSplitLine}
+            onPickCategory={(lineId) => {
+              setSplitCategoryLineId(lineId);
+              setPickerMode('category');
+            }}
+            onRemoveLine={removeSplitLine}
+            onUpdateLine={updateSplitLine}
+          />
+        </SplitTransactionEditorScrollContainer>
       ) : (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}

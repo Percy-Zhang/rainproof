@@ -62,7 +62,7 @@ import {
   type TransactionPickerMode,
 } from './TransactionFormComponents';
 import { DeleteTransactionPanel, TransactionLinkEntryRow } from './TransactionEditActions';
-import { SplitTransactionEditor } from './SplitTransactionEditor';
+import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from './SplitTransactionEditor';
 
 type EditPage = 'form' | 'split';
 
@@ -477,7 +477,24 @@ export function EditTransactionScreen({
         </View>
       </View>
 
-      {draft ? (
+      {draft && page === 'split' ? (
+        <SplitTransactionEditorScrollContainer>
+          <SplitTransactionEditor
+            categories={categories}
+            currencyCode={amountCurrencyCode}
+            lines={getEditableSplitLines(draft)}
+            showCurrencyCodes={showCurrencyCodes}
+            totalMinor={getDraftExpenseTotalMinor(draft)}
+            onAddLine={addSplitLine}
+            onPickCategory={(lineId) => {
+              setSplitCategoryLineId(lineId);
+              setPickerMode('category');
+            }}
+            onRemoveLine={removeSplitLine}
+            onUpdateLine={updateSplitLine}
+          />
+        </SplitTransactionEditorScrollContainer>
+      ) : draft ? (
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={spacing.xl}
@@ -488,24 +505,8 @@ export function EditTransactionScreen({
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {page === 'split' ? (
-              <SplitTransactionEditor
-                categories={categories}
-                currencyCode={amountCurrencyCode}
-                lines={getEditableSplitLines(draft)}
-                showCurrencyCodes={showCurrencyCodes}
-                totalMinor={getDraftExpenseTotalMinor(draft)}
-                onAddLine={addSplitLine}
-                onPickCategory={(lineId) => {
-                  setSplitCategoryLineId(lineId);
-                  setPickerMode('category');
-                }}
-                onRemoveLine={removeSplitLine}
-                onUpdateLine={updateSplitLine}
-              />
-            ) : (
-              <>
-                <TransactionTypeTabs kind={draft.kind} onChange={changeKind} />
+            <>
+              <TransactionTypeTabs kind={draft.kind} onChange={changeKind} />
 
                 <AutocompleteField
                   label="Item"
@@ -633,8 +634,7 @@ export function EditTransactionScreen({
               onCancel={() => setConfirmDelete(false)}
               onDelete={deleteCurrentTransaction}
             />
-              </>
-            )}
+            </>
           </ScrollView>
         </KeyboardAvoidingView>
       ) : transactionExists ? (
