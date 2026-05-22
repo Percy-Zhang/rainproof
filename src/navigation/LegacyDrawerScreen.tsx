@@ -113,7 +113,11 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           />
         </DashboardScrollScaffold>
       ) : rootScreen === 'stats' ? (
-        <StatsScreen snapshot={snapshot} showHeader={false} />
+        <StatsScreen
+          snapshot={snapshot}
+          onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
+          showHeader={false}
+        />
       ) : rootScreen === 'transactions' ? (
         <TransactionsScreen
           snapshot={snapshot}

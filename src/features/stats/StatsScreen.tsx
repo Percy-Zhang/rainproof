@@ -12,15 +12,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AccountFilterCarousel } from '../../components/AccountFilterCarousel';
 import { BottomSelectorPanel } from '../../components/BottomSelectorPanel';
-import { Card, Chip, ProgressBar, SectionHeader } from '../../components/ui';
+import { ActionButton, Card, Chip, SectionHeader } from '../../components/ui';
 import {
   getCashFlowSummary,
-  getSpendingByCategory,
 } from '../../domain/aggregates';
-import { defaultCategories, getCategory } from '../../domain/categories';
+import { defaultCategories } from '../../domain/categories';
 import { getCurrenciesInUse, getEffectiveDisplayCurrency } from '../../domain/currency';
 import { getDateRangeForPreset, getInclusiveDateRange, toDateInputValue } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
+import {
+  getStatsReport,
+  type StatsReportLineRow,
+} from '../../domain/statsReports';
+import { getStatsDonutViewModel, getStatsMatchRowDetailText, type StatsDonutMode } from '../../domain/statsChart';
+import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import type { Account, AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
@@ -28,16 +33,18 @@ import {
   type PeriodCarouselOption,
   type PeriodOption,
 } from '../transactions/PeriodCarousel';
+import { StatsDonutChart } from './StatsDonutChart';
 
 type StatsScreenProps = {
   snapshot: AppSnapshot;
+  onOpenTransaction?: (transactionId: string) => void;
   showHeader?: boolean;
 };
 
 type RangeMode = 'preset' | 'custom';
 type DatePickerTarget = 'start' | 'end';
 
-export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
+export function StatsScreen({ snapshot, onOpenTransaction, showHeader = true }: StatsScreenProps) {
   const insets = useSafeAreaInsets();
   const [preset, setPreset] = useState<PeriodOption>('last_month');
   const [rangeMode, setRangeMode] = useState<RangeMode>('preset');
@@ -57,6 +64,9 @@ export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
   );
   const [currencyCode, setCurrencyCode] = useState(effectiveDisplayCurrency);
   const [accountId, setAccountId] = useState('all');
+  const [spendingDonutMode, setSpendingDonutMode] = useState<StatsDonutMode>('category');
+  const [selectedSpendingCategoryRollupId, setSelectedSpendingCategoryRollupId] = useState('');
+  const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState('');
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
@@ -92,15 +102,39 @@ export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
         : getDateRangeForPreset(preset),
     [customEndDate, customStartDate, preset, rangeMode],
   );
-  const accountIds = effectiveAccountId === 'all' ? undefined : [effectiveAccountId];
-  const spending = getSpendingByCategory({
+  const accountIds = useMemo(
+    () => (effectiveAccountId === 'all' ? undefined : [effectiveAccountId]),
+    [effectiveAccountId],
+  );
+  const spendingReport = useMemo(() => getStatsReport({
+    reportKind: 'expense',
     transactions: snapshot.transactions,
-    lines: snapshot.transactionLines,
+    transactionLines: snapshot.transactionLines,
     transactionLinks: snapshot.transactionLinks,
+    accounts: snapshot.accounts,
+    categories,
     range,
     currencyCode,
     accountIds,
+  }), [
+    accountIds,
+    categories,
+    currencyCode,
+    range,
+    snapshot.accounts,
+    snapshot.transactionLines,
+    snapshot.transactionLinks,
+    snapshot.transactions,
+  ]);
+  const spendingDonut = getStatsDonutViewModel({
+    report: spendingReport,
+    mode: spendingDonutMode,
+    selectedCategoryRollupId: selectedSpendingCategoryRollupId,
+    selectedSubcategoryRollupId: selectedSpendingSubcategoryRollupId,
+    recentLimit: 5,
   });
+  const selectedSpendingRollup = spendingDonut.selectedRollup;
+  const selectedSpendingRows = spendingDonut.recentRows;
   const cashFlow = getCashFlowSummary({
     transactions: snapshot.transactions,
     lines: snapshot.transactionLines,
@@ -109,7 +143,6 @@ export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
     currencyCode,
     accountIds,
   });
-  const maxSpending = Math.max(...spending.map((item) => item.amountMinor), 1);
   const bottomPadding = (showCurrencyCodes ? 330 : rangeMode === 'custom' ? 280 : 230) + insets.bottom;
 
   function selectPeriodOption(option: PeriodCarouselOption) {
@@ -124,6 +157,30 @@ export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
   function changeCurrency(nextCurrencyCode: string) {
     setCurrencyCode(nextCurrencyCode);
     setAccountId('all');
+  }
+
+  function selectSpendingRollup(rollupId: string) {
+    if (spendingDonutMode === 'subcategory') {
+      setSelectedSpendingSubcategoryRollupId(rollupId);
+      return;
+    }
+
+    setSelectedSpendingCategoryRollupId(rollupId);
+  }
+
+  function openSpendingDetailedView() {
+    if (!spendingDonut.selectedCategoryRollup) {
+      return;
+    }
+
+    setSelectedSpendingCategoryRollupId(spendingDonut.selectedCategoryRollup.id);
+    setSelectedSpendingSubcategoryRollupId('');
+    setSpendingDonutMode('subcategory');
+  }
+
+  function returnToSpendingCategories() {
+    setSpendingDonutMode('category');
+    setSelectedSpendingSubcategoryRollupId('');
   }
 
   function handleDatePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
@@ -172,26 +229,64 @@ export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
         </Card>
 
         <Card testID="spending-chart-card">
-          <Text style={styles.cardTitle}>Spending by category</Text>
-          {spending.length ? (
-            spending.map((item) => {
-              const category = getCategory(item.categoryId, categories);
-              return (
-                <View key={item.categoryId} style={styles.chartRow}>
-                  <View style={styles.rowBetween}>
-                    <View style={styles.categoryTitleRow}>
-                      <View style={[styles.categoryDot, { backgroundColor: category.color }]} />
-                      <Text style={styles.categoryName}>{category.name}</Text>
-                    </View>
-                    <Text style={styles.amountText}>{formatMoney(item.amountMinor, currencyCode)}</Text>
-                  </View>
-                  <ProgressBar percentage={(item.amountMinor / maxSpending) * 100} color={category.color} />
+          <View style={styles.cardHeaderRow}>
+            <View style={styles.cardHeaderText}>
+              <Text style={styles.cardTitle}>Spending</Text>
+              {spendingDonutMode === 'subcategory' && spendingDonut.selectedCategoryRollup ? (
+                <Text numberOfLines={1} style={styles.cardSubtitle}>
+                  {spendingDonut.selectedCategoryRollup.label}
+                </Text>
+              ) : null}
+            </View>
+            {spendingDonutMode === 'subcategory' ? (
+              <ActionButton variant="ghost" onPress={returnToSpendingCategories}>
+                Back to categories
+              </ActionButton>
+            ) : (
+              <ActionButton
+                disabled={!spendingDonut.canShowDetailedView}
+                variant="secondary"
+                onPress={openSpendingDetailedView}
+              >
+                Detailed view
+              </ActionButton>
+            )}
+          </View>
+
+          <StatsDonutChart
+            currencyCode={currencyCode}
+            emptyLabel={spendingDonut.emptyLabel}
+            rollups={spendingDonut.rollups}
+            selectedRollupId={selectedSpendingRollup?.id}
+            onSelectRollup={selectSpendingRollup}
+          />
+
+          {selectedSpendingRollup ? (
+            <View style={styles.matchSection}>
+              <View style={styles.matchHeaderRow}>
+                <View style={styles.matchHeaderText}>
+                  <Text style={styles.matchTitle}>Recent matches</Text>
+                  <Text style={styles.matchDetail}>
+                    {selectedSpendingRollup.label} - {formatMoney(selectedSpendingRollup.netAmountMinor, currencyCode)}
+                  </Text>
                 </View>
-              );
-            })
-          ) : (
-            <Text style={styles.emptyText}>No spending in this period.</Text>
-          )}
+              </View>
+
+              {selectedSpendingRows.length ? (
+                <View style={styles.matchRows}>
+                  {selectedSpendingRows.map((row) => (
+                    <StatsMatchRow
+                      key={row.lineId}
+                      row={row}
+                      onOpenTransaction={onOpenTransaction}
+                    />
+                  ))}
+                </View>
+              ) : (
+                <Text style={styles.emptyText}>No matching transactions.</Text>
+              )}
+            </View>
+          ) : null}
         </Card>
 
         <Card testID="category-colors-card">
@@ -270,6 +365,49 @@ export function StatsScreen({ snapshot, showHeader = true }: StatsScreenProps) {
         <PeriodCarousel selectedOption={selectedPeriodOption} onSelectOption={selectPeriodOption} />
       </BottomSelectorPanel>
     </View>
+  );
+}
+
+function StatsMatchRow({
+  row,
+  onOpenTransaction,
+}: {
+  row: StatsReportLineRow;
+  onOpenTransaction?: (transactionId: string) => void;
+}) {
+  const title = row.transactionTitle || row.lineItemName || row.subcategoryName;
+  const lineDetail = getStatsMatchRowDetailText(row);
+  const amountPrefix = row.reportKind === 'expense' ? '-' : '+';
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={!onOpenTransaction}
+      onPress={() => onOpenTransaction?.(row.transactionId)}
+      style={({ pressed }) => [styles.matchRow, pressed && styles.pressed]}
+      testID={`stats-match-row-${row.lineId}`}
+    >
+      <View style={[styles.matchIcon, { backgroundColor: row.subcategoryColor }]} />
+      <View style={styles.matchBody}>
+        <View style={styles.transactionLine}>
+          <Text numberOfLines={1} style={styles.matchRowTitle}>
+            {row.lineItemName}
+          </Text>
+          <Text style={styles.matchAmount}>
+            {amountPrefix}{formatMoney(row.netAmountMinor, row.currencyCode)}
+          </Text>
+        </View>
+        <Text numberOfLines={1} style={styles.matchLineDetail}>
+          {title}
+        </Text>
+        <View style={styles.transactionLine}>
+          <Text numberOfLines={1} style={styles.matchMeta}>
+            {lineDetail}
+          </Text>
+          <Text style={styles.matchMeta}>{formatTransactionShortDate(row.transactionDatetime)}</Text>
+        </View>
+      </View>
+    </Pressable>
   );
 }
 
@@ -382,6 +520,23 @@ const styles = StyleSheet.create({
     fontSize: typography.h3,
     fontWeight: '800',
   },
+  cardHeaderRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  cardHeaderText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  cardSubtitle: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
   flowGrid: {
     gap: spacing.sm,
   },
@@ -417,44 +572,87 @@ const styles = StyleSheet.create({
   metricValueExpense: {
     color: colors.danger,
   },
-  chartRow: {
-    gap: spacing.sm,
-  },
-  rowBetween: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.md,
-    justifyContent: 'space-between',
-  },
-  categoryTitleRow: {
-    alignItems: 'center',
-    flex: 1,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    minWidth: 0,
-  },
-  categoryDot: {
-    borderRadius: 999,
-    height: 12,
-    width: 12,
-  },
-  categoryName: {
-    color: colors.ink,
-    flex: 1,
-    fontSize: typography.body,
-    fontWeight: '800',
-    minWidth: 0,
-  },
-  amountText: {
-    color: colors.ink,
-    flexShrink: 0,
-    fontSize: typography.body,
-    fontWeight: '800',
-    textAlign: 'right',
-  },
   emptyText: {
     color: colors.muted,
     fontSize: typography.body,
+  },
+  matchSection: {
+    gap: spacing.sm,
+  },
+  matchHeaderRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  matchHeaderText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  matchTitle: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  matchDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  matchRows: {
+    gap: spacing.xs,
+  },
+  matchRow: {
+    alignItems: 'flex-start',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    padding: spacing.sm,
+  },
+  matchIcon: {
+    borderRadius: 999,
+    height: 12,
+    marginTop: 5,
+    width: 12,
+  },
+  matchBody: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  transactionLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  matchRowTitle: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: typography.body,
+    fontWeight: '900',
+    minWidth: 0,
+  },
+  matchAmount: {
+    color: colors.danger,
+    flexShrink: 0,
+    fontSize: typography.body,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  matchLineDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  matchMeta: {
+    color: colors.muted,
+    flexShrink: 1,
+    fontSize: typography.small,
   },
   categoryGrid: {
     flexDirection: 'row',
