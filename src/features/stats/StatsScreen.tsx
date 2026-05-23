@@ -27,6 +27,7 @@ import {
 import { getStatsDonutViewModel, getStatsMatchRowDetailText, type StatsDonutMode } from '../../domain/statsChart';
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import type { Account, AppSnapshot } from '../../domain/types';
+import type { RootStackParamList } from '../../navigation/routes';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
   PeriodCarousel,
@@ -38,13 +39,19 @@ import { StatsDonutChart } from './StatsDonutChart';
 type StatsScreenProps = {
   snapshot: AppSnapshot;
   onOpenTransaction?: (transactionId: string) => void;
+  onOpenStatsDrilldown?: (params: RootStackParamList['StatsDrilldown']) => void;
   showHeader?: boolean;
 };
 
 type RangeMode = 'preset' | 'custom';
 type DatePickerTarget = 'start' | 'end';
 
-export function StatsScreen({ snapshot, onOpenTransaction, showHeader = true }: StatsScreenProps) {
+export function StatsScreen({
+  snapshot,
+  onOpenTransaction,
+  onOpenStatsDrilldown,
+  showHeader = true,
+}: StatsScreenProps) {
   const insets = useSafeAreaInsets();
   const [preset, setPreset] = useState<PeriodOption>('last_month');
   const [rangeMode, setRangeMode] = useState<RangeMode>('preset');
@@ -183,6 +190,23 @@ export function StatsScreen({ snapshot, onOpenTransaction, showHeader = true }: 
     setSelectedSpendingSubcategoryRollupId('');
   }
 
+  function openSpendingDrilldown() {
+    if (!selectedSpendingRollup || !onOpenStatsDrilldown) {
+      return;
+    }
+
+    onOpenStatsDrilldown({
+      reportKind: 'expense',
+      categoryId: selectedSpendingRollup.categoryId,
+      subcategoryId: spendingDonutMode === 'subcategory' ? selectedSpendingRollup.subcategoryId : undefined,
+      startIso: range.startIso,
+      endIso: range.endIso,
+      accountIds,
+      currencyCode,
+      initialSort: 'date_newest',
+    });
+  }
+
   function handleDatePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
     if (event.type === 'dismissed') {
       setDatePickerTarget(null);
@@ -270,6 +294,11 @@ export function StatsScreen({ snapshot, onOpenTransaction, showHeader = true }: 
                     {selectedSpendingRollup.label} - {formatMoney(selectedSpendingRollup.netAmountMinor, currencyCode)}
                   </Text>
                 </View>
+                {onOpenStatsDrilldown ? (
+                  <ActionButton variant="ghost" onPress={openSpendingDrilldown}>
+                    See all
+                  </ActionButton>
+                ) : null}
               </View>
 
               {selectedSpendingRows.length ? (

@@ -26,6 +26,7 @@ import {
   EditTransactionRouteScreen,
   LinkTransactionRouteScreen,
   RainyDayFundRouteScreen,
+  StatsDrilldownRouteScreen,
 } from './RootStackScreens';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
@@ -49,6 +50,11 @@ export function RootNavigator() {
         <RootStack.Screen name="AddTransaction" component={AddTransactionRouteScreen} />
         <RootStack.Screen name="EditTransaction" component={EditTransactionRouteScreen} />
         <RootStack.Screen name="LinkTransaction" component={LinkTransactionRouteScreen} />
+        <RootStack.Screen
+          name="StatsDrilldown"
+          component={StatsDrilldownRouteScreen}
+          options={{ headerShown: false }}
+        />
         <RootStack.Screen
           name="RainyDayFund"
           component={RainyDayFundRouteScreen}

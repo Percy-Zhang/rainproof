@@ -116,6 +116,7 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
         <StatsScreen
           snapshot={snapshot}
           onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
+          onOpenStatsDrilldown={(params) => rootNavigation?.navigate('StatsDrilldown', params)}
           showHeader={false}
         />
       ) : rootScreen === 'transactions' ? (

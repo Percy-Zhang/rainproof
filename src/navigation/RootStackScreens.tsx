@@ -9,6 +9,7 @@ import { ComposerScreenScaffold } from '../components/ScreenScaffold';
 import { FormError } from '../components/ui';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
 import { RainyDayFundScreen } from '../features/rainyDay/RainyDayFundScreen';
+import { StatsDrilldownScreen } from '../features/stats/StatsDrilldownScreen';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
@@ -148,6 +149,27 @@ export function LinkTransactionRouteScreen() {
   );
 }
 
+export function StatsDrilldownRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'StatsDrilldown'>>();
+  const { snapshot } = useRainproofDataContext();
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  return (
+    <DetailSafeArea testID="screen-statsDrilldown">
+      <StatsDrilldownScreen
+        snapshot={snapshot}
+        params={route.params}
+        onOpenTransaction={(transactionId) => navigation.navigate('EditTransaction', { transactionId })}
+        onBack={() => navigation.goBack()}
+      />
+    </DetailSafeArea>
+  );
+}
+
 export function RainyDayFundRouteScreen() {
   const { snapshot, derived, actions } = useRainproofDataContext();
 
@@ -174,9 +196,9 @@ export function RainyDayFundRouteScreen() {
   );
 }
 
-function DetailSafeArea({ children }: { children: ReactNode }) {
+function DetailSafeArea({ children, testID }: { children: ReactNode; testID?: string }) {
   return (
-    <SafeAreaView style={{ backgroundColor: colors.background, flex: 1 }}>
+    <SafeAreaView style={{ backgroundColor: colors.background, flex: 1 }} testID={testID}>
       {children}
     </SafeAreaView>
   );

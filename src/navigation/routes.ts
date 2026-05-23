@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { StatsReportKind, StatsReportSort } from '../domain/statsReports';
 
 export type HomeStackParamList = {
   Dashboard: undefined;
@@ -50,6 +51,16 @@ export type RootStackParamList = {
   AddTransaction: undefined;
   EditTransaction: { transactionId: string };
   LinkTransaction: { transactionId: string };
+  StatsDrilldown: {
+    reportKind: StatsReportKind;
+    categoryId: string;
+    subcategoryId?: string;
+    startIso: string;
+    endIso: string;
+    accountIds?: string[];
+    currencyCode: string;
+    initialSort?: StatsReportSort;
+  };
   RainyDayFund: undefined;
   CategoryManagement: undefined;
   CategoryEdit: { categoryId: string };
