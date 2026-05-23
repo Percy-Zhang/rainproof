@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +22,7 @@ import {
 import { defaultCategories } from '../../domain/categories';
 import { getDateRangeForPreset, getInclusiveDateRange, isWithinDateRange, toDateInputValue } from '../../domain/dates';
 import {
+  filterTransactionDisplayEntriesBySearch,
   formatTransactionCurrencyTotals,
   getTransactionGroupCurrencyTotals,
   groupTransactionDisplayEntries,
@@ -75,6 +77,7 @@ export function TransactionsScreen({
   const insets = useSafeAreaInsets();
   const [datePickerTarget, setDatePickerTarget] = useState<DatePickerTarget | null>(null);
   const [selectedAccountIds, setSelectedAccountIds] = useState(() => snapshot.accounts.map((account) => account.id));
+  const [searchQuery, setSearchQuery] = useState('');
   const { customEndDate, customStartDate, preset, rangeMode } = periodState;
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -101,11 +104,24 @@ export function TransactionsScreen({
       lines: snapshot.transactionLines,
       accountIds: selectedAccountIds,
     })
-      .filter((entry) => isWithinDateRange(entry.transaction.datetime, range))
-      .sort(compareTransactionDisplayEntriesDescending);
+      .filter((entry) => isWithinDateRange(entry.transaction.datetime, range));
+    const searchedEntries = filterTransactionDisplayEntriesBySearch({
+      entries,
+      query: searchQuery,
+      accounts: snapshot.accounts,
+      categories,
+    }).sort(compareTransactionDisplayEntriesDescending);
 
-    return groupTransactionDisplayEntries(entries, getTransactionGroupGranularity(range));
-  }, [range, selectedAccountIds, snapshot.transactionLines, snapshot.transactions]);
+    return groupTransactionDisplayEntries(searchedEntries, getTransactionGroupGranularity(range));
+  }, [
+    categories,
+    range,
+    searchQuery,
+    selectedAccountIds,
+    snapshot.accounts,
+    snapshot.transactionLines,
+    snapshot.transactions,
+  ]);
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
   const bottomPadding = (rangeMode === 'custom' ? 280 : 220) + insets.bottom;
 
@@ -171,6 +187,18 @@ export function TransactionsScreen({
 
         <Card testID="transaction-list-card">
           <Text style={styles.cardTitle}>Transactions</Text>
+          <TextInput
+            accessibilityLabel="Search transactions"
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+            onChangeText={setSearchQuery}
+            placeholder="Search item, split line, category, account"
+            placeholderTextColor={colors.muted}
+            returnKeyType="search"
+            style={styles.searchInput}
+            value={searchQuery}
+          />
 
           {groups.length ? (
             <View style={styles.groups}>
@@ -200,7 +228,11 @@ export function TransactionsScreen({
             </View>
           ) : (
             <Text style={styles.emptyText}>
-              {selectedAccountIds.length ? 'No transactions in this period.' : 'No accounts selected.'}
+              {selectedAccountIds.length
+                ? searchQuery.trim()
+                  ? 'No transactions match this search.'
+                  : 'No transactions in this period.'
+                : 'No accounts selected.'}
             </Text>
           )}
         </Card>
@@ -291,6 +323,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
   controlBlock: {
     gap: spacing.xs,
@@ -305,6 +338,17 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: typography.h3,
     fontWeight: '800',
+  },
+  searchInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.ink,
+    fontSize: typography.body,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   customRange: {
     gap: spacing.sm,

@@ -130,7 +130,7 @@ export function getTransactionSplitDisplayMetadata(entry: TransactionDisplayEntr
     primaryLine,
     primaryCategoryId: primaryLine?.categoryId,
     primarySubcategoryId: primaryLine?.subcategoryId,
-    splitLabel: isSplit ? formatSplitLabel(splitLines.length) : undefined,
+    splitLabel: undefined,
   };
 }
 
@@ -166,10 +166,6 @@ export function getSplitLineChildDisplayText(
     title,
     secondaryText,
   };
-}
-
-function formatSplitLabel(splitLineCount: number): string {
-  return `Split \u00b7 ${splitLineCount} ${splitLineCount === 1 ? 'line' : 'lines'}`;
 }
 
 function isSameDisplayText(left: string, right: string): boolean {

@@ -141,7 +141,7 @@ describe('transaction display helpers', () => {
         splitLines: splitEntry.lines,
         primaryCategoryId: 'housing',
         primarySubcategoryId: 'rent',
-        splitLabel: 'Split · 3 lines',
+        splitLabel: undefined,
       }),
     );
     expect(getTransactionSplitDisplayMetadata(entry())).toEqual(

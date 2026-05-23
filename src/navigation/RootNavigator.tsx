@@ -48,11 +48,7 @@ export function RootNavigator() {
         <RootStack.Screen name="EditAccount" component={EditAccountRouteScreen} />
         <RootStack.Screen name="AddTransaction" component={AddTransactionRouteScreen} />
         <RootStack.Screen name="EditTransaction" component={EditTransactionRouteScreen} />
-        <RootStack.Screen
-          name="LinkTransaction"
-          component={LinkTransactionRouteScreen}
-          options={{ headerShown: true, title: 'Link transaction' }}
-        />
+        <RootStack.Screen name="LinkTransaction" component={LinkTransactionRouteScreen} />
         <RootStack.Screen
           name="RainyDayFund"
           component={RainyDayFundRouteScreen}

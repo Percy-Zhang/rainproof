@@ -133,7 +133,7 @@ export function LinkTransactionRouteScreen() {
   }
 
   return (
-    <NativeHeaderContent>
+    <DetailSafeArea>
       <ComposerScreenScaffold screenKey="linkTransaction">
         <LinkTransactionScreen
           snapshot={snapshot}
@@ -142,10 +142,9 @@ export function LinkTransactionRouteScreen() {
           onUpdateTransactionLink={actions.updateTransactionLink}
           onDeleteTransactionLink={actions.deleteTransactionLink}
           onBack={() => navigation.goBack()}
-          showHeader={false}
         />
       </ComposerScreenScaffold>
-    </NativeHeaderContent>
+    </DetailSafeArea>
   );
 }
 
