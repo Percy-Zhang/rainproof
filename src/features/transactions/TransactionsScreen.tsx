@@ -40,6 +40,8 @@ import {
 } from './PeriodCarousel';
 import { TransactionListItem } from './TransactionListItems';
 
+const searchPlaceholderColor = `${colors.muted}99`;
+
 type TransactionsScreenProps = {
   snapshot: AppSnapshot;
   periodState: TransactionPeriodState;
@@ -194,7 +196,7 @@ export function TransactionsScreen({
             clearButtonMode="while-editing"
             onChangeText={setSearchQuery}
             placeholder="Search item, split line, category, account"
-            placeholderTextColor={colors.muted}
+            placeholderTextColor={searchPlaceholderColor}
             returnKeyType="search"
             style={styles.searchInput}
             value={searchQuery}
@@ -346,9 +348,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     color: colors.ink,
     fontSize: typography.body,
-    minHeight: 42,
+    height: 44,
+    includeFontPadding: false,
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
   },
   customRange: {
     gap: spacing.sm,

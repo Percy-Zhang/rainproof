@@ -1,7 +1,9 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useLayoutEffect, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { FormError } from '../components/ui';
 import {
@@ -19,15 +21,13 @@ export function CategoryManagementRouteScreen() {
   const navigation = useNavigation<RootStackNavigation>();
   const { categories, dirty, error, saveCategories } = useCategorySettingsDraft();
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => <CategoryHeaderSaveButton dirty={dirty} onSave={saveCategories} />,
-      title: 'Edit categories',
-    });
-  }, [dirty, navigation, saveCategories]);
-
   return (
-    <CategoryRouteShell>
+    <CategoryRouteShell
+      dirty={dirty}
+      title="Edit categories"
+      onBack={() => navigation.goBack()}
+      onSave={saveCategories}
+    >
       <CategoryManagementPage
         categories={categories}
         dirty={dirty}
@@ -47,21 +47,17 @@ export function CategoryEditRouteScreen() {
   const { dirty, error, getCategory, saveCategories, updateCategory } = useCategorySettingsDraft();
   const category = getCategory(route.params.categoryId);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: category
-        ? () => <CategoryHeaderSaveButton dirty={dirty} onSave={saveCategories} />
-        : undefined,
-      title: category?.name ?? 'Edit category',
-    });
-  }, [category, dirty, navigation, saveCategories]);
-
   if (!category) {
-    return <CategoryRouteMessage message="Category not found." />;
+    return <CategoryRouteMessage message="Category not found." onBack={() => navigation.goBack()} title="Edit category" />;
   }
 
   return (
-    <CategoryRouteShell>
+    <CategoryRouteShell
+      dirty={dirty}
+      title={category.name}
+      onBack={() => navigation.goBack()}
+      onSave={saveCategories}
+    >
       <CategoryEditPage
         category={category}
         dirty={dirty}
@@ -89,21 +85,17 @@ export function SubcategoryEditRouteScreen() {
   const category = getCategory(route.params.categoryId);
   const subcategory = getSubcategory(route.params.categoryId, route.params.subcategoryId);
 
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: category && subcategory
-        ? () => <CategoryHeaderSaveButton dirty={dirty} onSave={saveCategories} />
-        : undefined,
-      title: subcategory?.name ?? 'Edit subcategory',
-    });
-  }, [category, dirty, navigation, saveCategories, subcategory]);
-
   if (!category || !subcategory) {
-    return <CategoryRouteMessage message="Subcategory not found." />;
+    return <CategoryRouteMessage message="Subcategory not found." onBack={() => navigation.goBack()} title="Edit subcategory" />;
   }
 
   return (
-    <CategoryRouteShell>
+    <CategoryRouteShell
+      dirty={dirty}
+      title={subcategory.name}
+      onBack={() => navigation.goBack()}
+      onSave={saveCategories}
+    >
       <SubcategoryEditPage
         category={category}
         dirty={dirty}
@@ -131,9 +123,22 @@ function CategoryHeaderSaveButton({ dirty, onSave }: { dirty: boolean; onSave: (
   );
 }
 
-function CategoryRouteShell({ children }: { children: ReactNode }) {
+function CategoryRouteShell({
+  children,
+  dirty,
+  title,
+  onBack,
+  onSave,
+}: {
+  children: ReactNode;
+  dirty: boolean;
+  title: string;
+  onBack: () => void;
+  onSave: () => void;
+}) {
   return (
-    <View style={styles.routeShell}>
+    <SafeAreaView style={styles.routeShell}>
+      <CategoryTopBar dirty={dirty} title={title} onBack={onBack} onSave={onSave} />
       <ScrollView
         contentContainerStyle={styles.routeContent}
         keyboardShouldPersistTaps="handled"
@@ -141,35 +146,91 @@ function CategoryRouteShell({ children }: { children: ReactNode }) {
       >
         {children}
       </ScrollView>
-    </View>
+    </SafeAreaView>
   );
 }
 
-function CategoryRouteMessage({ message }: { message: string }) {
+function CategoryRouteMessage({ message, onBack, title }: { message: string; onBack: () => void; title: string }) {
   return (
-    <View style={styles.messageShell}>
-      <FormError message={message} />
+    <SafeAreaView style={styles.messageShell}>
+      <CategoryTopBar dirty={false} title={title} onBack={onBack} onSave={() => undefined} />
+      <View style={styles.messageBody}>
+        <FormError message={message} />
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function CategoryTopBar({
+  dirty,
+  title,
+  onBack,
+  onSave,
+}: {
+  dirty: boolean;
+  title: string;
+  onBack: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <View style={styles.topBar}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onBack}
+        style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+      >
+        <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
+        <Text style={styles.backButtonText}>Back</Text>
+      </Pressable>
+      <Text numberOfLines={1} style={styles.routeTitle}>{title}</Text>
+      <View style={styles.saveSlot}>
+        <CategoryHeaderSaveButton dirty={dirty} onSave={onSave} />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  backButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minHeight: 40,
+    paddingRight: spacing.sm,
+    width: 88,
+  },
+  backButtonText: {
+    color: colors.primaryDark,
+    fontSize: typography.body,
+    fontWeight: '800',
+  },
   messageShell: {
     backgroundColor: colors.background,
     flex: 1,
-    padding: spacing.lg,
+  },
+  messageBody: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
   },
   pressed: {
     opacity: 0.78,
   },
   routeContent: {
     gap: spacing.md,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
   routeShell: {
     backgroundColor: colors.background,
     flex: 1,
+  },
+  routeTitle: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: typography.h3,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   saveButton: {
     alignItems: 'flex-end',
@@ -187,5 +248,18 @@ const styles = StyleSheet.create({
   },
   saveButtonTextDisabled: {
     color: colors.muted,
+  },
+  saveSlot: {
+    alignItems: 'flex-end',
+    width: 88,
+  },
+  topBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
 });

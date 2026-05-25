@@ -1,7 +1,8 @@
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ReactNode } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
@@ -13,7 +14,7 @@ import { StatsDrilldownScreen } from '../features/stats/StatsDrilldownScreen';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
-import { colors, spacing } from '../theme/tokens';
+import { colors, spacing, typography } from '../theme/tokens';
 import type { RootStackParamList } from './routes';
 
 type RootStackNavigation = NativeStackNavigationProp<RootStackParamList>;
@@ -171,6 +172,7 @@ export function StatsDrilldownRouteScreen() {
 }
 
 export function RainyDayFundRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
   const { snapshot, derived, actions } = useRainproofDataContext();
 
   if (!snapshot || !derived.rainyDayProgress) {
@@ -178,7 +180,19 @@ export function RainyDayFundRouteScreen() {
   }
 
   return (
-    <NativeHeaderContent testID="screen-rainyDayFund">
+    <DetailSafeArea testID="screen-rainyDayFund">
+      <View style={styles.detailTopBar}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
+          <Text style={styles.backButtonText}>Back</Text>
+        </Pressable>
+        <Text numberOfLines={1} style={styles.detailTitle}>Rainy day fund</Text>
+        <View style={styles.headerSpacer} />
+      </View>
       <ScrollView
         contentContainerStyle={styles.rainyDayContent}
         keyboardShouldPersistTaps="handled"
@@ -192,7 +206,7 @@ export function RainyDayFundRouteScreen() {
           showHeader={false}
         />
       </ScrollView>
-    </NativeHeaderContent>
+    </DetailSafeArea>
   );
 }
 
@@ -201,14 +215,6 @@ function DetailSafeArea({ children, testID }: { children: ReactNode; testID?: st
     <SafeAreaView style={{ backgroundColor: colors.background, flex: 1 }} testID={testID}>
       {children}
     </SafeAreaView>
-  );
-}
-
-function NativeHeaderContent({ children, testID }: { children: ReactNode; testID?: string }) {
-  return (
-    <View style={styles.nativeHeaderContent} testID={testID}>
-      {children}
-    </View>
   );
 }
 
@@ -221,9 +227,40 @@ function MissingDataShell({ message }: { message: string }) {
 }
 
 const styles = StyleSheet.create({
-  nativeHeaderContent: {
-    backgroundColor: colors.background,
+  backButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minHeight: 40,
+    paddingRight: spacing.sm,
+    width: 88,
+  },
+  backButtonText: {
+    color: colors.primaryDark,
+    fontSize: typography.body,
+    fontWeight: '800',
+  },
+  detailTitle: {
+    color: colors.ink,
     flex: 1,
+    fontSize: typography.h3,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  detailTopBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+  },
+  headerSpacer: {
+    width: 88,
+  },
+  pressed: {
+    opacity: 0.78,
   },
   rainyDayContent: {
     gap: spacing.md,

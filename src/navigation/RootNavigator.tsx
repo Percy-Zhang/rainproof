@@ -58,22 +58,22 @@ export function RootNavigator() {
         <RootStack.Screen
           name="RainyDayFund"
           component={RainyDayFundRouteScreen}
-          options={{ headerShown: true, title: 'Rainy day fund' }}
+          options={{ headerShown: false }}
         />
         <RootStack.Screen
           name="CategoryManagement"
           component={CategoryManagementRouteScreen}
-          options={{ headerShown: true, title: 'Edit categories' }}
+          options={{ headerShown: false }}
         />
         <RootStack.Screen
           name="CategoryEdit"
           component={CategoryEditRouteScreen}
-          options={{ headerShown: true, title: 'Edit category' }}
+          options={{ headerShown: false }}
         />
         <RootStack.Screen
           name="SubcategoryEdit"
           component={SubcategoryEditRouteScreen}
-          options={{ headerShown: true, title: 'Edit subcategory' }}
+          options={{ headerShown: false }}
         />
       </RootStack.Navigator>
     </CategorySettingsDraftProvider>

@@ -763,11 +763,9 @@ const styles = StyleSheet.create({
   },
   nativePickerPanel: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingVertical: spacing.xs,
+    alignSelf: 'center',
+    backgroundColor: 'transparent',
+    paddingVertical: 0,
   },
   nativePickerDone: {
     alignItems: 'center',
