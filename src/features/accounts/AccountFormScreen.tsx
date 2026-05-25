@@ -7,8 +7,10 @@ import { AccountIconPicker } from '../../components/AccountDisplay';
 import { ActionButton, Chip, FormError } from '../../components/ui';
 import {
   getAccountTypeLabel,
+  formatOptionalMoneyInput,
   getInstitutionSuggestions,
   manualAccountTypes,
+  parseOptionalCreditLimit,
   parseOptionalOpeningBalance,
 } from '../../domain/accountForm';
 import {
@@ -58,6 +60,7 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
   const [type, setType] = useState<AccountType>(editingAccount?.type === 'brokerage' ? 'checking' : editingAccount?.type ?? 'checking');
   const [currencyCode, setCurrencyCode] = useState(editingAccount?.currencyCode ?? snapshot.defaultCurrencyCode);
   const [openingBalance, setOpeningBalance] = useState('');
+  const [creditLimit, setCreditLimit] = useState(formatOptionalMoneyInput(editingAccount?.creditLimitMinor));
   const [notes, setNotes] = useState(editingAccount?.notes ?? '');
   const [institutionName, setInstitutionName] = useState(editingAccount?.institutionName ?? '');
   const [includeInRainyDay, setIncludeInRainyDay] = useState(editingAccount?.includeInRainyDay ?? false);
@@ -84,6 +87,7 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
           type,
           currencyCode: normalizeCurrencyCode(currencyCode, snapshot.defaultCurrencyCode),
           openingBalanceMinor: parseOptionalOpeningBalance(openingBalance),
+          creditLimitMinor: type === 'credit_card' ? parseOptionalCreditLimit(creditLimit) : null,
           notes,
           institutionName,
           includeInRainyDay,
@@ -98,6 +102,7 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
           notes,
           institutionName,
           includeInRainyDay,
+          creditLimitMinor: props.account.type === 'credit_card' ? parseOptionalCreditLimit(creditLimit) : null,
           themeColor,
           iconName: normalizeAccountIconName(iconName, props.account.type),
         });
@@ -207,6 +212,9 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
                       currentIcon === getDefaultAccountIcon(type) ? getDefaultAccountIcon(accountType) : currentIcon,
                     );
                     setType(accountType);
+                    if (accountType !== 'credit_card') {
+                      setCreditLimit('');
+                    }
                   }}
                 >
                   {getAccountTypeLabel(accountType)}
@@ -229,6 +237,16 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
               keyboardType="decimal-pad"
             />
           </>
+        ) : null}
+
+        {type === 'credit_card' ? (
+          <AccountField
+            label="Credit limit"
+            value={creditLimit}
+            onChangeText={setCreditLimit}
+            placeholder="Optional"
+            keyboardType="decimal-pad"
+          />
         ) : null}
 
         <View style={styles.autocompleteWrap}>

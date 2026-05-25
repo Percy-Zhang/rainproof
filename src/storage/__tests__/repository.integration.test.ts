@@ -162,6 +162,7 @@ async function addAccount(
     name: string;
     type?: Account['type'];
     openingBalanceMinor?: number;
+    creditLimitMinor?: number | null;
     iconName?: string;
     includeInRainyDay?: boolean;
     currencyCode?: string;
@@ -172,6 +173,7 @@ async function addAccount(
     type: input.type ?? 'checking',
     currencyCode: input.currencyCode ?? 'AUD',
     openingBalanceMinor: input.openingBalanceMinor ?? 0,
+    creditLimitMinor: input.creditLimitMinor,
     iconName: input.iconName,
     includeInRainyDay: input.includeInRainyDay,
   });
@@ -439,6 +441,7 @@ describe('SQLite finance repository integration', () => {
       expect(getAccountByName(snapshot, 'Everyday')).toEqual(
         expect.objectContaining({
           currencyCode: 'AUD',
+          creditLimitMinor: null,
           iconName: 'cash-outline',
           includeInRainyDay: true,
           openingBalanceMinor: 12500,
@@ -454,6 +457,7 @@ describe('SQLite finance repository integration', () => {
         notes: 'Updated notes',
         institutionName: 'Bank',
         includeInRainyDay: false,
+        creditLimitMinor: null,
         themeColor: '#0F7B45',
         iconName: 'card-outline',
       });
@@ -485,6 +489,63 @@ describe('SQLite finance repository integration', () => {
       await repository.reopenAccount(account.id);
       snapshot = await repository.getSnapshot();
       expect(getAccountByName(snapshot, 'Daily').isArchived).toBe(false);
+    });
+  });
+
+  it('persists nullable credit card limits without affecting ledger balances', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const card = await addAccount(repository, {
+        name: 'Rewards card',
+        type: 'credit_card',
+        openingBalanceMinor: -42000,
+        creditLimitMinor: 200000,
+      });
+      await addAccount(repository, {
+        name: 'Everyday',
+        type: 'checking',
+        creditLimitMinor: 999999,
+      });
+
+      let snapshot = await repository.getSnapshot();
+      expect(getAccountByName(snapshot, 'Rewards card')).toEqual(
+        expect.objectContaining({
+          creditLimitMinor: 200000,
+          openingBalanceMinor: -42000,
+          type: 'credit_card',
+        }),
+      );
+      expect(getAccountByName(snapshot, 'Everyday').creditLimitMinor).toBeNull();
+      expect(getAccountBalances(snapshot.accounts, snapshot.transactionLines)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            account: expect.objectContaining({ id: card.id }),
+            balanceMinor: -42000,
+          }),
+        ]),
+      );
+
+      await repository.updateAccount({
+        id: card.id,
+        name: 'Rewards card',
+        nickname: '',
+        notes: '',
+        institutionName: '',
+        includeInRainyDay: false,
+        creditLimitMinor: 250000,
+        themeColor: '#1876A8',
+        iconName: 'card-outline',
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(getAccountByName(snapshot, 'Rewards card').creditLimitMinor).toBe(250000);
+      expect(getAccountBalances(snapshot.accounts, snapshot.transactionLines)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            account: expect.objectContaining({ id: card.id }),
+            balanceMinor: -42000,
+          }),
+        ]),
+      );
     });
   });
 
@@ -1585,13 +1646,14 @@ describe('SQLite finance repository integration', () => {
       expect(getAccountByName(snapshot, 'Legacy account')).toEqual(
         expect.objectContaining({
           id: 'legacy_acct',
+          creditLimitMinor: null,
           iconName: 'business-outline',
           openingBalanceMinor: 12300,
           showOnDashboard: true,
         }),
       );
       expect(await getColumnNames(fixture.db, 'accounts')).toEqual(
-        expect.arrayContaining(['icon_name', 'theme_color', 'show_on_dashboard', 'sort_order']),
+        expect.arrayContaining(['credit_limit_minor', 'icon_name', 'theme_color', 'show_on_dashboard', 'sort_order']),
       );
       expect(await getColumnNames(fixture.db, 'transaction_links')).toEqual(
         expect.arrayContaining(['source_transaction_id', 'target_transaction_id', 'source_line_id', 'target_line_id', 'link_type']),

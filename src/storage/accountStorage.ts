@@ -23,15 +23,16 @@ export async function addAccountStorage(
 
   await db.runAsync(
     `INSERT INTO accounts (
-      id, name, nickname, type, currency_code, opening_balance_minor, notes, institution_name,
+      id, name, nickname, type, currency_code, opening_balance_minor, credit_limit_minor, notes, institution_name,
       include_in_rainy_day, theme_color, icon_name, show_on_dashboard, sort_order, is_archived, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
     id,
     input.name.trim() || 'New account',
     input.nickname?.trim() ?? '',
     input.type,
     currencyCode,
     input.openingBalanceMinor,
+    input.type === 'credit_card' ? input.creditLimitMinor ?? null : null,
     input.notes?.trim() ?? '',
     input.institutionName?.trim() ?? '',
     input.includeInRainyDay ? 1 : 0,
@@ -63,13 +64,14 @@ export async function updateAccountStorage(
   await db.runAsync(
     `UPDATE accounts
      SET name = ?, nickname = ?, notes = ?, institution_name = ?, include_in_rainy_day = ?,
-         theme_color = ?, icon_name = ?, updated_at = ?
+         credit_limit_minor = ?, theme_color = ?, icon_name = ?, updated_at = ?
      WHERE id = ?`,
     input.name.trim() || 'Untitled account',
     input.nickname.trim(),
     input.notes.trim(),
     input.institutionName.trim(),
     input.includeInRainyDay ? 1 : 0,
+    existingAccount?.type === 'credit_card' ? input.creditLimitMinor ?? null : null,
     normalizeAccountThemeColor(input.themeColor),
     normalizeAccountIconName(input.iconName, existingAccount?.type),
     now,

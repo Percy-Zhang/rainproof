@@ -10,6 +10,7 @@ const currentAccountColumns = [
   'type',
   'currency_code',
   'opening_balance_minor',
+  'credit_limit_minor',
   'notes',
   'institution_name',
   'include_in_rainy_day',
@@ -128,7 +129,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
@@ -160,7 +161,9 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.versionWrites).toEqual([]);
-    expect(db.getColumnNames('accounts')).toEqual(expect.arrayContaining(['icon_name', 'show_on_dashboard']));
+    expect(db.getColumnNames('accounts')).toEqual(
+      expect.arrayContaining(['credit_limit_minor', 'icon_name', 'show_on_dashboard']),
+    );
     expect(db.getColumnNames('transactions')).toEqual(expect.arrayContaining(['labels_json', 'group_id']));
     expect(db.getColumnNames('transaction_lines')).toEqual(
       expect.arrayContaining(['external_party', 'transfer_peer_account_id', 'note']),

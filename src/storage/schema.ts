@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   type TEXT NOT NULL,
   currency_code TEXT NOT NULL,
   opening_balance_minor INTEGER NOT NULL,
+  credit_limit_minor INTEGER,
   notes TEXT NOT NULL DEFAULT '',
   institution_name TEXT NOT NULL DEFAULT '',
   include_in_rainy_day INTEGER NOT NULL DEFAULT 0,

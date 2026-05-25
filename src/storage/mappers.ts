@@ -26,6 +26,7 @@ export type AccountRow = {
   type: AccountType;
   currency_code: string;
   opening_balance_minor: number;
+  credit_limit_minor: number | null;
   notes: string;
   institution_name: string;
   include_in_rainy_day: number;
@@ -124,6 +125,7 @@ export function mapAccount(row: AccountRow): Account {
     type: row.type,
     currencyCode: normalizeCurrencyCode(row.currency_code),
     openingBalanceMinor: row.opening_balance_minor,
+    creditLimitMinor: row.credit_limit_minor ?? null,
     notes: row.notes,
     institutionName: row.institution_name,
     includeInRainyDay: row.include_in_rainy_day === 1,

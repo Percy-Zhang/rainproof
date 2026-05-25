@@ -32,6 +32,7 @@ export type Account = {
   type: AccountType;
   currencyCode: CurrencyCode;
   openingBalanceMinor: number;
+  creditLimitMinor?: number | null;
   notes: string;
   institutionName: string;
   includeInRainyDay: boolean;
@@ -204,6 +205,7 @@ export type NewAccountInput = {
   type: AccountType;
   currencyCode: CurrencyCode;
   openingBalanceMinor: number;
+  creditLimitMinor?: number | null;
   notes?: string;
   institutionName?: string;
   includeInRainyDay?: boolean;
@@ -219,6 +221,7 @@ export type UpdateAccountInput = {
   notes: string;
   institutionName: string;
   includeInRainyDay: boolean;
+  creditLimitMinor?: number | null;
   themeColor: string;
   iconName: string;
 };

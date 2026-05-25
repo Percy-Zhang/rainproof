@@ -12,6 +12,14 @@ import {
   getDashboardSelectedAccountIds,
   toggleDashboardAccountSelection,
 } from '../../domain/dashboard';
+import {
+  formatCreditCardBalanceLabel,
+  formatCreditCardUtilization,
+  getCreditCardBalanceSummary,
+  getCreditCardPortfolioSummary,
+  type CreditCardBalanceSummary,
+  type CreditCardCurrencySummary,
+} from '../../domain/creditCards';
 import { formatMoney } from '../../domain/money';
 import type {
   Account,
@@ -64,6 +72,10 @@ export function DashboardScreen({
         selectedAccountIds,
       }),
     [previewAccountIds, selectedAccountIds, snapshot],
+  );
+  const creditCardSummaries = useMemo(
+    () => getCreditCardPortfolioSummary(accountBalances),
+    [accountBalances],
   );
 
   useEffect(() => {
@@ -146,6 +158,23 @@ export function DashboardScreen({
           />
         )}
       </Card>
+
+      {creditCardSummaries.length ? (
+        <Card testID="dashboard-credit-cards-card" style={styles.compactCard}>
+          <View style={styles.sectionCardHeader}>
+            <Text style={styles.cardTitle}>Credit cards</Text>
+          </View>
+          <View style={styles.creditSummaryStack}>
+            {creditCardSummaries.map((summary) => (
+              <CreditCardSummaryBlock
+                key={summary.currencyCode}
+                showCurrencyCodes={showCurrencyCodes}
+                summary={summary}
+              />
+            ))}
+          </View>
+        </Card>
+      ) : null}
 
       <Card testID="recent-transactions-card" style={styles.compactCard}>
         <View style={styles.sectionCardHeader}>
@@ -276,6 +305,11 @@ function AccountTile({
   showCurrencyCodes: boolean;
   onPress: () => void;
 }) {
+  const creditCardSummary = getCreditCardBalanceSummary({ account, balanceMinor });
+  const balanceLabel = creditCardSummary
+    ? formatCreditCardBalanceLabel({ account, balanceMinor }, { showCurrencyCode: showCurrencyCodes })
+    : formatMoney(balanceMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes });
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -293,9 +327,83 @@ function AccountTile({
     >
       <Text numberOfLines={1} style={styles.accountName}>{getAccountDisplayName(account)}</Text>
       <Text numberOfLines={1} adjustsFontSizeToFit style={styles.accountBalance}>
-        {formatMoney(balanceMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+        {balanceLabel}
       </Text>
     </Pressable>
+  );
+}
+
+function CreditCardSummaryBlock({
+  showCurrencyCodes,
+  summary,
+}: {
+  showCurrencyCodes: boolean;
+  summary: CreditCardCurrencySummary;
+}) {
+  return (
+    <View style={styles.creditSummaryBlock}>
+      <View style={styles.creditSummaryMetrics}>
+        <CreditMetric
+          label="Total owed"
+          value={formatMoney(summary.totalOwedMinor, summary.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+        />
+        {summary.totalAvailableCreditMinor !== null ? (
+          <CreditMetric
+            label={summary.totalAvailableCreditMinor < 0 ? 'Over limit' : 'Available'}
+            value={formatMoney(Math.abs(summary.totalAvailableCreditMinor), summary.currencyCode, {
+              showCurrencyCode: showCurrencyCodes,
+            })}
+          />
+        ) : null}
+        {summary.utilization !== null ? (
+          <CreditMetric label="Utilization" value={formatCreditCardUtilization(summary.utilization) ?? ''} />
+        ) : null}
+      </View>
+      <View style={styles.creditCardRows}>
+        {summary.cards.map((card) => (
+          <CreditCardSummaryRow key={card.account.id} card={card} showCurrencyCodes={showCurrencyCodes} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function CreditCardSummaryRow({
+  card,
+  showCurrencyCodes,
+}: {
+  card: CreditCardBalanceSummary;
+  showCurrencyCodes: boolean;
+}) {
+  const available = card.availableCreditMinor;
+  const utilization = formatCreditCardUtilization(card.utilization);
+
+  return (
+    <View style={styles.creditCardRow}>
+      <Text numberOfLines={1} style={styles.creditCardName}>{getAccountDisplayName(card.account)}</Text>
+      <View style={styles.creditCardValues}>
+        <Text numberOfLines={1} style={styles.creditCardBalance}>
+          {formatCreditCardBalanceLabel(card, { showCurrencyCode: showCurrencyCodes })}
+        </Text>
+        {available !== null ? (
+          <Text numberOfLines={1} style={styles.creditCardDetail}>
+            {available < 0 ? 'Over' : 'Available'} {formatMoney(Math.abs(available), card.account.currencyCode, {
+              showCurrencyCode: showCurrencyCodes,
+            })}
+            {utilization ? ` - ${utilization}` : ''}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function CreditMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.creditMetric}>
+      <Text style={styles.creditMetricLabel}>{label}</Text>
+      <Text style={styles.creditMetricValue}>{value}</Text>
+    </View>
   );
 }
 
@@ -405,6 +513,66 @@ const styles = StyleSheet.create({
   },
   compactRows: {
     gap: 0,
+  },
+  creditCardBalance: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  creditCardDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    textAlign: 'right',
+  },
+  creditCardName: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  creditCardRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  creditCardRows: {
+    gap: spacing.xs,
+  },
+  creditCardValues: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+  },
+  creditMetric: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flex: 1,
+    minWidth: 96,
+    padding: spacing.sm,
+  },
+  creditMetricLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  creditMetricValue: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  creditSummaryBlock: {
+    gap: spacing.sm,
+  },
+  creditSummaryMetrics: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  creditSummaryStack: {
+    gap: spacing.md,
   },
   emptyText: {
     color: colors.muted,

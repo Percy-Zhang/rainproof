@@ -19,6 +19,7 @@ describe('storage mappers', () => {
         type: 'checking',
         currency_code: 'aud',
         opening_balance_minor: 12345,
+        credit_limit_minor: null,
         notes: 'Daily',
         institution_name: 'Bank',
         include_in_rainy_day: 1,
@@ -33,6 +34,7 @@ describe('storage mappers', () => {
     ).toEqual(
       expect.objectContaining({
         currencyCode: 'AUD',
+        creditLimitMinor: null,
         includeInRainyDay: true,
         isArchived: true,
         showOnDashboard: false,

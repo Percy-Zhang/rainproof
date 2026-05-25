@@ -4,6 +4,11 @@ import { ScaleDecorator } from 'react-native-draggable-flatlist';
 
 import { AccountIconBadge } from '../../components/AccountDisplay';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
+import {
+  formatCreditCardBalanceLabel,
+  formatCreditCardUtilization,
+  getCreditCardBalanceSummary,
+} from '../../domain/creditCards';
 import { formatMoney } from '../../domain/money';
 import type { Account } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -28,10 +33,17 @@ export function AccountListRow({
   onPress,
 }: AccountListRowProps) {
   const hiddenFromDashboard = account.isArchived || !account.showOnDashboard;
+  const accountBalance = { account, balanceMinor: balanceMinor ?? 0 };
+  const creditCardSummary = balanceMinor === undefined ? null : getCreditCardBalanceSummary(accountBalance);
   const balanceLabel =
     account.isArchived || balanceMinor === undefined
       ? 'Closed'
-      : formatMoney(balanceMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes });
+      : creditCardSummary
+        ? formatCreditCardBalanceLabel(accountBalance, { showCurrencyCode: showCurrencyCodes })
+        : formatMoney(balanceMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes });
+  const detailText = creditCardSummary?.availableCreditMinor !== null && creditCardSummary?.availableCreditMinor !== undefined
+    ? getCreditCardLimitDetail(creditCardSummary, showCurrencyCodes)
+    : account.notes || 'No notes yet.';
 
   return (
     <ScaleDecorator>
@@ -77,7 +89,7 @@ export function AccountListRow({
               {account.isArchived ? <Text style={styles.closedBadge}>Closed</Text> : null}
             </View>
             <Text numberOfLines={1} style={styles.notesText}>
-              {account.notes || 'No notes yet.'}
+              {detailText}
             </Text>
           </View>
           <Text style={[styles.balanceText, account.isArchived && styles.closedBalanceText]}>{balanceLabel}</Text>
@@ -169,3 +181,21 @@ const styles = StyleSheet.create({
     opacity: 0.78,
   },
 });
+
+function getCreditCardLimitDetail(
+  summary: NonNullable<ReturnType<typeof getCreditCardBalanceSummary>>,
+  showCurrencyCodes: boolean,
+): string {
+  const utilization = formatCreditCardUtilization(summary.utilization);
+  const formattedAvailable = formatMoney(
+    Math.abs(summary.availableCreditMinor ?? 0),
+    summary.account.currencyCode,
+    { showCurrencyCode: showCurrencyCodes },
+  );
+
+  if ((summary.availableCreditMinor ?? 0) < 0) {
+    return `Over limit by ${formattedAvailable}${utilization ? ` - ${utilization} used` : ''}`;
+  }
+
+  return `Available ${formattedAvailable}${utilization ? ` - ${utilization} used` : ''}`;
+}

@@ -136,6 +136,12 @@ const migrations: Migration[] = [
       await ensureLineLevelTransactionLinkSchema(db);
     },
   },
+  {
+    version: 6,
+    migrate: async (db) => {
+      await ensureAccountCreditLimitColumn(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -163,6 +169,7 @@ export async function runMigrations(db: MigrationDatabase): Promise<void> {
 async function ensureCurrentSchemaCompatibility(db: MigrationDatabase): Promise<void> {
   await db.execAsync(SCHEMA_SQL);
   await ensureAccountCompatibilityColumns(db);
+  await ensureAccountCreditLimitColumn(db);
   await ensureTransactionCompatibilityColumns(db);
   await ensureLineLevelTransactionLinkSchema(db);
   await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
@@ -232,6 +239,10 @@ async function ensureAccountCompatibilityColumns(db: MigrationDatabase): Promise
   await ensureColumn(db, 'accounts', 'is_archived', 'INTEGER NOT NULL DEFAULT 0');
   await ensureColumn(db, 'accounts', 'created_at', "TEXT NOT NULL DEFAULT ''");
   await ensureColumn(db, 'accounts', 'updated_at', "TEXT NOT NULL DEFAULT ''");
+}
+
+async function ensureAccountCreditLimitColumn(db: MigrationDatabase): Promise<void> {
+  await ensureColumn(db, 'accounts', 'credit_limit_minor', 'INTEGER');
 }
 
 async function ensureTransactionCompatibilityColumns(db: MigrationDatabase): Promise<void> {

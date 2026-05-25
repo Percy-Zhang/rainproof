@@ -14,6 +14,23 @@ export function parseOptionalOpeningBalance(input: string): number {
   return input.trim() ? parseMoneyInput(input) : 0;
 }
 
+export function parseOptionalCreditLimit(input: string): number | null {
+  if (!input.trim()) {
+    return null;
+  }
+
+  const amountMinor = parseMoneyInput(input);
+  if (amountMinor <= 0) {
+    return null;
+  }
+
+  return amountMinor;
+}
+
+export function formatOptionalMoneyInput(amountMinor: number | null | undefined): string {
+  return amountMinor && amountMinor > 0 ? (amountMinor / 100).toFixed(2) : '';
+}
+
 export function getInstitutionSuggestions(
   accounts: Account[],
   query: string,

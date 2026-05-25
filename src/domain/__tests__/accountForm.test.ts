@@ -6,6 +6,7 @@ import {
   getAccountTypeLabel,
   getInstitutionSuggestions,
   manualAccountTypes,
+  parseOptionalCreditLimit,
   parseOptionalOpeningBalance,
 } from '../accountForm';
 import type { Account } from '../types';
@@ -36,6 +37,13 @@ describe('account form helpers', () => {
     expect(parseOptionalOpeningBalance('')).toBe(0);
     expect(parseOptionalOpeningBalance('   ')).toBe(0);
     expect(parseOptionalOpeningBalance('12.34')).toBe(1234);
+  });
+
+  it('treats blank, zero, and negative credit limits as unset', () => {
+    expect(parseOptionalCreditLimit('')).toBeNull();
+    expect(parseOptionalCreditLimit('0')).toBeNull();
+    expect(parseOptionalCreditLimit('-25')).toBeNull();
+    expect(parseOptionalCreditLimit('2500.00')).toBe(250000);
   });
 
   it('does not expose brokerage account type yet', () => {
