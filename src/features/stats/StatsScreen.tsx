@@ -25,6 +25,12 @@ import {
   type StatsReportLineRow,
 } from '../../domain/statsReports';
 import { getStatsDonutViewModel, getStatsMatchRowDetailText, type StatsDonutMode } from '../../domain/statsChart';
+import {
+  getStatsMonthlyTrendSummary,
+  getStatsRollupMonthlyTrend,
+  type StatsMonthlyTrendBucket,
+  type StatsRollupTrendBucket,
+} from '../../domain/statsTrends';
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import type { Account, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
@@ -133,6 +139,31 @@ export function StatsScreen({
     snapshot.transactionLinks,
     snapshot.transactions,
   ]);
+  const incomeReport = useMemo(() => getStatsReport({
+    reportKind: 'income',
+    transactions: snapshot.transactions,
+    transactionLines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    accounts: snapshot.accounts,
+    categories,
+    range,
+    currencyCode,
+    accountIds,
+  }), [
+    accountIds,
+    categories,
+    currencyCode,
+    range,
+    snapshot.accounts,
+    snapshot.transactionLines,
+    snapshot.transactionLinks,
+    snapshot.transactions,
+  ]);
+  const monthlyTrendSummary = useMemo(() => getStatsMonthlyTrendSummary({
+    incomeReport,
+    expenseReport: spendingReport,
+    range,
+  }), [incomeReport, range, spendingReport]);
   const spendingDonut = getStatsDonutViewModel({
     report: spendingReport,
     mode: spendingDonutMode,
@@ -142,6 +173,12 @@ export function StatsScreen({
   });
   const selectedSpendingRollup = spendingDonut.selectedRollup;
   const selectedSpendingRows = spendingDonut.recentRows;
+  const selectedSpendingTrend = useMemo(() => getStatsRollupMonthlyTrend({
+    report: spendingReport,
+    rollupKind: spendingDonutMode,
+    rollupId: selectedSpendingRollup?.id,
+    range,
+  }), [range, selectedSpendingRollup?.id, spendingDonutMode, spendingReport]);
   const cashFlow = getCashFlowSummary({
     transactions: snapshot.transactions,
     lines: snapshot.transactionLines,
@@ -248,8 +285,67 @@ export function StatsScreen({
           <View style={styles.flowGrid}>
             <Metric label="Income" value={formatMoney(cashFlow.incomeMinor, currencyCode)} tone="income" />
             <Metric label="Spending" value={formatMoney(cashFlow.expenseMinor, currencyCode)} tone="expense" />
-            <Metric label="Net" value={formatMoney(cashFlow.netMinor, currencyCode)} />
+            <Metric label="Net" value={formatSignedMoney(cashFlow.netMinor, currencyCode)} tone={getNetTone(cashFlow.netMinor)} />
           </View>
+        </Card>
+
+        <Card testID="monthly-averages-card">
+          <View style={styles.cardHeaderText}>
+            <Text style={styles.cardTitle}>Monthly averages</Text>
+            <Text style={styles.cardSubtitle}>{monthlyTrendSummary.averages.basisLabel}</Text>
+          </View>
+          <View style={styles.flowGrid}>
+            <Metric
+              label="Income / mo"
+              value={formatMoney(monthlyTrendSummary.averages.averageIncomeMinor, currencyCode)}
+              tone="income"
+            />
+            <Metric
+              label="Spending / mo"
+              value={formatMoney(monthlyTrendSummary.averages.averageSpendingMinor, currencyCode)}
+              tone="expense"
+            />
+            <Metric
+              label="Net / mo"
+              value={formatSignedMoney(monthlyTrendSummary.averages.averageNetCashFlowMinor, currencyCode)}
+              tone={getNetTone(monthlyTrendSummary.averages.averageNetCashFlowMinor)}
+            />
+          </View>
+          <Text style={styles.reportNote}>{monthlyTrendSummary.averages.note}</Text>
+        </Card>
+
+        <Card testID="gross-net-spending-card">
+          <Text style={styles.cardTitle}>Gross vs net spending</Text>
+          <View style={styles.flowGrid}>
+            <Metric
+              label="Gross spending"
+              value={formatMoney(monthlyTrendSummary.grossNetSpending.grossSpendingMinor, currencyCode)}
+              tone="expense"
+            />
+            <Metric
+              label="Linked back"
+              value={formatMoney(monthlyTrendSummary.grossNetSpending.linkedAdjustmentMinor, currencyCode)}
+              tone="income"
+            />
+            <Metric
+              label="Net spending"
+              value={formatMoney(monthlyTrendSummary.grossNetSpending.netSpendingMinor, currencyCode)}
+              tone="expense"
+            />
+          </View>
+        </Card>
+
+        <Card testID="monthly-trend-card">
+          <Text style={styles.cardTitle}>Monthly cash-flow trend</Text>
+          {monthlyTrendSummary.buckets.length ? (
+            <View style={styles.trendRows}>
+              {monthlyTrendSummary.buckets.map((bucket) => (
+                <MonthlyTrendRow key={bucket.monthKey} bucket={bucket} currencyCode={currencyCode} />
+              ))}
+            </View>
+          ) : (
+            <Text style={styles.emptyText}>No monthly trend data for this filter.</Text>
+          )}
         </Card>
 
         <Card testID="spending-chart-card">
@@ -317,6 +413,22 @@ export function StatsScreen({
             </View>
           ) : null}
         </Card>
+
+        {selectedSpendingTrend.rollup ? (
+          <Card testID="selected-spending-trend-card">
+            <View style={styles.cardHeaderText}>
+              <Text style={styles.cardTitle}>Selected spending trend</Text>
+              <Text style={styles.cardSubtitle}>
+                {selectedSpendingTrend.rollup.label} - monthly net spending
+              </Text>
+            </View>
+            <View style={styles.trendRows}>
+              {selectedSpendingTrend.buckets.map((bucket) => (
+                <RollupTrendRow key={bucket.monthKey} bucket={bucket} currencyCode={currencyCode} />
+              ))}
+            </View>
+          </Card>
+        ) : null}
 
         <Card testID="category-colors-card">
           <Text style={styles.cardTitle}>Category colors</Text>
@@ -393,6 +505,60 @@ export function StatsScreen({
 
         <PeriodCarousel selectedOption={selectedPeriodOption} onSelectOption={selectPeriodOption} />
       </BottomSelectorPanel>
+    </View>
+  );
+}
+
+function MonthlyTrendRow({ bucket, currencyCode }: { bucket: StatsMonthlyTrendBucket; currencyCode: string }) {
+  return (
+    <View style={styles.trendRow}>
+      <Text style={styles.trendMonth}>{bucket.monthLabel}</Text>
+      <View style={styles.trendValues}>
+        <TrendValue label="Income" value={formatMoney(bucket.incomeNetMinor, currencyCode)} tone="income" />
+        <TrendValue label="Spending" value={formatMoney(bucket.spendingNetMinor, currencyCode)} tone="expense" />
+        <TrendValue
+          label="Net"
+          value={formatSignedMoney(bucket.netCashFlowMinor, currencyCode)}
+          tone={getNetTone(bucket.netCashFlowMinor)}
+        />
+      </View>
+    </View>
+  );
+}
+
+function RollupTrendRow({ bucket, currencyCode }: { bucket: StatsRollupTrendBucket; currencyCode: string }) {
+  const detail = bucket.grossAmountMinor !== bucket.netAmountMinor
+    ? `Gross ${formatMoney(bucket.grossAmountMinor, currencyCode)}`
+    : `${bucket.lineCount} records`;
+
+  return (
+    <View style={styles.trendRow}>
+      <Text style={styles.trendMonth}>{bucket.monthLabel}</Text>
+      <View style={styles.trendValues}>
+        <TrendValue label="Net" value={formatMoney(bucket.netAmountMinor, currencyCode)} tone="expense" />
+        <TrendValue label={detail} value="" />
+      </View>
+    </View>
+  );
+}
+
+function TrendValue({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'income' | 'expense';
+}) {
+  return (
+    <View style={styles.trendValue}>
+      <Text style={styles.trendLabel}>{label}</Text>
+      {value ? (
+        <Text style={[styles.trendAmount, tone === 'income' && styles.trendIncome, tone === 'expense' && styles.trendExpense]}>
+          {value}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -474,6 +640,22 @@ function accountLabel(account: Account, showCurrencyCodes: boolean): string {
   return showCurrencyCodes ? `${account.name} (${account.currencyCode})` : account.name;
 }
 
+function formatSignedMoney(amountMinor: number, currencyCode: string): string {
+  return amountMinor > 0 ? `+${formatMoney(amountMinor, currencyCode)}` : formatMoney(amountMinor, currencyCode);
+}
+
+function getNetTone(amountMinor: number): 'income' | 'expense' | undefined {
+  if (amountMinor > 0) {
+    return 'income';
+  }
+
+  if (amountMinor < 0) {
+    return 'expense';
+  }
+
+  return undefined;
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -481,6 +663,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
   },
   controlBlock: {
     gap: spacing.xs,
@@ -604,6 +787,50 @@ const styles = StyleSheet.create({
   emptyText: {
     color: colors.muted,
     fontSize: typography.body,
+  },
+  reportNote: {
+    color: colors.muted,
+    fontSize: typography.small,
+  },
+  trendRows: {
+    gap: spacing.xs,
+  },
+  trendRow: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: spacing.sm,
+    padding: spacing.sm,
+  },
+  trendMonth: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  trendValues: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+  },
+  trendValue: {
+    minWidth: 88,
+  },
+  trendLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  trendAmount: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  trendIncome: {
+    color: colors.success,
+  },
+  trendExpense: {
+    color: colors.danger,
   },
   matchSection: {
     gap: spacing.sm,
