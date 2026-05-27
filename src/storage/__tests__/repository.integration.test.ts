@@ -10,6 +10,7 @@ import {
   getSpendingByCategory,
   getTransactionDisplayEntries,
 } from '../../domain/aggregates';
+import { getDefaultDashboardCardSettings } from '../../domain/dashboardCards';
 import type {
   Account,
   AppSnapshot,
@@ -277,6 +278,7 @@ describe('SQLite finance repository integration', () => {
       expect(settings.map((setting) => setting.key)).toEqual(
         expect.arrayContaining([
           'category_catalog_json',
+          'dashboard_card_settings',
           'default_currency_code',
           'default_currency_mode',
           'enabled_currency_codes',
@@ -292,9 +294,142 @@ describe('SQLite finance repository integration', () => {
       expect(snapshot.transactionLines).toEqual([]);
       expect(snapshot.transactionLinks).toEqual([]);
       expect(snapshot.budgets).toEqual([]);
+      expect(await getColumnNames(db, 'budgets')).toEqual(
+        expect.arrayContaining([
+          'name',
+          'amount_minor',
+          'period',
+          'scope_type',
+          'subcategory_id',
+          'is_active',
+        ]),
+      );
       expect(snapshot.recurringBills).toEqual([]);
       expect(snapshot.rainyDayFund.goalMinor).toBe(0);
       expect(snapshot.rainyDayFund.linkedAccountIds).toEqual([]);
+    });
+  });
+
+  it('persists dashboard card settings through the settings store', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const defaults = getDefaultDashboardCardSettings();
+      let snapshot = await repository.getSnapshot();
+
+      expect(snapshot.settings.dashboardCardSettings).toEqual(defaults);
+
+      const customized = [
+        { id: 'recentTransactions' as const, visible: true },
+        { id: 'accounts' as const, visible: false },
+        ...defaults.filter((setting) => !['recentTransactions', 'accounts'].includes(setting.id)),
+      ];
+
+      await repository.updateDashboardCardSettings({ dashboardCardSettings: customized });
+      snapshot = await repository.getSnapshot();
+
+      expect(snapshot.settings.dashboardCardSettings?.slice(0, 2)).toEqual([
+        { id: 'recentTransactions', visible: true },
+        { id: 'accounts', visible: false },
+      ]);
+    });
+  });
+
+  it('falls back to default dashboard cards when stored settings are corrupt', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      await db.runAsync(
+        `INSERT INTO settings (key, value)
+         VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        'dashboard_card_settings',
+        'not-json',
+      );
+
+      const snapshot = await repository.getSnapshot();
+
+      expect(snapshot.settings.dashboardCardSettings).toEqual(getDefaultDashboardCardSettings());
+    });
+  });
+
+  it('persists monthly budgets and prevents duplicate active scopes', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await repository.addBudget({
+        name: 'Overall monthly',
+        amountMinor: 150000,
+        currencyCode: 'AUD',
+        scopeType: 'overall',
+      });
+      await repository.addBudget({
+        name: 'Groceries',
+        amountMinor: 50000,
+        currencyCode: 'AUD',
+        scopeType: 'subcategory',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      });
+
+      let budgets = (await repository.getSnapshot()).budgets;
+      const overall = budgets.find((budget) => budget.scopeType === 'overall');
+      const groceries = budgets.find((budget) => budget.scopeType === 'subcategory');
+
+      expect(overall).toEqual(
+        expect.objectContaining({
+          name: 'Overall monthly',
+          amountMinor: 150000,
+          currencyCode: 'AUD',
+          period: 'monthly',
+          scopeType: 'overall',
+          categoryId: null,
+          subcategoryId: null,
+          isActive: true,
+        }),
+      );
+      expect(groceries).toEqual(
+        expect.objectContaining({
+          name: 'Groceries',
+          amountMinor: 50000,
+          scopeType: 'subcategory',
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+          isActive: true,
+        }),
+      );
+
+      await expect(
+        repository.addBudget({
+          name: 'Duplicate overall',
+          amountMinor: 200000,
+          currencyCode: 'AUD',
+          scopeType: 'overall',
+        }),
+      ).rejects.toThrow('An active budget already exists for this scope.');
+
+      await repository.updateBudget({
+        id: overall!.id,
+        name: 'Overall monthly updated',
+        amountMinor: 175000,
+        currencyCode: 'AUD',
+        scopeType: 'overall',
+      });
+      await repository.archiveBudget(groceries!.id);
+
+      budgets = (await repository.getSnapshot()).budgets;
+      expect(budgets.find((budget) => budget.id === overall!.id)).toEqual(
+        expect.objectContaining({
+          name: 'Overall monthly updated',
+          amountMinor: 175000,
+          isActive: true,
+        }),
+      );
+      expect(budgets.find((budget) => budget.id === groceries!.id)?.isActive).toBe(false);
+
+      await repository.addBudget({
+        name: 'Groceries replacement',
+        amountMinor: 60000,
+        currencyCode: 'AUD',
+        scopeType: 'subcategory',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      });
+      expect((await repository.getSnapshot()).budgets.filter((budget) => budget.isActive)).toHaveLength(2);
     });
   });
 
@@ -1658,6 +1793,65 @@ describe('SQLite finance repository integration', () => {
       expect(await getColumnNames(fixture.db, 'transaction_links')).toEqual(
         expect.arrayContaining(['source_transaction_id', 'target_transaction_id', 'source_line_id', 'target_line_id', 'link_type']),
       );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('migrates legacy category budgets into active monthly category budgets', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.db.execAsync(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL
+        );
+
+        INSERT INTO settings (key, value) VALUES (
+          'category_catalog_json',
+          '[{"id":"food","name":"Food & Dining"}]'
+        );
+
+        CREATE TABLE budgets (
+          id TEXT PRIMARY KEY NOT NULL,
+          category_id TEXT NOT NULL,
+          currency_code TEXT NOT NULL,
+          monthly_limit_minor INTEGER NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(category_id, currency_code)
+        );
+
+        INSERT INTO budgets (
+          id, category_id, currency_code, monthly_limit_minor, created_at, updated_at
+        ) VALUES (
+          'legacy_food_budget', 'food', 'AUD', 90000,
+          '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
+        );
+
+        PRAGMA user_version = 6;
+      `);
+
+      await fixture.repository.initialize('AUD');
+
+      const snapshot = await fixture.repository.getSnapshot();
+      expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      expect(await getColumnNames(fixture.db, 'budgets')).toEqual(
+        expect.arrayContaining(['name', 'amount_minor', 'period', 'scope_type', 'is_active']),
+      );
+      expect(snapshot.budgets).toEqual([
+        expect.objectContaining({
+          id: 'legacy_food_budget',
+          name: 'Food & Dining budget',
+          amountMinor: 90000,
+          currencyCode: 'AUD',
+          period: 'monthly',
+          scopeType: 'category',
+          categoryId: 'food',
+          subcategoryId: null,
+          isActive: true,
+        }),
+      ]);
     } finally {
       fixture.cleanup();
     }

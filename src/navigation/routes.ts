@@ -17,22 +17,12 @@ export type StatisticsStackParamList = {
   Statistics: undefined;
 };
 
-export type SettingsStackParamList = {
-  Settings: undefined;
+export type BudgetsStackParamList = {
+  Budgets: undefined;
 };
 
-export type PlanningStackParamList = {
-  Planning: undefined;
-  SplitPayments: undefined;
-  SplitTransaction: { transactionId: string };
-  OutstandingReimbursements: undefined;
-  Budgets: undefined;
-  AddBudget: undefined;
-  EditBudget: { budgetId: string };
-  BudgetDetails: { budgetId: string };
-  RecurringPayments: undefined;
-  AddRecurringPayment: undefined;
-  EditRecurringPayment: { recurringBillId: string };
+export type SettingsStackParamList = {
+  Settings: undefined;
 };
 
 export type MainDrawerParamList = {
@@ -40,7 +30,7 @@ export type MainDrawerParamList = {
   Accounts: NavigatorScreenParams<AccountsStackParamList> | undefined;
   Transactions: NavigatorScreenParams<TransactionsStackParamList> | undefined;
   Statistics: NavigatorScreenParams<StatisticsStackParamList> | undefined;
-  Planning: NavigatorScreenParams<PlanningStackParamList> | undefined;
+  Budgets: NavigatorScreenParams<BudgetsStackParamList> | undefined;
   Settings: NavigatorScreenParams<SettingsStackParamList> | undefined;
 };
 
@@ -62,6 +52,9 @@ export type RootStackParamList = {
     initialSort?: StatsReportSort;
   };
   RainyDayFund: undefined;
+  AddBudget: undefined;
+  EditBudget: { budgetId: string };
+  DashboardCards: undefined;
   CategoryManagement: undefined;
   CategoryEdit: { categoryId: string };
   SubcategoryEdit: { categoryId: string; subcategoryId: string };

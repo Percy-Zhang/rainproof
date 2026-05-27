@@ -1,317 +1,316 @@
-import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useMemo } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { ActionButton, Card, Chip, FormError, ProgressBar, SectionHeader, TextField } from '../../components/ui';
-import { getBudgetUsage, getSpendingByCategory } from '../../domain/aggregates';
-import { defaultCategories, getCategory } from '../../domain/categories';
-import { getCurrenciesInUse } from '../../domain/currency';
-import { getDateRangeForPreset } from '../../domain/dates';
-import { formatMoney, normalizeCurrencyCode, parseMoneyInput } from '../../domain/money';
-import type {
-  AppSnapshot,
-  NewBudgetInput,
-  NewRecurringBillInput,
-  UpdateRainyDayFundInput,
-} from '../../domain/types';
+import { CategoryIconBadge } from '../../components/CategoryDisplay';
+import { ActionButton, Card, ProgressBar } from '../../components/ui';
+import {
+  getBudgetMonthlyRange,
+  getBudgetUsageDisplayRows,
+  getBudgetUsageFromStatsReport,
+  type BudgetUsageDisplayRow,
+} from '../../domain/budgets';
+import { formatMoney } from '../../domain/money';
+import { getStatsReport } from '../../domain/statsReports';
+import type { AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type BudgetsScreenProps = {
   snapshot: AppSnapshot;
-  onAddBudget: (input: NewBudgetInput) => Promise<void>;
-  onAddRecurringBill: (input: NewRecurringBillInput) => Promise<void>;
-  onUpdateRainyDayFund: (input: UpdateRainyDayFundInput) => Promise<void>;
+  onAddBudget: () => void;
+  onEditBudget: (budgetId: string) => void;
 };
 
 export function BudgetsScreen({
   snapshot,
   onAddBudget,
-  onAddRecurringBill,
-  onUpdateRainyDayFund,
+  onEditBudget,
 }: BudgetsScreenProps) {
-  const currencies = useMemo(
-    () =>
-      getCurrenciesInUse([
-        snapshot.defaultCurrencyCode,
-        snapshot.rainyDayFund.currencyCode,
-        ...snapshot.accounts.map((account) => account.currencyCode),
-      ]),
+  const budgetRows = useMemo(
+    () => getBudgetUsageRowsForSnapshot(snapshot),
     [snapshot],
   );
-  const [budgetCategoryId, setBudgetCategoryId] = useState('food');
-  const [budgetCurrency, setBudgetCurrency] = useState(snapshot.defaultCurrencyCode);
-  const [budgetLimit, setBudgetLimit] = useState('');
-  const [billName, setBillName] = useState('');
-  const [billAmount, setBillAmount] = useState('');
-  const [billCategoryId, setBillCategoryId] = useState('bills');
-  const [billAccountId, setBillAccountId] = useState(snapshot.accounts[0]?.id ?? '');
-  const [billDueDay, setBillDueDay] = useState('1');
-  const [rainyCurrency, setRainyCurrency] = useState(snapshot.rainyDayFund.currencyCode);
-  const [rainyGoal, setRainyGoal] = useState(formatMoney(snapshot.rainyDayFund.goalMinor, snapshot.rainyDayFund.currencyCode).replace(`${snapshot.rainyDayFund.currencyCode} `, ''));
-  const [linkedAccountIds, setLinkedAccountIds] = useState(snapshot.rainyDayFund.linkedAccountIds);
-  const [error, setError] = useState('');
-  const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
-  const categories = snapshot.categories ?? defaultCategories;
-
-  const selectedBillAccount = snapshot.accounts.find((account) => account.id === billAccountId) ?? snapshot.accounts[0];
-  const monthRange = getDateRangeForPreset('last_month');
-  const monthSpending = getSpendingByCategory({
-    transactions: snapshot.transactions,
-    lines: snapshot.transactionLines,
-    transactionLinks: snapshot.transactionLinks,
-    range: monthRange,
-    currencyCode: budgetCurrency,
-  });
-  const budgetUsage = getBudgetUsage(
-    snapshot.budgets.filter((budget) => budget.currencyCode === budgetCurrency),
-    monthSpending,
-  );
-
-  async function submitBudget() {
-    try {
-      await onAddBudget({
-        categoryId: budgetCategoryId,
-        currencyCode: normalizeCurrencyCode(budgetCurrency, snapshot.defaultCurrencyCode),
-        monthlyLimitMinor: parseMoneyInput(budgetLimit),
-      });
-      setBudgetLimit('');
-      setError('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save budget.');
-    }
-  }
-
-  async function submitBill() {
-    try {
-      if (!selectedBillAccount) {
-        throw new Error('Add an account before adding bills.');
-      }
-
-      await onAddRecurringBill({
-        name: billName,
-        amountMinor: parseMoneyInput(billAmount),
-        currencyCode: selectedBillAccount.currencyCode,
-        accountId: selectedBillAccount.id,
-        categoryId: billCategoryId,
-        dueDay: Number(billDueDay),
-      });
-      setBillName('');
-      setBillAmount('');
-      setError('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not add bill.');
-    }
-  }
-
-  async function submitRainyFund() {
-    try {
-      await onUpdateRainyDayFund({
-        currencyCode: normalizeCurrencyCode(rainyCurrency, snapshot.defaultCurrencyCode),
-        goalMinor: parseMoneyInput(rainyGoal),
-        linkedAccountIds,
-      });
-      setError('');
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not update rainy day fund.');
-    }
-  }
 
   return (
-    <View style={styles.stack}>
-      <SectionHeader title="Budgets" detail="Monthly category limits are tracked per currency." />
-
-      <Card testID="budget-form">
-        <Text style={styles.cardTitle}>Monthly limit</Text>
-        <Text style={styles.label}>Category</Text>
-        <View style={styles.wrap}>
-          {categories
-            .filter((category) => category.type !== 'income')
-            .map((category) => (
-              <Chip key={category.id} selected={budgetCategoryId === category.id} onPress={() => setBudgetCategoryId(category.id)}>
-                {category.name}
-              </Chip>
-            ))}
-        </View>
-        {showCurrencyCodes ? (
-          <>
-            <Text style={styles.label}>Currency</Text>
-            <View style={styles.wrap}>
-              {currencies.map((currency) => (
-                <Chip key={currency} selected={budgetCurrency === currency} onPress={() => setBudgetCurrency(currency)}>
-                  {currency}
-                </Chip>
-              ))}
-            </View>
-          </>
-        ) : null}
-        <TextField
-          label="Monthly limit"
-          value={budgetLimit}
-          onChangeText={setBudgetLimit}
-          keyboardType="decimal-pad"
-          placeholder="0.00"
-        />
-        <ActionButton onPress={submitBudget} testID="save-budget">
-          Save budget
-        </ActionButton>
-      </Card>
-
-      {budgetUsage.length ? (
-        <Card testID="budget-list">
-          <Text style={styles.cardTitle}>Used vs remaining</Text>
-          {budgetUsage.map((usage) => {
-            const category = getCategory(usage.budget.categoryId, categories);
-            return (
-              <View key={usage.budget.id} style={styles.budgetRow}>
-                <View style={styles.rowBetween}>
-                  <Text style={styles.categoryName}>{category.name}</Text>
-                  <Text style={styles.amountText}>
-                    {formatMoney(usage.remainingMinor, usage.budget.currencyCode)} left
-                  </Text>
-                </View>
-                <ProgressBar percentage={usage.percentageUsed} color={usage.percentageUsed >= 100 ? colors.danger : category.color} />
-                <Text style={styles.metaText}>
-                  {formatMoney(usage.spentMinor, usage.budget.currencyCode)} of{' '}
-                  {formatMoney(usage.budget.monthlyLimitMinor, usage.budget.currencyCode)}
-                </Text>
-              </View>
-            );
-          })}
-        </Card>
-      ) : null}
-
-      <SectionHeader title="Recurring bills" />
-      <Card testID="bill-form">
-        <TextField label="Name" value={billName} onChangeText={setBillName} placeholder="Internet, Rent, Insurance" />
-        <TextField label="Amount" value={billAmount} onChangeText={setBillAmount} keyboardType="decimal-pad" />
-        <Text style={styles.label}>Account</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
-          {snapshot.accounts.map((account) => (
-            <Chip key={account.id} selected={billAccountId === account.id} onPress={() => setBillAccountId(account.id)}>
-              {showCurrencyCodes ? `${account.name} (${account.currencyCode})` : account.name}
-            </Chip>
-          ))}
-        </ScrollView>
-        <Text style={styles.label}>Category</Text>
-        <View style={styles.wrap}>
-          {categories
-            .filter((category) => category.type !== 'income')
-            .map((category) => (
-              <Chip key={category.id} selected={billCategoryId === category.id} onPress={() => setBillCategoryId(category.id)}>
-                {category.name}
-              </Chip>
-            ))}
-        </View>
-        <TextField label="Due day" value={billDueDay} onChangeText={setBillDueDay} keyboardType="number-pad" />
-        <ActionButton onPress={submitBill} testID="save-bill">
-          Add bill
-        </ActionButton>
-      </Card>
-
-      <Card testID="bill-list">
-        <Text style={styles.cardTitle}>Bills</Text>
-        {snapshot.recurringBills.map((bill) => (
-          <View key={bill.id} style={styles.rowBetween}>
-            <View style={styles.billText}>
-              <Text style={styles.categoryName}>{bill.name}</Text>
-              <Text style={styles.metaText}>Due day {bill.dueDay} - {getCategory(bill.categoryId, categories).name}</Text>
-            </View>
-            <Text style={styles.amountText}>{formatMoney(bill.amountMinor, bill.currencyCode)}</Text>
+    <View style={styles.shell}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryText}>
+            <Text style={styles.heading}>Monthly budgets</Text>
+            <Text style={styles.subtle}>Monthly limits using net spending for the current calendar month.</Text>
           </View>
-        ))}
-      </Card>
-
-      <SectionHeader title="Rainy day fund" detail="Only linked accounts in the fund currency count toward progress." />
-      <Card testID="rainy-fund-form">
-        {showCurrencyCodes ? (
-          <>
-            <Text style={styles.label}>Currency</Text>
-            <View style={styles.wrap}>
-              {currencies.map((currency) => (
-                <Chip key={currency} selected={rainyCurrency === currency} onPress={() => setRainyCurrency(currency)}>
-                  {currency}
-                </Chip>
-              ))}
-            </View>
-          </>
-        ) : null}
-        <TextField label="Goal" value={rainyGoal} onChangeText={setRainyGoal} keyboardType="decimal-pad" />
-        <Text style={styles.label}>Linked accounts</Text>
-        <View style={styles.wrap}>
-          {snapshot.accounts
-            .filter((account) => account.currencyCode === rainyCurrency)
-            .map((account) => (
-              <Chip
-                key={account.id}
-                selected={linkedAccountIds.includes(account.id)}
-                onPress={() =>
-                  setLinkedAccountIds((ids) =>
-                    ids.includes(account.id) ? ids.filter((id) => id !== account.id) : [...ids, account.id],
-                  )
-                }
-              >
-                {account.name}
-              </Chip>
-            ))}
+          <ActionButton onPress={onAddBudget} testID="add-budget">
+            Add
+          </ActionButton>
         </View>
-        <FormError message={error} />
-        <ActionButton onPress={submitRainyFund} testID="save-rainy-fund">
-          Save rainy fund
-        </ActionButton>
-      </Card>
+
+        {budgetRows.length ? (
+          <View style={styles.list}>
+            {budgetRows.map((row) => (
+              <BudgetUsageCard key={row.id} row={row} onPress={() => onEditBudget(row.id)} />
+            ))}
+          </View>
+        ) : (
+          <Card testID="budgets-empty-state">
+            <View style={styles.emptyIcon}>
+              <Ionicons name="wallet-outline" size={24} color={colors.primaryDark} />
+            </View>
+            <Text style={styles.emptyTitle}>No active budgets yet</Text>
+            <Text style={styles.emptyText}>
+              Add an overall, category, or subcategory monthly budget to track spending against this month.
+            </Text>
+            <ActionButton variant="secondary" onPress={onAddBudget}>
+              Add first budget
+            </ActionButton>
+          </Card>
+        )}
+      </ScrollView>
     </View>
   );
 }
 
+function BudgetUsageCard({
+  row,
+  onPress,
+}: {
+  row: BudgetUsageDisplayRow;
+  onPress: () => void;
+}) {
+  const status = getStatusCopy(row);
+  const progressColor = getBudgetStatusColor(row.status);
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.budgetCard, pressed && styles.pressed]}
+      testID={`budget-row-${row.id}`}
+    >
+      <View style={styles.budgetHeader}>
+        <CategoryIconBadge color={row.color} icon={row.icon} size="md" />
+        <View style={styles.budgetTitleWrap}>
+          <Text numberOfLines={1} style={styles.budgetName}>{row.budget.name}</Text>
+          <Text numberOfLines={1} style={styles.scopeText}>{row.scopeLabel} · {row.scopeDetail}</Text>
+        </View>
+        <Text style={[styles.statusPill, { color: progressColor }]}>{status.label}</Text>
+      </View>
+
+      <View style={styles.amountGrid}>
+        <AmountBlock label="Used" value={formatMoney(row.spentMinor, row.budget.currencyCode)} />
+        <AmountBlock label={status.remainingLabel} value={formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode)} tone={row.remainingMinor < 0 ? 'danger' : 'default'} />
+        <AmountBlock label="Limit" value={formatMoney(row.budget.amountMinor, row.budget.currencyCode)} align="right" />
+      </View>
+
+      <ProgressBar percentage={row.percentageUsed} color={progressColor} />
+      <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used this month</Text>
+    </Pressable>
+  );
+}
+
+function AmountBlock({
+  align = 'left',
+  label,
+  tone = 'default',
+  value,
+}: {
+  align?: 'left' | 'right';
+  label: string;
+  tone?: 'default' | 'danger';
+  value: string;
+}) {
+  return (
+    <View style={[styles.amountBlock, align === 'right' && styles.amountBlockRight]}>
+      <Text style={styles.amountLabel}>{label}</Text>
+      <Text style={[styles.amountValue, tone === 'danger' && styles.dangerText]}>{value}</Text>
+    </View>
+  );
+}
+
+function getBudgetUsageRowsForSnapshot(snapshot: AppSnapshot): BudgetUsageDisplayRow[] {
+  const activeBudgets = snapshot.budgets.filter((budget) => budget.isActive);
+  const range = getBudgetMonthlyRange();
+  const currencies = Array.from(new Set(activeBudgets.map((budget) => budget.currencyCode)));
+  const usages = currencies.flatMap((currencyCode) => {
+    const report = getStatsReport({
+      reportKind: 'expense',
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
+      accounts: snapshot.accounts,
+      categories: snapshot.categories,
+      range,
+      currencyCode,
+    });
+
+    return getBudgetUsageFromStatsReport({ budgets: activeBudgets, report });
+  });
+
+  return getBudgetUsageDisplayRows(usages, snapshot.categories).sort((left, right) => (
+    getBudgetStatusRank(right.status) - getBudgetStatusRank(left.status) ||
+    right.percentageUsed - left.percentageUsed ||
+    left.budget.name.localeCompare(right.budget.name) ||
+    left.budget.id.localeCompare(right.budget.id)
+  ));
+}
+
+function getStatusCopy(row: BudgetUsageDisplayRow): { label: string; remainingLabel: string } {
+  if (row.remainingMinor < 0) {
+    return { label: 'Over', remainingLabel: 'Over by' };
+  }
+
+  if (row.status === 'near_limit') {
+    return { label: 'Near limit', remainingLabel: 'Remaining' };
+  }
+
+  return { label: 'Under', remainingLabel: 'Remaining' };
+}
+
+function getBudgetStatusRank(status: BudgetUsageDisplayRow['status']): number {
+  switch (status) {
+    case 'over_budget':
+      return 3;
+    case 'near_limit':
+      return 2;
+    case 'under_budget':
+      return 1;
+  }
+}
+
+function getBudgetStatusColor(status: BudgetUsageDisplayRow['status']): string {
+  switch (status) {
+    case 'over_budget':
+      return colors.danger;
+    case 'near_limit':
+      return '#9B6B12';
+    case 'under_budget':
+      return colors.success;
+  }
+}
+
 const styles = StyleSheet.create({
-  stack: {
+  shell: {
+    flex: 1,
+  },
+  content: {
     gap: spacing.md,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
   },
-  cardTitle: {
-    color: colors.ink,
-    fontSize: typography.h3,
-    fontWeight: '800',
-  },
-  label: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  wrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  chips: {
-    gap: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  budgetRow: {
-    gap: spacing.sm,
-  },
-  rowBetween: {
+  summaryRow: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.md,
     justifyContent: 'space-between',
   },
-  categoryName: {
+  summaryText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  heading: {
+    color: colors.ink,
+    fontSize: typography.h2,
+    fontWeight: '900',
+  },
+  subtle: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+  },
+  list: {
+    gap: spacing.md,
+  },
+  budgetCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.lg,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+  },
+  budgetHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  budgetTitleWrap: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  budgetName: {
     color: colors.ink,
     fontSize: typography.body,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  amountText: {
-    color: colors.ink,
-    fontSize: typography.body,
-    fontWeight: '800',
-    textAlign: 'right',
-  },
-  metaText: {
+  scopeText: {
     color: colors.muted,
     fontSize: typography.small,
   },
-  billText: {
+  statusPill: {
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  amountGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  amountBlock: {
     flex: 1,
     gap: spacing.xs,
+    minWidth: 0,
+  },
+  amountBlockRight: {
+    alignItems: 'flex-end',
+  },
+  amountLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  amountValue: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  dangerText: {
+    color: colors.danger,
+  },
+  progressText: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  emptyIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  emptyTitle: {
+    color: colors.ink,
+    fontSize: typography.h3,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: colors.muted,
+    fontSize: typography.body,
+    lineHeight: 21,
+  },
+  pressed: {
+    opacity: 0.78,
   },
 });

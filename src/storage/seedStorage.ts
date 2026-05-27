@@ -73,8 +73,9 @@ export async function seedDemoFirstRunStorage(
 
     await db.runAsync(
       `INSERT INTO budgets (
-        id, category_id, currency_code, monthly_limit_minor, created_at, updated_at
-      ) VALUES (?, 'food', ?, 70000, ?, ?)`,
+        id, name, amount_minor, currency_code, period, scope_type, category_id,
+        subcategory_id, is_active, created_at, updated_at
+      ) VALUES (?, 'Food & Dining budget', 70000, ?, 'monthly', 'category', 'food', NULL, 1, ?, ?)`,
       createLocalId('budget'),
       currencyCode,
       now,
@@ -261,16 +262,31 @@ async function upsertSeedBudget(
   monthlyLimitMinor: number,
   now: string,
 ): Promise<void> {
+  const updated = await db.runAsync(
+    `UPDATE budgets
+     SET amount_minor = ?, updated_at = ?
+     WHERE period = 'monthly' AND scope_type = 'category' AND currency_code = ?
+       AND category_id = ? AND subcategory_id IS NULL AND is_active = 1`,
+    monthlyLimitMinor,
+    now,
+    currencyCode,
+    categoryId,
+  );
+
+  if (updated.changes > 0) {
+    return;
+  }
+
   await db.runAsync(
     `INSERT INTO budgets (
-      id, category_id, currency_code, monthly_limit_minor, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(category_id, currency_code)
-    DO UPDATE SET monthly_limit_minor = excluded.monthly_limit_minor, updated_at = excluded.updated_at`,
+      id, name, amount_minor, currency_code, period, scope_type, category_id,
+      subcategory_id, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, 1, ?, ?)`,
     createLocalId('budget'),
-    categoryId,
-    currencyCode,
+    `${categoryId.replace(/[_-]+/g, ' ')} budget`,
     monthlyLimitMinor,
+    currencyCode,
+    categoryId,
     now,
     now,
   );

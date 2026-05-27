@@ -9,7 +9,9 @@ import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { ComposerScreenScaffold } from '../components/ScreenScaffold';
 import { FormError } from '../components/ui';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
+import { BudgetFormScreen } from '../features/budgets/BudgetFormScreen';
 import { RainyDayFundScreen } from '../features/rainyDay/RainyDayFundScreen';
+import { DashboardCardsScreen } from '../features/settings/DashboardCardsScreen';
 import { StatsDrilldownScreen } from '../features/stats/StatsDrilldownScreen';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
@@ -206,6 +208,91 @@ export function RainyDayFundRouteScreen() {
           showHeader={false}
         />
       </ScrollView>
+    </DetailSafeArea>
+  );
+}
+
+export function AddBudgetRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const { snapshot, actions } = useRainproofDataContext();
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="addBudget">
+        <BudgetFormScreen
+          mode="add"
+          snapshot={snapshot}
+          onAddBudget={actions.addBudget}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function EditBudgetRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'EditBudget'>>();
+  const { snapshot, actions } = useRainproofDataContext();
+  const budget = snapshot?.budgets.find((item) => item.id === route.params.budgetId);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  if (!budget) {
+    return <MissingDataShell message="Budget not found." />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="editBudget">
+        <BudgetFormScreen
+          mode="edit"
+          snapshot={snapshot}
+          budget={budget}
+          onUpdateBudget={actions.updateBudget}
+          onArchiveBudget={actions.archiveBudget}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function DashboardCardsRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const { snapshot, actions } = useRainproofDataContext();
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  return (
+    <DetailSafeArea testID="screen-dashboardCards">
+      <View style={styles.detailTopBar}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
+          <Text style={styles.backButtonText}>Back</Text>
+        </Pressable>
+        <Text numberOfLines={1} style={styles.detailTitle}>Dashboard cards</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      <DashboardCardsScreen
+        settings={snapshot.settings.dashboardCardSettings}
+        onUpdateSettings={(dashboardCardSettings) =>
+          actions.updateDashboardCardSettings({ dashboardCardSettings })}
+      />
     </DetailSafeArea>
   );
 }

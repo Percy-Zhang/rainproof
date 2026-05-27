@@ -100,11 +100,20 @@ export type SubcategoryDefinition = {
   icon: string;
 };
 
+export type BudgetPeriod = 'monthly';
+
+export type BudgetScopeType = 'overall' | 'category' | 'subcategory';
+
 export type Budget = {
   id: string;
-  categoryId: string;
+  name: string;
+  amountMinor: number;
   currencyCode: CurrencyCode;
-  monthlyLimitMinor: number;
+  period: BudgetPeriod;
+  scopeType: BudgetScopeType;
+  categoryId: string | null;
+  subcategoryId: string | null;
+  isActive: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -158,6 +167,8 @@ export type BudgetUsage = {
   spentMinor: number;
   remainingMinor: number;
   percentageUsed: number;
+  status: 'under_budget' | 'near_limit' | 'over_budget';
+  matchingLineIds: string[];
 };
 
 export type RainyDayProgress = {
@@ -174,6 +185,21 @@ export type CashFlowSummary = {
   netMinor: number;
 };
 
+export type DashboardCardId =
+  | 'balanceSummary'
+  | 'cashFlow'
+  | 'rainyDay'
+  | 'accounts'
+  | 'creditCards'
+  | 'budgetProgress'
+  | 'topSpending'
+  | 'recentTransactions';
+
+export type DashboardCardSetting = {
+  id: DashboardCardId;
+  visible: boolean;
+};
+
 export type UpcomingBill = RecurringBill & {
   nextDueDate: string;
 };
@@ -184,6 +210,7 @@ export type AppSettings = {
   multiCurrencyEnabled: boolean;
   enabledCurrencyCodes: CurrencyCode[];
   dashboardSelectedAccountIds: string[] | null;
+  dashboardCardSettings?: DashboardCardSetting[];
 };
 
 export type AppSnapshot = {
@@ -265,9 +292,18 @@ export type UpdateTransactionLinkInput = NewTransactionLinkInput & {
 };
 
 export type NewBudgetInput = {
-  categoryId: string;
+  name?: string;
+  amountMinor: number;
   currencyCode: CurrencyCode;
-  monthlyLimitMinor: number;
+  period?: BudgetPeriod;
+  scopeType: BudgetScopeType;
+  categoryId?: string | null;
+  subcategoryId?: string | null;
+  isActive?: boolean;
+};
+
+export type UpdateBudgetInput = NewBudgetInput & {
+  id: string;
 };
 
 export type NewRecurringBillInput = {
@@ -289,6 +325,10 @@ export type UpdateAppSettingsInput = {
   defaultCurrencyCode: CurrencyCode;
   multiCurrencyEnabled: boolean;
   enabledCurrencyCodes: CurrencyCode[];
+};
+
+export type UpdateDashboardCardSettingsInput = {
+  dashboardCardSettings: DashboardCardSetting[];
 };
 
 export type UpdateCategoryCatalogInput = {

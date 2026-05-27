@@ -1,6 +1,7 @@
 import { sanitizeCategoryCatalog } from '../domain/categories';
 import { uniqueCurrencyCodes } from '../domain/currencyCatalog';
 import { getEffectiveDisplayCurrency, normalizeDefaultCurrencyMode } from '../domain/currency';
+import { normalizeDashboardCardSettings } from '../domain/dashboardCards';
 import { normalizeCurrencyCode } from '../domain/money';
 import type { AppSnapshot, RainyDayFund } from '../domain/types';
 import type { RepositoryDatabase } from './database';
@@ -50,7 +51,10 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   const linkRows = await db.getAllAsync<TransactionLinkRow>(
     'SELECT * FROM transaction_links ORDER BY created_at ASC, id ASC',
   );
-  const budgetRows = await db.getAllAsync<BudgetRow>('SELECT * FROM budgets ORDER BY category_id ASC');
+  const budgetRows = await db.getAllAsync<BudgetRow>(
+    `SELECT * FROM budgets
+     ORDER BY is_active DESC, currency_code ASC, scope_type ASC, name ASC, created_at ASC`,
+  );
   const billRows = await db.getAllAsync<RecurringBillRow>(
     'SELECT * FROM recurring_bills ORDER BY due_day ASC',
   );
@@ -65,6 +69,14 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       'SELECT value FROM settings WHERE key = ?',
       'dashboard_selected_account_ids',
     ))?.value,
+  );
+  const dashboardCardSettings = normalizeDashboardCardSettings(
+    safeParseJson(
+      (await db.getFirstAsync<SettingRow>(
+        'SELECT value FROM settings WHERE key = ?',
+        'dashboard_card_settings',
+      ))?.value,
+    ),
   );
   const categories = sanitizeCategoryCatalog(
     safeParseJson(
@@ -117,6 +129,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       multiCurrencyEnabled: accountCurrencyCodes.length > 1,
       enabledCurrencyCodes,
       dashboardSelectedAccountIds,
+      dashboardCardSettings,
     },
     categories,
     accounts: accountRows.map(mapAccount),

@@ -144,20 +144,21 @@ export function getSpendingByCategory({
 }
 
 export function getBudgetUsage(budgets: Budget[], spending: SpendingByCategory[]): BudgetUsage[] {
-  return budgets.map((budget) => {
+  return budgets.filter((budget) => budget.isActive && budget.scopeType === 'category').map((budget) => {
     const spentMinor =
       spending.find(
         (item) => item.categoryId === budget.categoryId && item.currencyCode === budget.currencyCode,
       )?.amountMinor ?? 0;
+    const percentageUsed =
+      budget.amountMinor <= 0 ? 0 : Math.round((spentMinor / budget.amountMinor) * 100);
 
     return {
       budget,
       spentMinor,
-      remainingMinor: budget.monthlyLimitMinor - spentMinor,
-      percentageUsed:
-        budget.monthlyLimitMinor <= 0
-          ? 0
-          : Math.min(100, Math.round((spentMinor / budget.monthlyLimitMinor) * 100)),
+      remainingMinor: budget.amountMinor - spentMinor,
+      percentageUsed,
+      status: percentageUsed >= 100 ? 'over_budget' : percentageUsed >= 80 ? 'near_limit' : 'under_budget',
+      matchingLineIds: [],
     };
   });
 }

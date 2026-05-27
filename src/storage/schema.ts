@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -87,12 +87,24 @@ ON transaction_links(link_type);
 
 CREATE TABLE IF NOT EXISTS budgets (
   id TEXT PRIMARY KEY NOT NULL,
-  category_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  amount_minor INTEGER NOT NULL,
   currency_code TEXT NOT NULL,
-  monthly_limit_minor INTEGER NOT NULL,
+  period TEXT NOT NULL DEFAULT 'monthly',
+  scope_type TEXT NOT NULL DEFAULT 'category',
+  category_id TEXT,
+  subcategory_id TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE(category_id, currency_code)
+  CHECK (amount_minor > 0),
+  CHECK (period IN ('monthly')),
+  CHECK (scope_type IN ('overall', 'category', 'subcategory')),
+  CHECK (
+    (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL) OR
+    (scope_type = 'category' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NULL) OR
+    (scope_type = 'subcategory' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NOT NULL AND subcategory_id <> '')
+  )
 );
 
 CREATE TABLE IF NOT EXISTS recurring_bills (

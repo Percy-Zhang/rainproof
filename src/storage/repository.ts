@@ -4,12 +4,15 @@ import type {
   NewAccountInput,
   NewBudgetInput,
   NewRecurringBillInput,
+  Budget,
   NewTransactionInput,
   NewTransactionLinkInput,
   TransactionLink,
   UpdateAccountInput,
   UpdateAppSettingsInput,
   UpdateCategoryCatalogInput,
+  UpdateDashboardCardSettingsInput,
+  UpdateBudgetInput,
   UpdateRainyDayFundInput,
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
@@ -27,7 +30,13 @@ import {
 import type { RepositoryDatabase } from './database';
 import type { CountRow } from './mappers';
 import { runMigrations } from './migrations';
-import { addBudgetStorage, addRecurringBillStorage } from './planningStorage';
+import {
+  addBudgetStorage,
+  addRecurringBillStorage,
+  archiveBudgetStorage,
+  listBudgetsStorage,
+  updateBudgetStorage,
+} from './planningStorage';
 import { ensureRainyDayFund, updateRainyDayFundStorage } from './rainyDayStorage';
 import {
   ensureDemoSampleDataVersionStorage,
@@ -36,6 +45,7 @@ import {
 import {
   initializeRequiredSettings,
   updateCategoryCatalogStorage,
+  updateDashboardCardSettingsStorage,
   updateDashboardSelectedAccountIdsStorage,
   updateSettingsStorage,
 } from './settingsStorage';
@@ -75,11 +85,15 @@ export type FinanceRepository = {
   getTransactionLinksForTargetTransaction(transactionId: string): Promise<TransactionLink[]>;
   getTransactionLinksForTransaction(transactionId: string): Promise<TransactionLink[]>;
   removeTransactionLinksForTransaction(transactionId: string): Promise<void>;
+  listBudgets(): Promise<Budget[]>;
   addBudget(input: NewBudgetInput): Promise<void>;
+  updateBudget(input: UpdateBudgetInput): Promise<void>;
+  archiveBudget(budgetId: string): Promise<void>;
   addRecurringBill(input: NewRecurringBillInput): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
+  updateDashboardCardSettings(input: UpdateDashboardCardSettingsInput): Promise<void>;
   updateDashboardSelectedAccountIds(accountIds: string[]): Promise<void>;
   updateAccountDashboardVisibility(accountId: string, showOnDashboard: boolean): Promise<void>;
   updateAccountOrder(accountIds: string[]): Promise<void>;
@@ -180,6 +194,18 @@ class SQLiteFinanceRepository implements FinanceRepository {
     return addBudgetStorage(this.db, input);
   }
 
+  async listBudgets(): Promise<Budget[]> {
+    return listBudgetsStorage(this.db);
+  }
+
+  async updateBudget(input: UpdateBudgetInput): Promise<void> {
+    return updateBudgetStorage(this.db, input);
+  }
+
+  async archiveBudget(budgetId: string): Promise<void> {
+    return archiveBudgetStorage(this.db, budgetId);
+  }
+
   async addRecurringBill(input: NewRecurringBillInput): Promise<void> {
     return addRecurringBillStorage(this.db, input);
   }
@@ -194,6 +220,10 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void> {
     return updateCategoryCatalogStorage(this.db, input);
+  }
+
+  async updateDashboardCardSettings(input: UpdateDashboardCardSettingsInput): Promise<void> {
+    return updateDashboardCardSettingsStorage(this.db, input);
   }
 
   async updateDashboardSelectedAccountIds(accountIds: string[]): Promise<void> {

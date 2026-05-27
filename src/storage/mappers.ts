@@ -80,9 +80,14 @@ export type TransactionLinkRow = {
 
 export type BudgetRow = {
   id: string;
-  category_id: string;
+  name: string;
+  amount_minor: number;
   currency_code: string;
-  monthly_limit_minor: number;
+  period: 'monthly';
+  scope_type: 'overall' | 'category' | 'subcategory';
+  category_id: string | null;
+  subcategory_id: string | null;
+  is_active: number;
   created_at: string;
   updated_at: string;
 };
@@ -187,9 +192,14 @@ export function mapTransactionLink(row: TransactionLinkRow): TransactionLink {
 export function mapBudget(row: BudgetRow): Budget {
   return {
     id: row.id,
-    categoryId: row.category_id,
+    name: row.name,
+    amountMinor: row.amount_minor,
     currencyCode: normalizeCurrencyCode(row.currency_code),
-    monthlyLimitMinor: row.monthly_limit_minor,
+    period: row.period,
+    scopeType: row.scope_type,
+    categoryId: row.category_id || null,
+    subcategoryId: row.subcategory_id || null,
+    isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

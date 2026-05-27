@@ -54,17 +54,35 @@ CREATE INDEX IF NOT EXISTS idx_transaction_links_link_type
 ON transaction_links(link_type);
 `;
 
-const PLANNING_AND_RAINY_DAY_SCHEMA_SQL = `
+const BUDGETS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS budgets (
   id TEXT PRIMARY KEY NOT NULL,
-  category_id TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  amount_minor INTEGER NOT NULL,
   currency_code TEXT NOT NULL,
-  monthly_limit_minor INTEGER NOT NULL,
+  period TEXT NOT NULL DEFAULT 'monthly',
+  scope_type TEXT NOT NULL DEFAULT 'category',
+  category_id TEXT,
+  subcategory_id TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
-  UNIQUE(category_id, currency_code)
+  CHECK (amount_minor > 0),
+  CHECK (period IN ('monthly')),
+  CHECK (scope_type IN ('overall', 'category', 'subcategory')),
+  CHECK (
+    (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL) OR
+    (scope_type = 'category' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NULL) OR
+    (scope_type = 'subcategory' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NOT NULL AND subcategory_id <> '')
+  )
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope
+ON budgets(period, currency_code, scope_type, COALESCE(category_id, ''), COALESCE(subcategory_id, ''))
+WHERE is_active = 1;
+`;
+
+const PLANNING_AND_RAINY_DAY_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS recurring_bills (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
@@ -142,6 +160,12 @@ const migrations: Migration[] = [
       await ensureAccountCreditLimitColumn(db);
     },
   },
+  {
+    version: 7,
+    migrate: async (db) => {
+      await ensureBudgetSchema(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -172,7 +196,114 @@ async function ensureCurrentSchemaCompatibility(db: MigrationDatabase): Promise<
   await ensureAccountCreditLimitColumn(db);
   await ensureTransactionCompatibilityColumns(db);
   await ensureLineLevelTransactionLinkSchema(db);
+  await ensureBudgetSchema(db);
   await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
+}
+
+type LegacyBudgetRow = {
+  id: string;
+  category_id: string;
+  currency_code: string;
+  monthly_limit_minor: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type CategoryCatalogSettingRow = {
+  value: string;
+};
+
+async function ensureBudgetSchema(db: MigrationDatabase): Promise<void> {
+  const columns = await db.getAllAsync<TableColumnRow>('PRAGMA table_info(budgets)');
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (columnNames.has('amount_minor') && columnNames.has('scope_type') && columnNames.has('is_active')) {
+    await db.execAsync(BUDGETS_SCHEMA_SQL);
+    return;
+  }
+
+  const legacyRows = await db.getAllAsync<LegacyBudgetRow>(
+    'SELECT id, category_id, currency_code, monthly_limit_minor, created_at, updated_at FROM budgets',
+  );
+  const categoryNames = await getBudgetMigrationCategoryNames(db);
+
+  await db.execAsync(`
+DROP TABLE IF EXISTS budgets_v1_next;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_v1_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+`);
+
+  for (const row of legacyRows) {
+    const categoryId = row.category_id?.trim() || 'other';
+    const name = `${categoryNames.get(categoryId) ?? formatBudgetMigrationLabel(categoryId)} budget`;
+    const amountMinor = Number(row.monthly_limit_minor);
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      continue;
+    }
+
+    await db.runAsync(
+      `INSERT INTO budgets_v1_next (
+        id, name, amount_minor, currency_code, period, scope_type, category_id,
+        subcategory_id, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, 1, ?, ?)`,
+      row.id,
+      name,
+      amountMinor,
+      row.currency_code,
+      categoryId,
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
+  await db.execAsync(`
+DROP TABLE budgets;
+ALTER TABLE budgets_v1_next RENAME TO budgets;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+`);
+}
+
+async function getBudgetMigrationCategoryNames(db: MigrationDatabase): Promise<Map<string, string>> {
+  const setting = await db.getFirstAsync<CategoryCatalogSettingRow>(
+    'SELECT value FROM settings WHERE key = ?',
+    'category_catalog_json',
+  );
+  const names = new Map<string, string>();
+
+  try {
+    const parsed = JSON.parse(setting?.value ?? '[]');
+    if (!Array.isArray(parsed)) {
+      return names;
+    }
+
+    for (const category of parsed) {
+      if (
+        category &&
+        typeof category === 'object' &&
+        typeof category.id === 'string' &&
+        typeof category.name === 'string' &&
+        category.id.trim() &&
+        category.name.trim()
+      ) {
+        names.set(category.id.trim(), category.name.trim());
+      }
+    }
+  } catch {
+    return names;
+  }
+
+  return names;
+}
+
+function formatBudgetMigrationLabel(value: string): string {
+  const words = value
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  return words.length
+    ? words.map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ')
+    : 'Category';
 }
 
 async function ensureLineLevelTransactionLinkSchema(db: MigrationDatabase): Promise<void> {

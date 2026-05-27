@@ -10,12 +10,18 @@ import { colors, spacing, typography } from '../../theme/tokens';
 
 type SettingsScreenProps = {
   snapshot: AppSnapshot;
+  onOpenDashboardCards: () => void;
   onOpenCategoryManagement: () => void;
   onUpdateSettings: (input: UpdateAppSettingsInput) => Promise<void>;
   showHeader?: boolean;
 };
 
-export function SettingsScreen({ snapshot, onOpenCategoryManagement, showHeader = true }: SettingsScreenProps) {
+export function SettingsScreen({
+  snapshot,
+  onOpenDashboardCards,
+  onOpenCategoryManagement,
+  showHeader = true,
+}: SettingsScreenProps) {
   const accountCurrencyCodes = uniqueCurrencyCodes(snapshot.accounts.map((account) => account.currencyCode));
   const displayCurrencyCodes = accountCurrencyCodes.length ? accountCurrencyCodes : [snapshot.settings.defaultCurrencyCode];
 
@@ -61,6 +67,22 @@ export function SettingsScreen({ snapshot, onOpenCategoryManagement, showHeader 
             </View>
           ))}
         </View>
+      </Card>
+
+      <Card testID="dashboard-card-settings-card">
+        <Text style={styles.cardTitle}>Dashboard</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onOpenDashboardCards}
+          style={({ pressed }) => [styles.settingsNavRow, pressed && styles.pressed]}
+        >
+          <CategoryIconBadge color={colors.primary} icon="grid-outline" size="md" />
+          <View style={styles.settingText}>
+            <Text style={styles.settingTitle}>Dashboard cards</Text>
+            <Text style={styles.smallMuted}>Choose visible cards and reorder the Dashboard.</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+        </Pressable>
       </Card>
 
       <Card testID="category-settings-card">

@@ -8,6 +8,7 @@ import { CategorySettingsDraftProvider } from '../features/settings/CategorySett
 import { colors, spacing, typography } from '../theme/tokens';
 import {
   AccountsDrawerScreen,
+  BudgetsDrawerScreen,
   HomeDrawerScreen,
   SettingsDrawerScreen,
   StatisticsDrawerScreen,
@@ -24,6 +25,9 @@ import {
   AddTransactionRouteScreen,
   EditAccountRouteScreen,
   EditTransactionRouteScreen,
+  AddBudgetRouteScreen,
+  DashboardCardsRouteScreen,
+  EditBudgetRouteScreen,
   LinkTransactionRouteScreen,
   RainyDayFundRouteScreen,
   StatsDrilldownRouteScreen,
@@ -58,6 +62,21 @@ export function RootNavigator() {
         <RootStack.Screen
           name="RainyDayFund"
           component={RainyDayFundRouteScreen}
+          options={{ headerShown: false }}
+        />
+        <RootStack.Screen
+          name="AddBudget"
+          component={AddBudgetRouteScreen}
+          options={{ headerShown: false }}
+        />
+        <RootStack.Screen
+          name="EditBudget"
+          component={EditBudgetRouteScreen}
+          options={{ headerShown: false }}
+        />
+        <RootStack.Screen
+          name="DashboardCards"
+          component={DashboardCardsRouteScreen}
           options={{ headerShown: false }}
         />
         <RootStack.Screen
@@ -130,6 +149,14 @@ function MainDrawerNavigator() {
         options={{
           drawerIcon: ({ color, size }) => <Ionicons name="bar-chart-outline" color={color} size={size} />,
           title: 'Statistics',
+        }}
+      />
+      <Drawer.Screen
+        name="Budgets"
+        component={BudgetsDrawerScreen}
+        options={{
+          drawerIcon: ({ color, size }) => <Ionicons name="wallet-outline" color={color} size={size} />,
+          title: 'Budgets',
         }}
       />
       <Drawer.Screen

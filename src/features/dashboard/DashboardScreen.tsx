@@ -2,9 +2,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { Card, ProgressBar } from '../../components/ui';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
+import {
+  getBudgetMonthlyRange,
+  getBudgetUsageDisplayRows,
+  getBudgetUsageFromStatsReport,
+  getDashboardBudgetSummaryData,
+  type BudgetUsageDisplayRow,
+} from '../../domain/budgets';
 import { defaultCategories } from '../../domain/categories';
+import {
+  getDashboardCardDefinition,
+  getRenderableDashboardCardIds,
+} from '../../domain/dashboardCards';
 import {
   getDashboardAccountPreview,
   getDashboardInitialSelectedAccountIds,
@@ -21,11 +33,17 @@ import {
   type CreditCardCurrencySummary,
 } from '../../domain/creditCards';
 import { formatMoney } from '../../domain/money';
+import { getStatsReport } from '../../domain/statsReports';
 import type {
   Account,
   AccountBalance,
   AppSnapshot,
+  CashFlowSummary,
+  CategoryDefinition,
+  CurrencyTotal,
+  DashboardCardId,
   RainyDayProgress,
+  SpendingByCategory,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { CompactTransactionListItem } from '../transactions/TransactionListItems';
@@ -33,24 +51,32 @@ import { CompactTransactionListItem } from '../transactions/TransactionListItems
 type DashboardScreenProps = {
   snapshot: AppSnapshot;
   accountBalances: AccountBalance[];
+  totalsByCurrency: CurrencyTotal[];
   rainyDayProgress: RainyDayProgress;
+  cashFlow: CashFlowSummary | null;
+  currentMonthSpending: SpendingByCategory[];
   onAddAccount: () => void;
   onOpenRainyDayFund: () => void;
   onOpenTransactions: () => void;
   onOpenTransaction: (transactionId: string) => void;
   onOpenAccount: () => void;
+  onOpenBudgets: () => void;
   onUpdateSelectedAccountIds: (accountIds: string[]) => Promise<void>;
 };
 
 export function DashboardScreen({
   snapshot,
   accountBalances,
+  totalsByCurrency,
   rainyDayProgress,
+  cashFlow,
+  currentMonthSpending,
   onAddAccount,
   onOpenRainyDayFund,
   onOpenTransactions,
   onOpenTransaction,
   onOpenAccount,
+  onOpenBudgets,
   onUpdateSelectedAccountIds,
 }: DashboardScreenProps) {
   const hasAnyAccounts = snapshot.accounts.length > 0;
@@ -77,6 +103,18 @@ export function DashboardScreen({
     () => getCreditCardPortfolioSummary(accountBalances),
     [accountBalances],
   );
+  const budgetProgress = useMemo(
+    () => getDashboardBudgetProgressData(snapshot, categories),
+    [categories, snapshot],
+  );
+  const dashboardCardIds = useMemo(
+    () =>
+      getRenderableDashboardCardIds(snapshot.settings.dashboardCardSettings, {
+        budgetProgress: budgetProgress.activeBudgetCount > 0,
+        creditCards: creditCardSummaries.length > 0,
+      }),
+    [budgetProgress.activeBudgetCount, creditCardSummaries.length, snapshot.settings.dashboardCardSettings],
+  );
 
   useEffect(() => {
     setSelectedAccountIds((currentIds) => {
@@ -96,37 +134,164 @@ export function DashboardScreen({
     });
   }
 
+  function renderDashboardCard(cardId: DashboardCardId) {
+    switch (cardId) {
+      case 'balanceSummary':
+        return (
+          <BalanceSummaryCard
+            key={cardId}
+            showCurrencyCodes={showCurrencyCodes}
+            totalsByCurrency={totalsByCurrency}
+          />
+        );
+      case 'cashFlow':
+        return (
+          <CashFlowCard
+            key={cardId}
+            cashFlow={cashFlow}
+            showCurrencyCodes={showCurrencyCodes}
+          />
+        );
+      case 'rainyDay':
+        return (
+          <RainyDayDashboardCard
+            key={cardId}
+            rainyDayProgress={rainyDayProgress}
+            showCurrencyCodes={showCurrencyCodes}
+            onOpenRainyDayFund={onOpenRainyDayFund}
+          />
+        );
+      case 'accounts':
+        return (
+          <AccountsDashboardCard
+            key={cardId}
+            accountPreview={accountPreview}
+            hasAnyAccounts={hasAnyAccounts}
+            selectedAccountIds={selectedAccountIds}
+            showCurrencyCodes={showCurrencyCodes}
+            onAddAccount={onAddAccount}
+            onOpenAccount={onOpenAccount}
+            onToggleAccount={toggleAccount}
+          />
+        );
+      case 'creditCards':
+        return (
+          <CreditCardsDashboardCard
+            key={cardId}
+            creditCardSummaries={creditCardSummaries}
+            showCurrencyCodes={showCurrencyCodes}
+          />
+        );
+      case 'budgetProgress':
+        return (
+          <BudgetProgressDashboardCard
+            key={cardId}
+            activeBudgetCount={budgetProgress.activeBudgetCount}
+            rows={budgetProgress.rows}
+            showCurrencyCodes={showCurrencyCodes}
+            onOpenBudgets={onOpenBudgets}
+          />
+        );
+      case 'topSpending':
+        return (
+          <TopSpendingCard
+            key={cardId}
+            categories={categories}
+            currentMonthSpending={currentMonthSpending}
+            showCurrencyCodes={showCurrencyCodes}
+          />
+        );
+      case 'recentTransactions':
+        return (
+          <RecentTransactionsCard
+            key={cardId}
+            categories={categories}
+            recentTransactions={recentTransactions}
+            selectedAccountIds={selectedAccountIds}
+            showCurrencyCodes={showCurrencyCodes}
+            snapshot={snapshot}
+            onOpenTransaction={onOpenTransaction}
+            onOpenTransactions={onOpenTransactions}
+          />
+        );
+      default:
+        return null;
+    }
+  }
+
+  const renderedCards = dashboardCardIds.map(renderDashboardCard).filter(Boolean);
+
   return (
     <View style={styles.stack}>
-      <Card testID="rainy-day-card" style={styles.compactCard}>
-        <View style={styles.rowBetween}>
-          <View style={styles.headerText}>
-            <Text style={styles.kicker}>Rainy day fund</Text>
-            <Text style={styles.cardTitle}>{rainyDayProgress.percentage}% saved</Text>
-          </View>
-          <View style={styles.rainyHeaderAction}>
-            <Text style={styles.progressAmount}>
-              {formatMoney(rainyDayProgress.currentMinor, rainyDayProgress.fund.currencyCode, {
-                showCurrencyCode: showCurrencyCodes,
-              })}
-            </Text>
-            <HeaderIconAction
-              accessibilityLabel="Edit rainy day fund"
-              icon="create-outline"
-              onPress={onOpenRainyDayFund}
-              testID="dashboard-edit-rainy-day"
-            />
-          </View>
-        </View>
-        <ProgressBar percentage={rainyDayProgress.percentage} />
-        <Text style={styles.smallMuted}>
-          Goal {formatMoney(rainyDayProgress.fund.goalMinor, rainyDayProgress.fund.currencyCode, {
-            showCurrencyCode: showCurrencyCodes,
-          })}
-        </Text>
-      </Card>
+      {renderedCards.length ? renderedCards : (
+        <Card testID="dashboard-empty-cards-card" style={styles.compactCard}>
+          <Text style={styles.cardTitle}>Dashboard</Text>
+          <Text style={styles.emptyText}>All dashboard cards are hidden. Turn cards back on in Settings.</Text>
+        </Card>
+      )}
+    </View>
+  );
+}
 
-      <Card testID="dashboard-accounts-card" style={styles.compactCard}>
+function RainyDayDashboardCard({
+  rainyDayProgress,
+  showCurrencyCodes,
+  onOpenRainyDayFund,
+}: {
+  rainyDayProgress: RainyDayProgress;
+  showCurrencyCodes: boolean;
+  onOpenRainyDayFund: () => void;
+}) {
+  return (
+    <Card testID="rainy-day-card" style={styles.compactCard}>
+      <View style={styles.rowBetween}>
+        <View style={styles.headerText}>
+          <Text style={styles.kicker}>Rainy day fund</Text>
+          <Text style={styles.cardTitle}>{rainyDayProgress.percentage}% saved</Text>
+        </View>
+        <View style={styles.rainyHeaderAction}>
+          <Text style={styles.progressAmount}>
+            {formatMoney(rainyDayProgress.currentMinor, rainyDayProgress.fund.currencyCode, {
+              showCurrencyCode: showCurrencyCodes,
+            })}
+          </Text>
+          <HeaderIconAction
+            accessibilityLabel="Edit rainy day fund"
+            icon="create-outline"
+            onPress={onOpenRainyDayFund}
+            testID="dashboard-edit-rainy-day"
+          />
+        </View>
+      </View>
+      <ProgressBar percentage={rainyDayProgress.percentage} />
+      <Text style={styles.smallMuted}>
+        Goal {formatMoney(rainyDayProgress.fund.goalMinor, rainyDayProgress.fund.currencyCode, {
+          showCurrencyCode: showCurrencyCodes,
+        })}
+      </Text>
+    </Card>
+  );
+}
+
+function AccountsDashboardCard({
+  accountPreview,
+  hasAnyAccounts,
+  selectedAccountIds,
+  showCurrencyCodes,
+  onAddAccount,
+  onOpenAccount,
+  onToggleAccount,
+}: {
+  accountPreview: AccountBalance[];
+  hasAnyAccounts: boolean;
+  selectedAccountIds: string[];
+  showCurrencyCodes: boolean;
+  onAddAccount: () => void;
+  onOpenAccount: () => void;
+  onToggleAccount: (accountId: string) => void;
+}) {
+  return (
+    <Card testID="dashboard-accounts-card" style={styles.compactCard}>
         <View style={styles.sectionCardHeader}>
           <Text style={styles.cardTitle}>Accounts</Text>
           <HeaderIconAction
@@ -146,7 +311,7 @@ export function DashboardScreen({
                 balanceMinor={balanceMinor}
                 selected={selectedAccountIds.includes(account.id)}
                 showCurrencyCodes={showCurrencyCodes}
-                onPress={() => toggleAccount(account.id)}
+                onPress={() => onToggleAccount(account.id)}
               />
             ))}
           </View>
@@ -158,9 +323,22 @@ export function DashboardScreen({
           />
         )}
       </Card>
+  );
+}
 
-      {creditCardSummaries.length ? (
-        <Card testID="dashboard-credit-cards-card" style={styles.compactCard}>
+function CreditCardsDashboardCard({
+  creditCardSummaries,
+  showCurrencyCodes,
+}: {
+  creditCardSummaries: CreditCardCurrencySummary[];
+  showCurrencyCodes: boolean;
+}) {
+  if (!creditCardSummaries.length) {
+    return null;
+  }
+
+  return (
+    <Card testID="dashboard-credit-cards-card" style={styles.compactCard}>
           <View style={styles.sectionCardHeader}>
             <Text style={styles.cardTitle}>Credit cards</Text>
           </View>
@@ -174,9 +352,107 @@ export function DashboardScreen({
             ))}
           </View>
         </Card>
-      ) : null}
+  );
+}
 
-      <Card testID="recent-transactions-card" style={styles.compactCard}>
+function BudgetProgressDashboardCard({
+  activeBudgetCount,
+  rows,
+  showCurrencyCodes,
+  onOpenBudgets,
+}: {
+  activeBudgetCount: number;
+  rows: BudgetUsageDisplayRow[];
+  showCurrencyCodes: boolean;
+  onOpenBudgets: () => void;
+}) {
+  if (!activeBudgetCount) {
+    return null;
+  }
+
+  return (
+    <Card testID="dashboard-budget-progress-card" style={styles.compactCard}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onOpenBudgets}
+        style={({ pressed }) => [styles.budgetProgressContent, pressed && styles.pressedRow]}
+      >
+        <View style={styles.sectionCardHeader}>
+          <View style={styles.headerText}>
+            <Text style={styles.cardTitle}>{getDashboardCardDefinition('budgetProgress').title}</Text>
+            <Text style={styles.smallMuted}>
+              {activeBudgetCount === 1 ? '1 active monthly budget' : `${activeBudgetCount} active monthly budgets`}
+            </Text>
+          </View>
+          <Text style={styles.headerActionText}>View</Text>
+        </View>
+
+        <View style={styles.budgetProgressRows}>
+          {rows.map((row) => (
+            <BudgetProgressRow key={row.id} row={row} showCurrencyCodes={showCurrencyCodes} />
+          ))}
+        </View>
+      </Pressable>
+    </Card>
+  );
+}
+
+function BudgetProgressRow({
+  row,
+  showCurrencyCodes,
+}: {
+  row: BudgetUsageDisplayRow;
+  showCurrencyCodes: boolean;
+}) {
+  const progressColor = getBudgetStatusColor(row.status);
+  const statusLabel = getBudgetStatusLabel(row);
+
+  return (
+    <View style={styles.budgetProgressRow}>
+      <View style={styles.budgetProgressRowHeader}>
+        <CategoryIconBadge color={row.color} icon={row.icon} size="sm" />
+        <View style={styles.budgetProgressText}>
+          <Text numberOfLines={1} style={styles.budgetProgressName}>{row.budget.name}</Text>
+          <Text numberOfLines={1} style={styles.budgetProgressScope}>{row.scopeLabel}</Text>
+        </View>
+        <View style={styles.budgetProgressStatus}>
+          <Text style={[styles.budgetProgressStatusText, { color: progressColor }]}>{statusLabel}</Text>
+          <Text style={styles.budgetProgressPercent}>{Math.min(row.percentageUsed, 999)}%</Text>
+        </View>
+      </View>
+      <ProgressBar percentage={row.percentageUsed} color={progressColor} />
+      <View style={styles.budgetProgressAmounts}>
+        <Text style={styles.smallMuted}>
+          Used {formatMoney(row.spentMinor, row.budget.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+        </Text>
+        <Text style={styles.smallMuted}>
+          {row.remainingMinor < 0 ? 'Over ' : 'Left '}
+          {formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function RecentTransactionsCard({
+  categories,
+  recentTransactions,
+  selectedAccountIds,
+  showCurrencyCodes,
+  snapshot,
+  onOpenTransaction,
+  onOpenTransactions,
+}: {
+  categories: CategoryDefinition[];
+  recentTransactions: ReturnType<typeof getDashboardRecentTransactions>;
+  selectedAccountIds: string[];
+  showCurrencyCodes: boolean;
+  snapshot: AppSnapshot;
+  onOpenTransaction: (transactionId: string) => void;
+  onOpenTransactions: () => void;
+}) {
+  return (
+    <Card testID="recent-transactions-card" style={styles.compactCard}>
         <View style={styles.sectionCardHeader}>
           <Text style={styles.cardTitle}>Recent transactions</Text>
           <HeaderAction label="More" onPress={onOpenTransactions} testID="dashboard-more-transactions" />
@@ -202,8 +478,143 @@ export function DashboardScreen({
           </Text>
         )}
       </Card>
+  );
+}
 
-    </View>
+function getDashboardBudgetProgressData(
+  snapshot: AppSnapshot,
+  categories: CategoryDefinition[],
+): {
+  activeBudgetCount: number;
+  rows: BudgetUsageDisplayRow[];
+} {
+  const activeBudgets = snapshot.budgets.filter((budget) => budget.isActive);
+  if (!activeBudgets.length) {
+    return { activeBudgetCount: 0, rows: [] };
+  }
+
+  const range = getBudgetMonthlyRange();
+  const currencies = Array.from(new Set(activeBudgets.map((budget) => budget.currencyCode)));
+  const usages = currencies.flatMap((currencyCode) => {
+    const report = getStatsReport({
+      reportKind: 'expense',
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
+      accounts: snapshot.accounts,
+      categories,
+      range,
+      currencyCode,
+    });
+
+    return getBudgetUsageFromStatsReport({ budgets: activeBudgets, report });
+  });
+  const summary = getDashboardBudgetSummaryData(usages, 3);
+
+  return {
+    activeBudgetCount: summary.activeBudgetCount,
+    rows: getBudgetUsageDisplayRows(summary.highestRiskUsages, categories),
+  };
+}
+
+function BalanceSummaryCard({
+  showCurrencyCodes,
+  totalsByCurrency,
+}: {
+  showCurrencyCodes: boolean;
+  totalsByCurrency: CurrencyTotal[];
+}) {
+  return (
+    <Card testID="dashboard-balance-summary-card" style={styles.compactCard}>
+      <Text style={styles.cardTitle}>{getDashboardCardDefinition('balanceSummary').title}</Text>
+      {totalsByCurrency.length ? (
+        <View style={styles.metricRows}>
+          {totalsByCurrency.map((total) => (
+            <View key={total.currencyCode} style={styles.metricRow}>
+              <Text style={styles.metricLabel}>{total.currencyCode}</Text>
+              <Text style={styles.metricValue}>
+                {formatMoney(total.amountMinor, total.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.emptyText}>Add accounts to see your balances.</Text>
+      )}
+    </Card>
+  );
+}
+
+function CashFlowCard({
+  cashFlow,
+  showCurrencyCodes,
+}: {
+  cashFlow: CashFlowSummary | null;
+  showCurrencyCodes: boolean;
+}) {
+  const currencyCode = cashFlow?.currencyCode ?? 'AUD';
+
+  return (
+    <Card testID="dashboard-cash-flow-card" style={styles.compactCard}>
+      <Text style={styles.cardTitle}>{getDashboardCardDefinition('cashFlow').title}</Text>
+      <View style={styles.creditSummaryMetrics}>
+        <CreditMetric
+          label="Income"
+          value={formatMoney(cashFlow?.incomeMinor ?? 0, currencyCode, { showCurrencyCode: showCurrencyCodes })}
+          tone="income"
+        />
+        <CreditMetric
+          label="Spending"
+          value={formatMoney(cashFlow?.expenseMinor ?? 0, currencyCode, { showCurrencyCode: showCurrencyCodes })}
+          tone="expense"
+        />
+        <CreditMetric
+          label="Net"
+          value={formatMoney(cashFlow?.netMinor ?? 0, currencyCode, { showCurrencyCode: showCurrencyCodes })}
+          tone={getNetMetricTone(cashFlow?.netMinor ?? 0)}
+        />
+      </View>
+    </Card>
+  );
+}
+
+function TopSpendingCard({
+  categories,
+  currentMonthSpending,
+  showCurrencyCodes,
+}: {
+  categories: CategoryDefinition[];
+  currentMonthSpending: SpendingByCategory[];
+  showCurrencyCodes: boolean;
+}) {
+  const categoryById = new Map(categories.map((category) => [category.id, category]));
+  const topSpending = currentMonthSpending.slice(0, 3);
+
+  return (
+    <Card testID="dashboard-top-spending-card" style={styles.compactCard}>
+      <Text style={styles.cardTitle}>{getDashboardCardDefinition('topSpending').title}</Text>
+      {topSpending.length ? (
+        <View style={styles.topSpendingRows}>
+          {topSpending.map((item) => (
+            <View key={`${item.currencyCode}-${item.categoryId}`} style={styles.topSpendingRow}>
+              <CategoryIconBadge
+                color={categoryById.get(item.categoryId)?.color ?? colors.muted}
+                icon={categoryById.get(item.categoryId)?.icon ?? 'pricetag-outline'}
+                size="sm"
+              />
+              <Text numberOfLines={1} style={styles.topSpendingLabel}>
+                {categoryById.get(item.categoryId)?.name ?? 'Uncategorized'}
+              </Text>
+              <Text style={styles.topSpendingAmount}>
+                {formatMoney(item.amountMinor, item.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.emptyText}>No spending in the current month.</Text>
+      )}
+    </Card>
   );
 }
 
@@ -398,13 +809,67 @@ function CreditCardSummaryRow({
   );
 }
 
-function CreditMetric({ label, value }: { label: string; value: string }) {
+type CreditMetricTone = 'income' | 'expense' | 'neutral';
+
+function CreditMetric({
+  label,
+  tone = 'neutral',
+  value,
+}: {
+  label: string;
+  tone?: CreditMetricTone;
+  value: string;
+}) {
   return (
     <View style={styles.creditMetric}>
       <Text style={styles.creditMetricLabel}>{label}</Text>
-      <Text style={styles.creditMetricValue}>{value}</Text>
+      <Text style={[styles.creditMetricValue, getCreditMetricToneStyle(tone)]}>{value}</Text>
     </View>
   );
+}
+
+function getNetMetricTone(amountMinor: number): CreditMetricTone {
+  if (amountMinor > 0) {
+    return 'income';
+  }
+  if (amountMinor < 0) {
+    return 'expense';
+  }
+  return 'neutral';
+}
+
+function getCreditMetricToneStyle(tone: CreditMetricTone) {
+  switch (tone) {
+    case 'income':
+      return styles.creditMetricValueIncome;
+    case 'expense':
+      return styles.creditMetricValueExpense;
+    case 'neutral':
+      return null;
+  }
+}
+
+function getBudgetStatusLabel(row: BudgetUsageDisplayRow): string {
+  if (row.remainingMinor < 0) {
+    return 'Over';
+  }
+
+  if (row.status === 'near_limit') {
+    return 'Near';
+  }
+
+  return 'Under';
+}
+
+function getBudgetStatusColor(status: BudgetUsageDisplayRow['status']): string {
+  switch (status) {
+    case 'over_budget':
+      return colors.danger;
+    case 'near_limit':
+      return '#9B6B12';
+    case 'under_budget':
+      return colors.success;
+  }
 }
 
 const styles = StyleSheet.create({
@@ -514,6 +979,35 @@ const styles = StyleSheet.create({
   compactRows: {
     gap: 0,
   },
+  metricLabel: {
+    color: colors.muted,
+    flex: 1,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  metricRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+    minHeight: 40,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  metricRows: {
+    gap: spacing.sm,
+  },
+  metricValue: {
+    color: colors.ink,
+    flexShrink: 0,
+    fontSize: typography.body,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
   creditCardBalance: {
     color: colors.ink,
     fontSize: typography.small,
@@ -563,6 +1057,12 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: '900',
   },
+  creditMetricValueExpense: {
+    color: colors.danger,
+  },
+  creditMetricValueIncome: {
+    color: colors.success,
+  },
   creditSummaryBlock: {
     gap: spacing.sm,
   },
@@ -573,6 +1073,83 @@ const styles = StyleSheet.create({
   },
   creditSummaryStack: {
     gap: spacing.md,
+  },
+  budgetProgressAmounts: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  budgetProgressContent: {
+    borderRadius: 8,
+    gap: spacing.sm,
+  },
+  budgetProgressName: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  budgetProgressPercent: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  budgetProgressRow: {
+    gap: spacing.xs,
+  },
+  budgetProgressRowHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  budgetProgressRows: {
+    gap: spacing.sm,
+  },
+  budgetProgressScope: {
+    color: colors.muted,
+    fontSize: typography.small,
+  },
+  budgetProgressStatus: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+  },
+  budgetProgressStatusText: {
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  budgetProgressText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  topSpendingAmount: {
+    color: colors.ink,
+    flexShrink: 0,
+    fontSize: typography.body,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  topSpendingLabel: {
+    color: colors.ink,
+    flex: 1,
+    fontSize: typography.body,
+    fontWeight: '800',
+  },
+  topSpendingRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  topSpendingRows: {
+    gap: spacing.sm,
   },
   emptyText: {
     color: colors.muted,

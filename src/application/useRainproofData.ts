@@ -2,15 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   getAccountBalances,
-  getBudgetUsage,
   getCashFlowSummary,
   getRainyDayProgress,
   getSpendingByCategory,
   getUpcomingBills,
   groupBalancesByCurrency,
 } from '../domain/aggregates';
+import { getBudgetMonthlyRange, getBudgetUsageFromStatsReport } from '../domain/budgets';
 import { getEffectiveDisplayCurrency } from '../domain/currency';
 import { getDateRangeForPreset } from '../domain/dates';
+import { getStatsReport } from '../domain/statsReports';
 import type {
   AccountBalance,
   AppSnapshot,
@@ -27,7 +28,9 @@ import type {
   UpcomingBill,
   UpdateAppSettingsInput,
   UpdateCategoryCatalogInput,
+  UpdateDashboardCardSettingsInput,
   UpdateAccountInput,
+  UpdateBudgetInput,
   UpdateRainyDayFundInput,
   UpdateTransactionLinkInput,
   UpdateTransactionInput,
@@ -55,10 +58,13 @@ type RainproofActions = {
   updateTransactionLink(input: UpdateTransactionLinkInput): Promise<void>;
   deleteTransactionLink(linkId: string): Promise<void>;
   addBudget(input: NewBudgetInput): Promise<void>;
+  updateBudget(input: UpdateBudgetInput): Promise<void>;
+  archiveBudget(budgetId: string): Promise<void>;
   addRecurringBill(input: NewRecurringBillInput): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
+  updateDashboardCardSettings(input: UpdateDashboardCardSettingsInput): Promise<void>;
   updateDashboardSelectedAccountIds(accountIds: string[]): Promise<void>;
   updateAccountDashboardVisibility(accountId: string, showOnDashboard: boolean): Promise<void>;
   updateAccountOrder(accountIds: string[]): Promise<void>;
@@ -193,10 +199,21 @@ export function useRainproofData(): RainproofDataState {
       range: monthRange,
       currencyCode: currentCurrency,
     });
-    const budgetUsage = getBudgetUsage(
-      snapshot.budgets.filter((budget) => budget.currencyCode === currentCurrency),
-      currentMonthSpending,
-    );
+    const budgetMonthRange = getBudgetMonthlyRange();
+    const budgetExpenseReport = getStatsReport({
+      reportKind: 'expense',
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
+      accounts: snapshot.accounts,
+      categories: snapshot.categories,
+      range: budgetMonthRange,
+      currencyCode: currentCurrency,
+    });
+    const budgetUsage = getBudgetUsageFromStatsReport({
+      budgets: snapshot.budgets,
+      report: budgetExpenseReport,
+    });
     const upcomingBills = getUpcomingBills(snapshot.recurringBills);
     const cashFlow = getCashFlowSummary({
       transactions: snapshot.transactions,
@@ -249,10 +266,14 @@ export function useRainproofData(): RainproofDataState {
       deleteTransactionLink: (linkId) =>
         runMutation((repository) => repository.deleteTransactionLink(linkId), { rethrow: true }),
       addBudget: (input) => runMutation((repository) => repository.addBudget(input)),
+      updateBudget: (input) => runMutation((repository) => repository.updateBudget(input)),
+      archiveBudget: (budgetId) => runMutation((repository) => repository.archiveBudget(budgetId)),
       addRecurringBill: (input) => runMutation((repository) => repository.addRecurringBill(input)),
       updateRainyDayFund: (input) => runMutation((repository) => repository.updateRainyDayFund(input)),
       updateSettings: (input) => runMutation((repository) => repository.updateSettings(input)),
       updateCategoryCatalog: (input) => runMutation((repository) => repository.updateCategoryCatalog(input)),
+      updateDashboardCardSettings: (input) =>
+        runMutation((repository) => repository.updateDashboardCardSettings(input)),
       updateDashboardSelectedAccountIds: (accountIds) =>
         runMutation((repository) => repository.updateDashboardSelectedAccountIds(accountIds), { showSaving: false }),
       updateAccountDashboardVisibility: (accountId, showOnDashboard) =>

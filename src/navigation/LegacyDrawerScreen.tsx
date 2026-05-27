@@ -18,6 +18,7 @@ import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { DashboardScrollScaffold } from '../components/ScreenScaffold';
 import { FormError } from '../components/ui';
 import { AccountsScreen } from '../features/accounts/AccountsScreen';
+import { BudgetsScreen } from '../features/budgets/BudgetsScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
 import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { StatsScreen } from '../features/stats/StatsScreen';
@@ -29,7 +30,7 @@ import {
 import { colors, spacing, typography } from '../theme/tokens';
 import type { MainDrawerParamList, RootStackParamList } from './routes';
 
-type RootScreenKey = 'dashboard' | 'accounts' | 'transactions' | 'stats' | 'settings';
+type RootScreenKey = 'dashboard' | 'accounts' | 'transactions' | 'stats' | 'budgets' | 'settings';
 
 type LegacyDrawerScreenProps = {
   rootScreen: RootScreenKey;
@@ -49,6 +50,10 @@ export function TransactionsDrawerScreen() {
 
 export function StatisticsDrawerScreen() {
   return <LegacyDrawerScreen rootScreen="stats" />;
+}
+
+export function BudgetsDrawerScreen() {
+  return <LegacyDrawerScreen rootScreen="budgets" />;
 }
 
 export function SettingsDrawerScreen() {
@@ -103,12 +108,16 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           <DashboardScreen
             snapshot={snapshot}
             accountBalances={derived.accountBalances}
+            totalsByCurrency={derived.totalsByCurrency}
             rainyDayProgress={derived.rainyDayProgress}
+            cashFlow={derived.cashFlow}
+            currentMonthSpending={derived.currentMonthSpending}
             onAddAccount={() => rootNavigation?.navigate('AddAccount')}
             onOpenRainyDayFund={() => rootNavigation?.navigate('RainyDayFund')}
             onOpenTransactions={() => navigation.navigate('Transactions')}
             onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
             onOpenAccount={() => navigation.navigate('Accounts')}
+            onOpenBudgets={() => navigation.navigate('Budgets')}
             onUpdateSelectedAccountIds={actions.updateDashboardSelectedAccountIds}
           />
         </DashboardScrollScaffold>
@@ -127,6 +136,12 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
           showHeader={false}
         />
+      ) : rootScreen === 'budgets' ? (
+        <BudgetsScreen
+          snapshot={snapshot}
+          onAddBudget={() => rootNavigation?.navigate('AddBudget')}
+          onEditBudget={(budgetId) => rootNavigation?.navigate('EditBudget', { budgetId })}
+        />
       ) : (
         <ScrollView
           contentContainerStyle={styles.paddedScrollContent}
@@ -135,6 +150,7 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
         >
           <SettingsScreen
             snapshot={snapshot}
+            onOpenDashboardCards={() => rootNavigation?.navigate('DashboardCards')}
             onOpenCategoryManagement={() => rootNavigation?.navigate('CategoryManagement')}
             onUpdateSettings={actions.updateSettings}
             showHeader={false}

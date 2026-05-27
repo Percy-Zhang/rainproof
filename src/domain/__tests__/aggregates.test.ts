@@ -298,9 +298,14 @@ describe('aggregates', () => {
     const budgets: Budget[] = [
       {
         id: 'budget_food',
+        name: 'Food budget',
+        amountMinor: 10000,
+        period: 'monthly',
+        scopeType: 'category',
         categoryId: 'food',
+        subcategoryId: null,
         currencyCode: 'AUD',
-        monthlyLimitMinor: 10000,
+        isActive: true,
         createdAt: now,
         updatedAt: now,
       },
