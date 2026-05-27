@@ -1,4 +1,5 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
+import type { CategorySelectRouteParams } from '../features/categorySelection/categorySelectionModel';
 import type { StatsReportKind, StatsReportSort } from '../domain/statsReports';
 
 export type HomeStackParamList = {
@@ -21,6 +22,10 @@ export type BudgetsStackParamList = {
   Budgets: undefined;
 };
 
+export type RecurringStackParamList = {
+  Recurring: undefined;
+};
+
 export type SettingsStackParamList = {
   Settings: undefined;
 };
@@ -31,6 +36,7 @@ export type MainDrawerParamList = {
   Transactions: NavigatorScreenParams<TransactionsStackParamList> | undefined;
   Statistics: NavigatorScreenParams<StatisticsStackParamList> | undefined;
   Budgets: NavigatorScreenParams<BudgetsStackParamList> | undefined;
+  Recurring: NavigatorScreenParams<RecurringStackParamList> | undefined;
   Settings: NavigatorScreenParams<SettingsStackParamList> | undefined;
 };
 
@@ -54,6 +60,10 @@ export type RootStackParamList = {
   RainyDayFund: undefined;
   AddBudget: undefined;
   EditBudget: { budgetId: string };
+  AddRecurringItem: undefined;
+  EditRecurringItem: { recurringItemId: string };
+  CreateRecurringTransaction: { recurringItemId: string };
+  CategorySelect: CategorySelectRouteParams;
   DashboardCards: undefined;
   CategoryManagement: undefined;
   CategoryEdit: { categoryId: string };

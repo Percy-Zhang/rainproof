@@ -3,8 +3,9 @@ import type {
   AppSnapshot,
   NewAccountInput,
   NewBudgetInput,
-  NewRecurringBillInput,
   Budget,
+  NewRecurringItemInput,
+  RecurringItem,
   NewTransactionInput,
   NewTransactionLinkInput,
   TransactionLink,
@@ -13,6 +14,7 @@ import type {
   UpdateCategoryCatalogInput,
   UpdateDashboardCardSettingsInput,
   UpdateBudgetInput,
+  UpdateRecurringItemInput,
   UpdateRainyDayFundInput,
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
@@ -32,10 +34,14 @@ import type { CountRow } from './mappers';
 import { runMigrations } from './migrations';
 import {
   addBudgetStorage,
-  addRecurringBillStorage,
+  addRecurringItemStorage,
   archiveBudgetStorage,
+  archiveRecurringItemStorage,
+  deleteRecurringItemStorage,
   listBudgetsStorage,
+  listRecurringItemsStorage,
   updateBudgetStorage,
+  updateRecurringItemStorage,
 } from './planningStorage';
 import { ensureRainyDayFund, updateRainyDayFundStorage } from './rainyDayStorage';
 import {
@@ -89,7 +95,11 @@ export type FinanceRepository = {
   addBudget(input: NewBudgetInput): Promise<void>;
   updateBudget(input: UpdateBudgetInput): Promise<void>;
   archiveBudget(budgetId: string): Promise<void>;
-  addRecurringBill(input: NewRecurringBillInput): Promise<void>;
+  listRecurringItems(): Promise<RecurringItem[]>;
+  addRecurringItem(input: NewRecurringItemInput): Promise<void>;
+  updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
+  archiveRecurringItem(recurringItemId: string): Promise<void>;
+  deleteRecurringItem(recurringItemId: string): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
@@ -206,8 +216,24 @@ class SQLiteFinanceRepository implements FinanceRepository {
     return archiveBudgetStorage(this.db, budgetId);
   }
 
-  async addRecurringBill(input: NewRecurringBillInput): Promise<void> {
-    return addRecurringBillStorage(this.db, input);
+  async listRecurringItems(): Promise<RecurringItem[]> {
+    return listRecurringItemsStorage(this.db);
+  }
+
+  async addRecurringItem(input: NewRecurringItemInput): Promise<void> {
+    return addRecurringItemStorage(this.db, input);
+  }
+
+  async updateRecurringItem(input: UpdateRecurringItemInput): Promise<void> {
+    return updateRecurringItemStorage(this.db, input);
+  }
+
+  async archiveRecurringItem(recurringItemId: string): Promise<void> {
+    return archiveRecurringItemStorage(this.db, recurringItemId);
+  }
+
+  async deleteRecurringItem(recurringItemId: string): Promise<void> {
+    return deleteRecurringItemStorage(this.db, recurringItemId);
   }
 
   async updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void> {

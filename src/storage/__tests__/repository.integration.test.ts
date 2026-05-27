@@ -11,6 +11,7 @@ import {
   getTransactionDisplayEntries,
 } from '../../domain/aggregates';
 import { getDefaultDashboardCardSettings } from '../../domain/dashboardCards';
+import { getNextMonthlyDueDateForDay } from '../../domain/recurringItems';
 import type {
   Account,
   AppSnapshot,
@@ -304,6 +305,16 @@ describe('SQLite finance repository integration', () => {
           'is_active',
         ]),
       );
+      expect(await getColumnNames(db, 'recurring_items')).toEqual(
+        expect.arrayContaining([
+          'kind',
+          'subcategory_id',
+          'note',
+          'frequency',
+          'next_due_date',
+        ]),
+      );
+      expect(snapshot.recurringItems).toEqual([]);
       expect(snapshot.recurringBills).toEqual([]);
       expect(snapshot.rainyDayFund.goalMinor).toBe(0);
       expect(snapshot.rainyDayFund.linkedAccountIds).toEqual([]);
@@ -430,6 +441,80 @@ describe('SQLite finance repository integration', () => {
         subcategoryId: 'groceries',
       });
       expect((await repository.getSnapshot()).budgets.filter((budget) => budget.isActive)).toHaveLength(2);
+    });
+  });
+
+  it('persists recurring items without creating ledger activity', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+
+      await repository.addRecurringItem({
+        name: 'Salary',
+        kind: 'income',
+        amountMinor: 320000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Base pay',
+        frequency: 'fortnightly',
+        nextDueDate: '2026-05-29',
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const item = snapshot.recurringItems[0];
+      expect(item).toEqual(
+        expect.objectContaining({
+          name: 'Salary',
+          kind: 'income',
+          amountMinor: 320000,
+          currencyCode: 'AUD',
+          accountId: everyday.id,
+          categoryId: 'income',
+          subcategoryId: 'salary',
+          note: 'Base pay',
+          frequency: 'fortnightly',
+          nextDueDate: '2026-05-29',
+          isActive: true,
+        }),
+      );
+      expect(snapshot.recurringBills).toEqual(snapshot.recurringItems);
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
+
+      await repository.updateRecurringItem({
+        id: item.id,
+        name: 'Salary updated',
+        kind: 'income',
+        amountMinor: 330000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'income',
+        subcategoryId: 'wages',
+        note: 'Updated pay',
+        frequency: 'monthly',
+        nextDueDate: '2026-06-15',
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.recurringItems.find((candidate) => candidate.id === item.id)).toEqual(
+        expect.objectContaining({
+          name: 'Salary updated',
+          amountMinor: 330000,
+          subcategoryId: 'wages',
+          frequency: 'monthly',
+          nextDueDate: '2026-06-15',
+          isActive: true,
+        }),
+      );
+
+      await repository.archiveRecurringItem(item.id);
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.recurringItems.find((candidate) => candidate.id === item.id)?.isActive).toBe(false);
+
+      await repository.deleteRecurringItem(item.id);
+      expect((await repository.getSnapshot()).recurringItems).toEqual([]);
     });
   });
 
@@ -1849,6 +1934,67 @@ describe('SQLite finance repository integration', () => {
           scopeType: 'category',
           categoryId: 'food',
           subcategoryId: null,
+          isActive: true,
+        }),
+      ]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('migrates legacy recurring bills into recurring items', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.db.execAsync(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE recurring_bills (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency_code TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          category_id TEXT NOT NULL,
+          due_day INTEGER NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO recurring_bills (
+          id, name, amount_minor, currency_code, account_id, category_id, due_day,
+          is_active, created_at, updated_at
+        ) VALUES (
+          'legacy_bill', 'Internet', 8900, 'AUD', 'acct_everyday', 'bills', 12,
+          1, '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
+        );
+
+        PRAGMA user_version = 7;
+      `);
+
+      await fixture.repository.initialize('AUD');
+
+      const snapshot = await fixture.repository.getSnapshot();
+      expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      expect(await getColumnNames(fixture.db, 'recurring_items')).toEqual(
+        expect.arrayContaining(['kind', 'subcategory_id', 'note', 'frequency', 'next_due_date']),
+      );
+      expect(snapshot.recurringItems).toEqual([
+        expect.objectContaining({
+          id: 'legacy_bill',
+          name: 'Internet',
+          kind: 'expense',
+          amountMinor: 8900,
+          currencyCode: 'AUD',
+          accountId: 'acct_everyday',
+          categoryId: 'bills',
+          subcategoryId: null,
+          note: '',
+          frequency: 'monthly',
+          nextDueDate: getNextMonthlyDueDateForDay(12),
           isActive: true,
         }),
       ]);

@@ -12,12 +12,12 @@ import {
   mapAccount,
   mapBudget,
   mapRainyDayFund,
-  mapRecurringBill,
+  mapRecurringItem,
   mapTransaction,
   mapTransactionLine,
   mapTransactionLink,
   type RainyDayFundRow,
-  type RecurringBillRow,
+  type RecurringItemRow,
   safeParseCurrencyCodes,
   safeParseJson,
   safeParseNullableStringArray,
@@ -55,8 +55,8 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     `SELECT * FROM budgets
      ORDER BY is_active DESC, currency_code ASC, scope_type ASC, name ASC, created_at ASC`,
   );
-  const billRows = await db.getAllAsync<RecurringBillRow>(
-    'SELECT * FROM recurring_bills ORDER BY due_day ASC',
+  const recurringItemRows = await db.getAllAsync<RecurringItemRow>(
+    'SELECT * FROM recurring_items ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC',
   );
   const storedEnabledCurrencyCodes = safeParseCurrencyCodes(
     (await db.getFirstAsync<SettingRow>(
@@ -121,6 +121,8 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     ...accountRows.map((account) => account.currency_code),
   ]);
 
+  const recurringItems = recurringItemRows.map(mapRecurringItem);
+
   return {
     defaultCurrencyCode,
     settings: {
@@ -137,7 +139,8 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     transactionLines: lineRows.map(mapTransactionLine),
     transactionLinks: linkRows.map(mapTransactionLink),
     budgets: budgetRows.map(mapBudget),
-    recurringBills: billRows.map(mapRecurringBill),
+    recurringItems,
+    recurringBills: recurringItems,
     rainyDayFund,
   };
 }

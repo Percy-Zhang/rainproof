@@ -31,13 +31,14 @@ export type SeedBudgetDefinition = {
   monthlyLimitMinor: number;
 };
 
-export type SeedRecurringBillDefinition = {
+export type SeedRecurringItemDefinition = {
   name: string;
   amountMinor: number;
   currencyCode: string;
   accountId: string;
   categoryId: string;
-  dueDay: number;
+  subcategoryId: string;
+  nextDueDate: string;
 };
 
 export function getExpandedSampleAccounts({
@@ -233,27 +234,46 @@ export function getExpandedSampleBudgets(currencyCode: string): SeedBudgetDefini
   ];
 }
 
-export function getExpandedSampleRecurringBills({
+export function getExpandedSampleRecurringItems({
   billsId,
   creditCardId,
   currencyCode,
   everydayId,
+  now,
 }: {
   billsId: string;
   creditCardId: string;
   currencyCode: string;
   everydayId: string;
-}): SeedRecurringBillDefinition[] {
+  now: Date;
+}): SeedRecurringItemDefinition[] {
   return [
-    { name: 'Rent', amountMinor: 215000, currencyCode, accountId: billsId, categoryId: 'housing', dueDay: 1 },
-    { name: 'Mobile plan', amountMinor: 3900, currencyCode, accountId: everydayId, categoryId: 'bills', dueDay: 9 },
+    {
+      name: 'Rent',
+      amountMinor: 215000,
+      currencyCode,
+      accountId: billsId,
+      categoryId: 'housing',
+      subcategoryId: 'rent',
+      nextDueDate: nextMonthlyDueDate(1, now),
+    },
+    {
+      name: 'Mobile plan',
+      amountMinor: 3900,
+      currencyCode,
+      accountId: everydayId,
+      categoryId: 'bills',
+      subcategoryId: 'phone',
+      nextDueDate: nextMonthlyDueDate(9, now),
+    },
     {
       name: 'Streaming',
       amountMinor: 1899,
       currencyCode,
       accountId: creditCardId,
       categoryId: 'entertainment',
-      dueDay: 14,
+      subcategoryId: 'streaming',
+      nextDueDate: nextMonthlyDueDate(14, now),
     },
     {
       name: 'Car insurance',
@@ -261,9 +281,18 @@ export function getExpandedSampleRecurringBills({
       currencyCode,
       accountId: billsId,
       categoryId: 'transport',
-      dueDay: 20,
+      subcategoryId: 'car-insurance',
+      nextDueDate: nextMonthlyDueDate(20, now),
     },
-    { name: 'Gym', amountMinor: 6400, currencyCode, accountId: creditCardId, categoryId: 'health', dueDay: 26 },
+    {
+      name: 'Gym',
+      amountMinor: 6400,
+      currencyCode,
+      accountId: creditCardId,
+      categoryId: 'health',
+      subcategoryId: 'fitness',
+      nextDueDate: nextMonthlyDueDate(26, now),
+    },
   ];
 }
 
@@ -271,4 +300,17 @@ function daysAgo(from: Date, days: number): string {
   const next = new Date(from);
   next.setDate(next.getDate() - days);
   return next.toISOString();
+}
+
+function nextMonthlyDueDate(day: number, from: Date): string {
+  const candidate = new Date(from.getFullYear(), from.getMonth(), day, 12, 0, 0, 0);
+  if (candidate < new Date(from.getFullYear(), from.getMonth(), from.getDate(), 0, 0, 0, 0)) {
+    candidate.setMonth(candidate.getMonth() + 1);
+  }
+
+  return [
+    candidate.getFullYear(),
+    String(candidate.getMonth() + 1).padStart(2, '0'),
+    String(candidate.getDate()).padStart(2, '0'),
+  ].join('-');
 }

@@ -118,18 +118,28 @@ export type Budget = {
   updatedAt: string;
 };
 
-export type RecurringBill = {
+export type RecurringItemKind = Extract<TransactionKind, 'expense' | 'income'>;
+
+export type RecurringFrequency = 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
+
+export type RecurringItem = {
   id: string;
   name: string;
+  kind: RecurringItemKind;
   amountMinor: number;
   currencyCode: CurrencyCode;
   accountId: string;
   categoryId: string;
-  dueDay: number;
+  subcategoryId: string | null;
+  note: string;
+  frequency: RecurringFrequency;
+  nextDueDate: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 };
+
+export type RecurringBill = RecurringItem;
 
 export type RainyDayFund = {
   id: string;
@@ -200,9 +210,11 @@ export type DashboardCardSetting = {
   visible: boolean;
 };
 
-export type UpcomingBill = RecurringBill & {
-  nextDueDate: string;
+export type UpcomingRecurringItem = RecurringItem & {
+  dueStatus: 'overdue' | 'due_soon' | 'upcoming';
 };
+
+export type UpcomingBill = UpcomingRecurringItem;
 
 export type AppSettings = {
   defaultCurrencyCode: CurrencyCode;
@@ -222,6 +234,7 @@ export type AppSnapshot = {
   transactionLines: TransactionLine[];
   transactionLinks: TransactionLink[];
   budgets: Budget[];
+  recurringItems: RecurringItem[];
   recurringBills: RecurringBill[];
   rainyDayFund: RainyDayFund;
 };
@@ -306,14 +319,25 @@ export type UpdateBudgetInput = NewBudgetInput & {
   id: string;
 };
 
-export type NewRecurringBillInput = {
+export type NewRecurringItemInput = {
   name: string;
+  kind: RecurringItemKind;
   amountMinor: number;
   currencyCode: CurrencyCode;
   accountId: string;
   categoryId: string;
-  dueDay: number;
+  subcategoryId?: string | null;
+  note?: string;
+  frequency: RecurringFrequency;
+  nextDueDate: string;
+  isActive?: boolean;
 };
+
+export type UpdateRecurringItemInput = NewRecurringItemInput & {
+  id: string;
+};
+
+export type NewRecurringBillInput = NewRecurringItemInput;
 
 export type UpdateRainyDayFundInput = {
   currencyCode: CurrencyCode;

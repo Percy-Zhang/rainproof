@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -10,7 +10,18 @@ import { ComposerScreenScaffold } from '../components/ScreenScaffold';
 import { FormError } from '../components/ui';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
 import { BudgetFormScreen } from '../features/budgets/BudgetFormScreen';
+import {
+  createCategorySelectionRequestId,
+  useCategorySelectionRequests,
+} from '../features/categorySelection/CategorySelectionContext';
+import { CategorySelectScreen } from '../features/categorySelection/CategorySelectScreen';
+import type {
+  CategorySelectLaunchParams,
+  CategorySelectionResult,
+} from '../features/categorySelection/categorySelectionModel';
 import { RainyDayFundScreen } from '../features/rainyDay/RainyDayFundScreen';
+import { RecurringItemFormScreen } from '../features/recurring/RecurringItemFormScreen';
+import { RecurringTransactionReviewScreen } from '../features/recurring/RecurringTransactionReviewScreen';
 import { DashboardCardsScreen } from '../features/settings/DashboardCardsScreen';
 import { StatsDrilldownScreen } from '../features/stats/StatsDrilldownScreen';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
@@ -20,6 +31,20 @@ import { colors, spacing, typography } from '../theme/tokens';
 import type { RootStackParamList } from './routes';
 
 type RootStackNavigation = NativeStackNavigationProp<RootStackParamList>;
+type OpenCategorySelect = (
+  params: CategorySelectLaunchParams,
+  onSelect: (selection: CategorySelectionResult) => void,
+) => void;
+
+function useOpenCategorySelect(navigation: RootStackNavigation): OpenCategorySelect {
+  const { registerCategorySelectionRequest } = useCategorySelectionRequests();
+
+  return useCallback((params, onSelect) => {
+    const requestId = createCategorySelectionRequestId();
+    registerCategorySelectionRequest(requestId, onSelect);
+    navigation.navigate('CategorySelect', { ...params, requestId });
+  }, [navigation, registerCategorySelectionRequest]);
+}
 
 export function AddAccountRouteScreen() {
   const navigation = useNavigation<RootStackNavigation>();
@@ -80,6 +105,7 @@ export function EditAccountRouteScreen() {
 export function AddTransactionRouteScreen() {
   const navigation = useNavigation<RootStackNavigation>();
   const { snapshot, actions } = useRainproofDataContext();
+  const openCategorySelect = useOpenCategorySelect(navigation);
 
   if (!snapshot) {
     return <MissingDataShell message="Preparing Rainproof" />;
@@ -91,6 +117,7 @@ export function AddTransactionRouteScreen() {
         <AddTransactionScreen
           snapshot={snapshot}
           onAddTransaction={actions.addTransaction}
+          onOpenCategorySelect={openCategorySelect}
           onDone={() => navigation.goBack()}
         />
       </ComposerScreenScaffold>
@@ -103,6 +130,7 @@ export function EditTransactionRouteScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'EditTransaction'>>();
   const { snapshot, actions } = useRainproofDataContext();
   const { transactionId } = route.params;
+  const openCategorySelect = useOpenCategorySelect(navigation);
 
   if (!snapshot) {
     return <MissingDataShell message="Preparing Rainproof" />;
@@ -119,6 +147,7 @@ export function EditTransactionRouteScreen() {
           onUpdateTransactionLink={actions.updateTransactionLink}
           onDeleteTransactionLink={actions.deleteTransactionLink}
           onOpenTransactionLink={() => navigation.navigate('LinkTransaction', { transactionId })}
+          onOpenCategorySelect={openCategorySelect}
           onCancel={() => navigation.goBack()}
           onDone={() => navigation.goBack()}
         />
@@ -215,6 +244,7 @@ export function RainyDayFundRouteScreen() {
 export function AddBudgetRouteScreen() {
   const navigation = useNavigation<RootStackNavigation>();
   const { snapshot, actions } = useRainproofDataContext();
+  const openCategorySelect = useOpenCategorySelect(navigation);
 
   if (!snapshot) {
     return <MissingDataShell message="Preparing Rainproof" />;
@@ -227,6 +257,7 @@ export function AddBudgetRouteScreen() {
           mode="add"
           snapshot={snapshot}
           onAddBudget={actions.addBudget}
+          onOpenCategorySelect={openCategorySelect}
           onCancel={() => navigation.goBack()}
           onDone={() => navigation.goBack()}
         />
@@ -240,6 +271,7 @@ export function EditBudgetRouteScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'EditBudget'>>();
   const { snapshot, actions } = useRainproofDataContext();
   const budget = snapshot?.budgets.find((item) => item.id === route.params.budgetId);
+  const openCategorySelect = useOpenCategorySelect(navigation);
 
   if (!snapshot) {
     return <MissingDataShell message="Preparing Rainproof" />;
@@ -258,8 +290,157 @@ export function EditBudgetRouteScreen() {
           budget={budget}
           onUpdateBudget={actions.updateBudget}
           onArchiveBudget={actions.archiveBudget}
+          onOpenCategorySelect={openCategorySelect}
           onCancel={() => navigation.goBack()}
           onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function AddRecurringItemRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const { snapshot, actions } = useRainproofDataContext();
+  const openCategorySelect = useOpenCategorySelect(navigation);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="addRecurringItem">
+        <RecurringItemFormScreen
+          mode="add"
+          snapshot={snapshot}
+          onAddRecurringItem={actions.addRecurringItem}
+          onOpenCategorySelect={openCategorySelect}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function EditRecurringItemRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'EditRecurringItem'>>();
+  const { snapshot, actions } = useRainproofDataContext();
+  const recurringItem = snapshot?.recurringItems.find((item) => item.id === route.params.recurringItemId);
+  const openCategorySelect = useOpenCategorySelect(navigation);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  if (!recurringItem) {
+    return <MissingDataShell message="Recurring item not found." />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="editRecurringItem">
+        <RecurringItemFormScreen
+          mode="edit"
+          snapshot={snapshot}
+          recurringItem={recurringItem}
+          onUpdateRecurringItem={actions.updateRecurringItem}
+          onArchiveRecurringItem={actions.archiveRecurringItem}
+          onOpenCategorySelect={openCategorySelect}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function CreateRecurringTransactionRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'CreateRecurringTransaction'>>();
+  const { snapshot, actions } = useRainproofDataContext();
+  const recurringItem = snapshot?.recurringItems.find((item) => item.id === route.params.recurringItemId);
+  const openCategorySelect = useOpenCategorySelect(navigation);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  if (!recurringItem) {
+    return <MissingDataShell message="Recurring item not found." />;
+  }
+
+  if (!recurringItem.isActive) {
+    return <MissingDataShell message="Recurring item is archived." />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="createRecurringTransaction">
+        <RecurringTransactionReviewScreen
+          snapshot={snapshot}
+          recurringItem={recurringItem}
+          onAddTransaction={actions.addTransaction}
+          onUpdateRecurringItem={actions.updateRecurringItem}
+          onOpenCategorySelect={openCategorySelect}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function CategorySelectRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'CategorySelect'>>();
+  const { snapshot } = useRainproofDataContext();
+  const {
+    hasCategorySelectionRequest,
+    resolveCategorySelectionRequest,
+    unregisterCategorySelectionRequest,
+  } = useCategorySelectionRequests();
+  const requestId = route.params.requestId;
+  const requestExists = hasCategorySelectionRequest(requestId);
+
+  useEffect(() => {
+    if (!requestExists) {
+      navigation.goBack();
+    }
+
+    return () => unregisterCategorySelectionRequest(requestId);
+  }, [navigation, requestExists, requestId, unregisterCategorySelectionRequest]);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  if (!requestExists) {
+    return <MissingDataShell message="Category selection expired." />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="categorySelect">
+        <CategorySelectScreen
+          categories={snapshot.categories}
+          kind={route.params.kind}
+          selectedCategoryId={route.params.selectedCategoryId}
+          selectedSubcategoryId={route.params.selectedSubcategoryId}
+          selectionMode={route.params.selectionMode}
+          showSuggestions={route.params.showSuggestions}
+          title={route.params.title}
+          transactions={snapshot.transactions}
+          transactionLines={snapshot.transactionLines}
+          onBack={() => navigation.goBack()}
+          onCancel={() => navigation.goBack()}
+          onSelect={(selection) => {
+            if (resolveCategorySelectionRequest(requestId, selection)) {
+              navigation.goBack();
+            }
+          }}
         />
       </ComposerScreenScaffold>
     </DetailSafeArea>

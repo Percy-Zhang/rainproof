@@ -20,6 +20,7 @@ import { FormError } from '../components/ui';
 import { AccountsScreen } from '../features/accounts/AccountsScreen';
 import { BudgetsScreen } from '../features/budgets/BudgetsScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
+import { RecurringItemsScreen } from '../features/recurring/RecurringItemsScreen';
 import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { StatsScreen } from '../features/stats/StatsScreen';
 import {
@@ -30,7 +31,7 @@ import {
 import { colors, spacing, typography } from '../theme/tokens';
 import type { MainDrawerParamList, RootStackParamList } from './routes';
 
-type RootScreenKey = 'dashboard' | 'accounts' | 'transactions' | 'stats' | 'budgets' | 'settings';
+type RootScreenKey = 'dashboard' | 'accounts' | 'transactions' | 'stats' | 'budgets' | 'recurring' | 'settings';
 
 type LegacyDrawerScreenProps = {
   rootScreen: RootScreenKey;
@@ -54,6 +55,10 @@ export function StatisticsDrawerScreen() {
 
 export function BudgetsDrawerScreen() {
   return <LegacyDrawerScreen rootScreen="budgets" />;
+}
+
+export function RecurringDrawerScreen() {
+  return <LegacyDrawerScreen rootScreen="recurring" />;
 }
 
 export function SettingsDrawerScreen() {
@@ -141,6 +146,14 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           snapshot={snapshot}
           onAddBudget={() => rootNavigation?.navigate('AddBudget')}
           onEditBudget={(budgetId) => rootNavigation?.navigate('EditBudget', { budgetId })}
+        />
+      ) : rootScreen === 'recurring' ? (
+        <RecurringItemsScreen
+          snapshot={snapshot}
+          onAddRecurringItem={() => rootNavigation?.navigate('AddRecurringItem')}
+          onCreateTransaction={(recurringItemId) =>
+            rootNavigation?.navigate('CreateRecurringTransaction', { recurringItemId })}
+          onEditRecurringItem={(recurringItemId) => rootNavigation?.navigate('EditRecurringItem', { recurringItemId })}
         />
       ) : (
         <ScrollView

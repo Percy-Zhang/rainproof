@@ -2,11 +2,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { CategoryIconBadge, CategoryRow, SubcategoryRow } from '../../components/CategoryDisplay';
+import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { CurrencyDropdown } from '../../components/CurrencyDropdown';
 import { ActionButton, Chip, FormError, TextField } from '../../components/ui';
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
-import { defaultCategories, getCategory, getDefaultSubcategoryId, getSubcategory } from '../../domain/categories';
+import {
+  defaultCategories,
+  getCategory,
+  getDefaultSubcategoryId,
+  getSubcategory,
+  getSubcategoryColor,
+  getSubcategoryIcon,
+  getSubcategoryName,
+} from '../../domain/categories';
 import { getCurrencyOptions } from '../../domain/currencyCatalog';
 import { parseMoneyInput } from '../../domain/money';
 import type {
@@ -16,6 +24,11 @@ import type {
   NewBudgetInput,
   UpdateBudgetInput,
 } from '../../domain/types';
+import type {
+  CategorySelectLaunchParams,
+  CategorySelectionResult,
+} from '../categorySelection/categorySelectionModel';
+import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type BudgetFormScreenProps =
@@ -23,6 +36,10 @@ type BudgetFormScreenProps =
       mode: 'add';
       snapshot: AppSnapshot;
       onAddBudget: (input: NewBudgetInput) => Promise<void>;
+      onOpenCategorySelect: (
+        params: CategorySelectLaunchParams,
+        onSelect: (selection: CategorySelectionResult) => void,
+      ) => void;
       onCancel: () => void;
       onDone: () => void;
     }
@@ -32,6 +49,10 @@ type BudgetFormScreenProps =
       budget: Budget;
       onUpdateBudget: (input: UpdateBudgetInput) => Promise<void>;
       onArchiveBudget: (budgetId: string) => Promise<void>;
+      onOpenCategorySelect: (
+        params: CategorySelectLaunchParams,
+        onSelect: (selection: CategorySelectionResult) => void,
+      ) => void;
       onCancel: () => void;
       onDone: () => void;
     };
@@ -64,15 +85,31 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   const [error, setError] = useState('');
   const selectedCategory = getCategory(categoryId, categories);
 
-  function setSelectedCategory(nextCategoryId: string) {
-    const nextCategory = getCategory(nextCategoryId, categories);
-    setCategoryId(nextCategory.id);
-    setSubcategoryId(getDefaultSubcategoryId(nextCategory));
-  }
-
   function setSelectedScope(nextScopeType: BudgetScopeType) {
     setScopeType(nextScopeType);
     setConfirmArchive(false);
+  }
+
+  function openCategorySelect() {
+    if (scopeType === 'overall') {
+      return;
+    }
+
+    props.onOpenCategorySelect(
+      {
+        kind: 'expense',
+        selectedCategoryId: categoryId,
+        selectedSubcategoryId: scopeType === 'subcategory' ? subcategoryId : null,
+        selectionMode: scopeType === 'category' ? 'category' : 'subcategory',
+        showSuggestions: false,
+        title: scopeType === 'category' ? 'Budget category' : 'Budget subcategory',
+      },
+      ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
+        const nextCategory = getCategory(nextCategoryId, categories);
+        setCategoryId(nextCategory.id);
+        setSubcategoryId(nextSubcategoryId ?? getDefaultSubcategoryId(nextCategory));
+      },
+    );
   }
 
   async function submit() {
@@ -198,17 +235,14 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
         {scopeType !== 'overall' ? (
           <View style={styles.fieldGroup}>
             <Text style={styles.label}>Category</Text>
-            <View style={styles.categoryList}>
-              {categories.map((category) => (
-                <CategoryRow
-                  key={category.id}
-                  category={category}
-                  expanded={category.id === selectedCategory.id}
-                  onPress={() => setSelectedCategory(category.id)}
-                  trailingIcon={category.id === selectedCategory.id ? 'checkmark' : 'chevron-forward'}
-                />
-              ))}
-            </View>
+            <CategorySelectionField
+              label={scopeType === 'subcategory' ? 'Subcategory' : 'Category'}
+              value={getBudgetCategorySelectionLabel(scopeType, selectedCategory, subcategoryId, categories)}
+              onPress={openCategorySelect}
+              color={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
+              icon={getSubcategoryIcon(selectedCategory.id, subcategoryId, categories)}
+              iconColor={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
+            />
           </View>
         ) : (
           <View style={styles.overallPreview}>
@@ -219,24 +253,6 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
             </View>
           </View>
         )}
-
-        {scopeType === 'subcategory' ? (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Subcategory</Text>
-            <View style={styles.categoryList}>
-              {selectedCategory.subcategories.map((subcategory) => (
-                <SubcategoryRow
-                  key={subcategory.id}
-                  color={subcategory.color}
-                  icon={subcategory.icon}
-                  name={subcategory.name}
-                  selected={subcategoryId === subcategory.id}
-                  onPress={() => setSubcategoryId(subcategory.id)}
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
 
         <FormError message={error} />
 
@@ -254,6 +270,19 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
       </ScrollView>
     </View>
   );
+}
+
+function getBudgetCategorySelectionLabel(
+  scopeType: BudgetScopeType,
+  category: ReturnType<typeof getCategory>,
+  subcategoryId: string | null,
+  categories = defaultCategories,
+): string {
+  if (scopeType === 'subcategory') {
+    return `${category.name} / ${getSubcategoryName(category.id, subcategoryId ?? '', categories)}`;
+  }
+
+  return category.name;
 }
 
 function getFallbackBudgetName(

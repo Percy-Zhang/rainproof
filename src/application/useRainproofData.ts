@@ -20,7 +20,7 @@ import type {
   CurrencyTotal,
   NewAccountInput,
   NewBudgetInput,
-  NewRecurringBillInput,
+  NewRecurringItemInput,
   NewTransactionLinkInput,
   NewTransactionInput,
   RainyDayProgress,
@@ -31,6 +31,7 @@ import type {
   UpdateDashboardCardSettingsInput,
   UpdateAccountInput,
   UpdateBudgetInput,
+  UpdateRecurringItemInput,
   UpdateRainyDayFundInput,
   UpdateTransactionLinkInput,
   UpdateTransactionInput,
@@ -60,7 +61,10 @@ type RainproofActions = {
   addBudget(input: NewBudgetInput): Promise<void>;
   updateBudget(input: UpdateBudgetInput): Promise<void>;
   archiveBudget(budgetId: string): Promise<void>;
-  addRecurringBill(input: NewRecurringBillInput): Promise<void>;
+  addRecurringItem(input: NewRecurringItemInput): Promise<void>;
+  updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
+  archiveRecurringItem(recurringItemId: string): Promise<void>;
+  deleteRecurringItem(recurringItemId: string): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
@@ -214,7 +218,7 @@ export function useRainproofData(): RainproofDataState {
       budgets: snapshot.budgets,
       report: budgetExpenseReport,
     });
-    const upcomingBills = getUpcomingBills(snapshot.recurringBills);
+    const upcomingBills = getUpcomingBills(snapshot.recurringItems);
     const cashFlow = getCashFlowSummary({
       transactions: snapshot.transactions,
       lines: snapshot.transactionLines,
@@ -268,7 +272,13 @@ export function useRainproofData(): RainproofDataState {
       addBudget: (input) => runMutation((repository) => repository.addBudget(input)),
       updateBudget: (input) => runMutation((repository) => repository.updateBudget(input)),
       archiveBudget: (budgetId) => runMutation((repository) => repository.archiveBudget(budgetId)),
-      addRecurringBill: (input) => runMutation((repository) => repository.addRecurringBill(input)),
+      addRecurringItem: (input) => runMutation((repository) => repository.addRecurringItem(input)),
+      updateRecurringItem: (input) =>
+        runMutation((repository) => repository.updateRecurringItem(input), { rethrow: true }),
+      archiveRecurringItem: (recurringItemId) =>
+        runMutation((repository) => repository.archiveRecurringItem(recurringItemId)),
+      deleteRecurringItem: (recurringItemId) =>
+        runMutation((repository) => repository.deleteRecurringItem(recurringItemId)),
       updateRainyDayFund: (input) => runMutation((repository) => repository.updateRainyDayFund(input)),
       updateSettings: (input) => runMutation((repository) => repository.updateSettings(input)),
       updateCategoryCatalog: (input) => runMutation((repository) => repository.updateCategoryCatalog(input)),

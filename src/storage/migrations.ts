@@ -1,6 +1,7 @@
 import type * as SQLite from 'expo-sqlite';
 
 import { DEFAULT_ACCOUNT_THEME_COLOR } from '../domain/accountThemes';
+import { getNextMonthlyDueDateForDay } from '../domain/recurringItems';
 import { SCHEMA_SQL, SCHEMA_VERSION } from './schema';
 
 export type MigrationDatabase = Pick<
@@ -82,19 +83,34 @@ ON budgets(period, currency_code, scope_type, COALESCE(category_id, ''), COALESC
 WHERE is_active = 1;
 `;
 
-const PLANNING_AND_RAINY_DAY_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS recurring_bills (
+const RECURRING_ITEMS_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS recurring_items (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
+  kind TEXT NOT NULL,
   amount_minor INTEGER NOT NULL,
   currency_code TEXT NOT NULL,
   account_id TEXT NOT NULL DEFAULT '',
-  category_id TEXT NOT NULL,
-  due_day INTEGER NOT NULL,
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  frequency TEXT NOT NULL DEFAULT 'monthly',
+  next_due_date TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  CHECK (kind IN ('expense', 'income')),
+  CHECK (amount_minor > 0),
+  CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'yearly')),
+  CHECK (next_due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 );
+
+CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
+ON recurring_items(is_active, next_due_date);
+`;
+
+const PLANNING_AND_RAINY_DAY_SCHEMA_SQL = `
+${RECURRING_ITEMS_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS rainy_day_funds (
   id TEXT PRIMARY KEY NOT NULL,
@@ -166,6 +182,12 @@ const migrations: Migration[] = [
       await ensureBudgetSchema(db);
     },
   },
+  {
+    version: 8,
+    migrate: async (db) => {
+      await ensureRecurringItemsSchema(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -197,6 +219,7 @@ async function ensureCurrentSchemaCompatibility(db: MigrationDatabase): Promise<
   await ensureTransactionCompatibilityColumns(db);
   await ensureLineLevelTransactionLinkSchema(db);
   await ensureBudgetSchema(db);
+  await ensureRecurringItemsSchema(db);
   await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
 }
 
@@ -211,6 +234,19 @@ type LegacyBudgetRow = {
 
 type CategoryCatalogSettingRow = {
   value: string;
+};
+
+type LegacyRecurringBillRow = {
+  id: string;
+  name: string;
+  amount_minor: number;
+  currency_code: string;
+  account_id: string;
+  category_id: string;
+  due_day: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
 };
 
 async function ensureBudgetSchema(db: MigrationDatabase): Promise<void> {
@@ -304,6 +340,45 @@ function formatBudgetMigrationLabel(value: string): string {
   return words.length
     ? words.map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`).join(' ')
     : 'Category';
+}
+
+async function ensureRecurringItemsSchema(db: MigrationDatabase): Promise<void> {
+  await db.execAsync(RECURRING_ITEMS_SCHEMA_SQL);
+
+  const hasLegacyRecurringBills = await tableExists(db, 'recurring_bills');
+  if (!hasLegacyRecurringBills) {
+    return;
+  }
+
+  const legacyRows = await db.getAllAsync<LegacyRecurringBillRow>(
+    `SELECT id, name, amount_minor, currency_code, account_id, category_id, due_day,
+            is_active, created_at, updated_at
+     FROM recurring_bills`,
+  );
+
+  for (const row of legacyRows) {
+    const amountMinor = Number(row.amount_minor);
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      continue;
+    }
+
+    await db.runAsync(
+      `INSERT OR IGNORE INTO recurring_items (
+        id, name, kind, amount_minor, currency_code, account_id, category_id,
+        subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
+      ) VALUES (?, ?, 'expense', ?, ?, ?, ?, NULL, '', 'monthly', ?, ?, ?, ?)`,
+      row.id,
+      row.name?.trim() || 'Recurring item',
+      amountMinor,
+      row.currency_code,
+      row.account_id ?? '',
+      row.category_id ?? '',
+      getNextMonthlyDueDateForDay(row.due_day),
+      row.is_active === 1 ? 1 : 0,
+      row.created_at,
+      row.updated_at,
+    );
+  }
 }
 
 async function ensureLineLevelTransactionLinkSchema(db: MigrationDatabase): Promise<void> {
@@ -403,6 +478,14 @@ async function ensureColumn(
   if (!columnNames.has(columnName)) {
     await db.runAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnDefinition}`);
   }
+}
+
+async function tableExists(db: MigrationDatabase, tableName: string): Promise<boolean> {
+  const row = await db.getFirstAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+    tableName,
+  );
+  return !!row;
 }
 
 async function getUserVersion(db: MigrationDatabase): Promise<number> {

@@ -1,5 +1,6 @@
 import { isWithinDateRange } from './dates';
 import { getLinkedStatsAdjustments } from './linkedStats';
+import { getUpcomingRecurringItems } from './recurringItems';
 import type {
   Account,
   AccountBalance,
@@ -11,7 +12,7 @@ import type {
   DateRange,
   RainyDayFund,
   RainyDayProgress,
-  RecurringBill,
+  RecurringItem,
   SpendingByCategory,
   Transaction,
   TransactionLine,
@@ -216,27 +217,8 @@ export function getCashFlowSummary({
   };
 }
 
-export function getUpcomingBills(bills: RecurringBill[], from = new Date(), daysAhead = 30): UpcomingBill[] {
-  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  const horizon = new Date(start);
-  horizon.setDate(horizon.getDate() + daysAhead);
-
-  return bills
-    .filter((bill) => bill.isActive)
-    .map((bill) => {
-      const safeDueDay = Math.min(Math.max(bill.dueDay, 1), 28);
-      const candidate = new Date(start.getFullYear(), start.getMonth(), safeDueDay);
-      if (candidate < start) {
-        candidate.setMonth(candidate.getMonth() + 1);
-      }
-
-      return {
-        ...bill,
-        nextDueDate: candidate.toISOString(),
-      };
-    })
-    .filter((bill) => new Date(bill.nextDueDate) <= horizon)
-    .sort((a, b) => new Date(a.nextDueDate).getTime() - new Date(b.nextDueDate).getTime());
+export function getUpcomingBills(items: RecurringItem[], from = new Date(), daysAhead = 30): UpcomingBill[] {
+  return getUpcomingRecurringItems(items, from, daysAhead);
 }
 
 export function getTransactionLineTotal(transactionId: string, lines: TransactionLine[], currencyCode: CurrencyCode): number {

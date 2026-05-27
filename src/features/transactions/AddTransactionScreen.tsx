@@ -46,6 +46,10 @@ import type {
   NewTransactionInput,
   TransactionKind,
 } from '../../domain/types';
+import type {
+  CategorySelectLaunchParams,
+  CategorySelectionResult,
+} from '../categorySelection/categorySelectionModel';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
   accountLabel,
@@ -67,6 +71,10 @@ import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from '.
 type AddTransactionScreenProps = {
   snapshot: AppSnapshot;
   onAddTransaction: (input: NewTransactionInput) => Promise<void>;
+  onOpenCategorySelect: (
+    params: CategorySelectLaunchParams,
+    onSelect: (selection: CategorySelectionResult) => void,
+  ) => void;
   onDone: () => void;
 };
 
@@ -79,7 +87,12 @@ function createSplitLineId(): string {
   return `split-line-${splitLineCounter}`;
 }
 
-export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: AddTransactionScreenProps) {
+export function AddTransactionScreen({
+  snapshot,
+  onAddTransaction,
+  onOpenCategorySelect,
+  onDone,
+}: AddTransactionScreenProps) {
   const now = new Date();
   const [page, setPage] = useState<Page>('amount');
   const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
@@ -97,7 +110,6 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
   const [labels, setLabels] = useState('');
   const [groupId, setGroupId] = useState('');
   const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>([]);
-  const [splitCategoryLineId, setSplitCategoryLineId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -108,11 +120,6 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
     ? undefined
     : snapshot.accounts.find((account) => account.id === toAccountId);
   const selectedCategory = categoryId ? getCategory(categoryId, categories) : categories[0];
-  const selectedSplitLine = splitCategoryLineId
-    ? splitLines.find((line) => line.id === splitCategoryLineId)
-    : undefined;
-  const pickerCategoryId = selectedSplitLine?.categoryId ?? categoryId;
-  const pickerSubcategoryId = selectedSplitLine?.subcategoryId ?? subcategoryId;
   const displayAmount = getDisplayAmount(amountExpression);
   const previewAmountMinor = parsePreviewAmount(displayAmount, kind, fromAccountId);
   const splitTotalMinor = Math.abs(previewAmountMinor);
@@ -160,7 +167,6 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
 
       if (action === 'close_picker') {
         setPickerMode(null);
-        setSplitCategoryLineId(null);
         return true;
       }
 
@@ -181,7 +187,6 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
     setKind(nextKind);
     if (nextKind === 'transfer' || nextKind !== kind) {
       setSplitLines([]);
-      setSplitCategoryLineId(null);
       if (page === 'split') {
         setPage('amount');
       }
@@ -394,14 +399,59 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
     setSplitLines(nextLines);
   }
 
+  function openMainCategorySelect() {
+    if (kind === 'transfer') {
+      return;
+    }
+
+    onOpenCategorySelect(
+      {
+        kind,
+        selectedCategoryId: categoryId,
+        selectedSubcategoryId: subcategoryId,
+        selectionMode: 'subcategory',
+        showSuggestions: true,
+        title: 'Category',
+      },
+      ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
+        setCategoryId(nextCategoryId);
+        setSubcategoryId(nextSubcategoryId ?? '');
+      },
+    );
+  }
+
+  function openSplitLineCategorySelect(lineId: string) {
+    if (kind === 'transfer') {
+      return;
+    }
+
+    const line = splitLines.find((candidate) => candidate.id === lineId);
+    onOpenCategorySelect(
+      {
+        kind,
+        selectedCategoryId: line?.categoryId ?? categoryId,
+        selectedSubcategoryId: line?.subcategoryId ?? subcategoryId,
+        selectionMode: 'subcategory',
+        showSuggestions: true,
+        title: 'Split line category',
+      },
+      ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
+        updateSplitLine(lineId, {
+          categoryId: nextCategoryId,
+          subcategoryId: nextSubcategoryId ?? '',
+        });
+      },
+    );
+  }
+
   if (pickerMode) {
     return (
       <TransactionPickerScreen
         mode={pickerMode}
         accounts={snapshot.accounts}
         selectedAccountId={pickerMode === 'targetAccount' ? toAccountId : fromAccountId}
-        selectedCategoryId={pickerCategoryId}
-        selectedSubcategoryId={pickerSubcategoryId}
+        selectedCategoryId={categoryId}
+        selectedSubcategoryId={subcategoryId}
         kind={kind}
         categories={categories}
         transactions={snapshot.transactions}
@@ -410,7 +460,6 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
         sourceAccountId={fromAccountId}
         onClose={() => {
           setPickerMode(null);
-          setSplitCategoryLineId(null);
         }}
         onSelectAccount={(accountId) => {
           if (pickerMode === 'targetAccount') {
@@ -419,21 +468,8 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             setFromAccountId(accountId);
           }
           setPickerMode(null);
-          setSplitCategoryLineId(null);
         }}
-        onSelectCategory={(nextCategoryId, nextSubcategoryId) => {
-          if (splitCategoryLineId) {
-            updateSplitLine(splitCategoryLineId, {
-              categoryId: nextCategoryId,
-              subcategoryId: nextSubcategoryId,
-            });
-          } else {
-            setCategoryId(nextCategoryId);
-            setSubcategoryId(nextSubcategoryId);
-          }
-          setPickerMode(null);
-          setSplitCategoryLineId(null);
-        }}
+        onSelectCategory={() => undefined}
         onExit={onDone}
         cancelTestID="cancel-add-transaction-picker"
       />
@@ -514,7 +550,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
               <SelectorRow
                 label="Category"
                 value={`${selectedCategory.name} / ${getSubcategoryName(selectedCategory.id, subcategoryId, categories)}`}
-                onPress={() => setPickerMode('category')}
+                onPress={openMainCategorySelect}
                 color={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
                 icon={getSubcategoryIcon(selectedCategory.id, subcategoryId, categories)}
                 iconColor={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
@@ -562,8 +598,7 @@ export function AddTransactionScreen({ snapshot, onAddTransaction, onDone }: Add
             totalMinor={splitTotalMinor}
             onAddLine={addSplitLine}
             onPickCategory={(lineId) => {
-              setSplitCategoryLineId(lineId);
-              setPickerMode('category');
+              openSplitLineCategorySelect(lineId);
             }}
             onRemoveLine={removeSplitLine}
             onUpdateLine={updateSplitLine}

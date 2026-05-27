@@ -1,23 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AccountIconBadge } from '../../components/AccountDisplay';
-import { CategoryIconBadge, CategoryRow, SubcategoryRow } from '../../components/CategoryDisplay';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
-import { getCategorySuggestions, type CategorySuggestionMode } from '../../domain/categorySuggestions';
-import {
-  defaultCategories,
-  getCategory,
-  getSubcategory,
-  getSubcategoryColor,
-  getSubcategoryIcon,
-  getSubcategoryName,
-} from '../../domain/categories';
+import { defaultCategories } from '../../domain/categories';
 import { isOutsideAccountId, OUTSIDE_ACCOUNT_ID } from '../../domain/transactionEdit';
 import type { Account, CategoryDefinition, Transaction, TransactionKind, TransactionLine } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
-import { formatTransactionKindLabel } from './TransactionKindTabs';
+import { CategorySelectContent } from '../categorySelection/CategorySelectScreen';
 
 export type TransactionPickerMode = 'sourceAccount' | 'targetAccount' | 'category';
 
@@ -56,21 +46,7 @@ export function TransactionPickerScreen({
   onSelectCategory: (categoryId: string, subcategoryId: string) => void;
   cancelTestID?: string;
 }) {
-  const [expandedCategoryId, setExpandedCategoryId] = useState(selectedCategoryId ? getCategory(selectedCategoryId, categoryCatalog).id : '');
-  const [suggestionMode, setSuggestionMode] = useState<CategorySuggestionMode>('frequent');
-  const categories = categoryCatalog.filter((category) =>
-    kind === 'income' ? category.type === 'income' : category.type === 'expense',
-  );
-  const frequentSuggestions = useMemo(
-    () => getCategorySuggestions({ transactions, lines: transactionLines, kind, mode: 'frequent' }),
-    [kind, transactionLines, transactions],
-  );
-  const recentSuggestions = useMemo(
-    () => getCategorySuggestions({ transactions, lines: transactionLines, kind, mode: 'recent' }),
-    [kind, transactionLines, transactions],
-  );
-  const hasSuggestions = frequentSuggestions.length > 0 || recentSuggestions.length > 0;
-  const visibleSuggestions = suggestionMode === 'frequent' ? frequentSuggestions : recentSuggestions;
+  const categoryKind = kind === 'income' ? 'income' : 'expense';
   const title =
     mode === 'sourceAccount'
       ? kind === 'transfer' ? 'Transfer from' : 'Account'
@@ -93,74 +69,17 @@ export function TransactionPickerScreen({
       </View>
 
       {mode === 'category' ? (
-        <ScrollView contentContainerStyle={styles.pickerList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          {hasSuggestions ? (
-            <View style={styles.suggestionPanel}>
-              <View style={styles.suggestionTabs}>
-                {(['frequent', 'recent'] as CategorySuggestionMode[]).map((option) => (
-                  <Pressable
-                    accessibilityRole="button"
-                    key={option}
-                    onPress={() => setSuggestionMode(option)}
-                    style={({ pressed }) => [
-                      styles.suggestionTab,
-                      suggestionMode === option && styles.suggestionTabSelected,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Text style={[styles.suggestionTabText, suggestionMode === option && styles.suggestionTabTextSelected]}>
-                      {formatTransactionKindLabel(option)}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-              {visibleSuggestions.length ? (
-                <ScrollView
-                  horizontal
-                  contentContainerStyle={styles.categorySuggestionList}
-                  keyboardShouldPersistTaps="handled"
-                  showsHorizontalScrollIndicator={false}
-                >
-                  {visibleSuggestions.map((suggestion) => (
-                    <CategorySuggestionRow
-                      key={`${suggestion.categoryId}:${suggestion.subcategoryId}`}
-                      categoryId={suggestion.categoryId}
-                      subcategoryId={suggestion.subcategoryId}
-                      categories={categoryCatalog}
-                      selected={selectedCategoryId === suggestion.categoryId && selectedSubcategoryId === suggestion.subcategoryId}
-                      onPress={() => onSelectCategory(suggestion.categoryId, suggestion.subcategoryId)}
-                    />
-                  ))}
-                </ScrollView>
-              ) : (
-                <Text style={styles.emptySuggestionText}>No {suggestionMode} categories yet.</Text>
-              )}
-            </View>
-          ) : null}
-          {categories.map((category) => (
-            <View key={category.id} style={styles.categoryGroup}>
-              <CategoryRow
-                category={category}
-                expanded={expandedCategoryId === category.id}
-                onPress={() => setExpandedCategoryId((currentId) => (currentId === category.id ? '' : category.id))}
-              />
-              {expandedCategoryId === category.id ? (
-                <View style={styles.subcategoryList}>
-                  {category.subcategories.map((subcategory) => (
-                    <SubcategoryRow
-                      key={subcategory.id}
-                      onPress={() => onSelectCategory(category.id, subcategory.id)}
-                      selected={selectedCategoryId === category.id && selectedSubcategoryId === subcategory.id}
-                      color={subcategory.color}
-                      icon={subcategory.icon}
-                      name={subcategory.name}
-                    />
-                  ))}
-                </View>
-              ) : null}
-            </View>
-          ))}
-        </ScrollView>
+        <CategorySelectContent
+          categories={categoryCatalog}
+          kind={categoryKind}
+          selectedCategoryId={selectedCategoryId}
+          selectedSubcategoryId={selectedSubcategoryId}
+          selectionMode="subcategory"
+          showSuggestions
+          transactionLines={transactionLines}
+          transactions={transactions}
+          onSelect={(selection) => onSelectCategory(selection.categoryId, selection.subcategoryId ?? '')}
+        />
       ) : (
         <ScrollView contentContainerStyle={styles.pickerList} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           {kind === 'transfer' ? (
@@ -210,46 +129,6 @@ export function TransactionPickerScreen({
         </ScrollView>
       )}
     </View>
-  );
-}
-
-function CategorySuggestionRow({
-  categoryId,
-  subcategoryId,
-  categories,
-  selected,
-  onPress,
-}: {
-  categoryId: string;
-  subcategoryId: string;
-  categories: CategoryDefinition[];
-  selected: boolean;
-  onPress: () => void;
-}) {
-  const category = getCategory(categoryId, categories);
-  const subcategory = getSubcategory(categoryId, subcategoryId, categories);
-  const color = getSubcategoryColor(categoryId, subcategoryId, categories);
-  const icon = getSubcategoryIcon(categoryId, subcategoryId, categories);
-  const label = subcategoryId ? getSubcategoryName(categoryId, subcategoryId, categories) : category.name;
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.categorySuggestionRow,
-        { borderColor: selected ? color : colors.faint },
-        selected && styles.categorySuggestionRowSelected,
-        pressed && styles.pressed,
-      ]}
-    >
-      <CategoryIconBadge color={color} icon={icon} size="sm" />
-      <View style={styles.categorySuggestionText}>
-        <Text numberOfLines={1} style={styles.categorySuggestionTitle}>
-          {subcategory?.name ?? label}
-        </Text>
-      </View>
-    </Pressable>
   );
 }
 

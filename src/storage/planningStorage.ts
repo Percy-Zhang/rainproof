@@ -3,10 +3,18 @@ import {
   getBudgetScopeKey,
   validateBudgetInput,
 } from '../domain/budgets';
-import type { Budget, NewBudgetInput, NewRecurringBillInput, UpdateBudgetInput } from '../domain/types';
+import { validateRecurringItemInput } from '../domain/recurringItems';
+import type {
+  Budget,
+  NewBudgetInput,
+  NewRecurringItemInput,
+  RecurringItem,
+  UpdateBudgetInput,
+  UpdateRecurringItemInput,
+} from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
-import { mapBudget, type BudgetRow } from './mappers';
+import { mapBudget, mapRecurringItem, type BudgetRow, type RecurringItemRow } from './mappers';
 
 export async function addBudgetStorage(
   db: RepositoryDatabase,
@@ -90,26 +98,92 @@ export async function listBudgetsStorage(db: RepositoryDatabase): Promise<Budget
   return rows.map(mapBudget);
 }
 
-export async function addRecurringBillStorage(
+export async function listRecurringItemsStorage(db: RepositoryDatabase): Promise<RecurringItem[]> {
+  const rows = await db.getAllAsync<RecurringItemRow>(
+    `SELECT * FROM recurring_items
+     ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC`,
+  );
+  return rows.map(mapRecurringItem);
+}
+
+export async function addRecurringItemStorage(
   db: RepositoryDatabase,
-  input: NewRecurringBillInput,
+  input: NewRecurringItemInput,
 ): Promise<void> {
   const now = new Date().toISOString();
+  const validated = validateRecurringItemInput(input);
   await db.runAsync(
-    `INSERT INTO recurring_bills (
-      id, name, amount_minor, currency_code, account_id, category_id, due_day,
-      is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-    createLocalId('bill'),
-    input.name.trim() || 'Recurring bill',
-    input.amountMinor,
-    normalizeCurrencyCode(input.currencyCode),
-    input.accountId,
-    input.categoryId,
-    Math.min(Math.max(input.dueDay, 1), 28),
+    `INSERT INTO recurring_items (
+      id, name, kind, amount_minor, currency_code, account_id, category_id,
+      subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    createLocalId('recurring'),
+    validated.name,
+    validated.kind,
+    validated.amountMinor,
+    normalizeCurrencyCode(validated.currencyCode),
+    validated.accountId,
+    validated.categoryId,
+    validated.subcategoryId,
+    validated.note,
+    validated.frequency,
+    validated.nextDueDate,
+    validated.isActive ? 1 : 0,
     now,
     now,
   );
+}
+
+export async function updateRecurringItemStorage(
+  db: RepositoryDatabase,
+  input: UpdateRecurringItemInput,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const validated = validateRecurringItemInput(input);
+  const existing = await db.getFirstAsync<RecurringItemRow>('SELECT * FROM recurring_items WHERE id = ?', input.id);
+  if (!existing) {
+    throw new Error('Recurring item not found.');
+  }
+
+  await db.runAsync(
+    `UPDATE recurring_items
+     SET name = ?, kind = ?, amount_minor = ?, currency_code = ?, account_id = ?,
+         category_id = ?, subcategory_id = ?, note = ?, frequency = ?, next_due_date = ?,
+         is_active = ?, updated_at = ?
+     WHERE id = ?`,
+    validated.name,
+    validated.kind,
+    validated.amountMinor,
+    normalizeCurrencyCode(validated.currencyCode),
+    validated.accountId,
+    validated.categoryId,
+    validated.subcategoryId,
+    validated.note,
+    validated.frequency,
+    validated.nextDueDate,
+    validated.isActive ? 1 : 0,
+    now,
+    input.id,
+  );
+}
+
+export async function archiveRecurringItemStorage(
+  db: RepositoryDatabase,
+  recurringItemId: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  await db.runAsync(
+    'UPDATE recurring_items SET is_active = 0, updated_at = ? WHERE id = ?',
+    now,
+    recurringItemId,
+  );
+}
+
+export async function deleteRecurringItemStorage(
+  db: RepositoryDatabase,
+  recurringItemId: string,
+): Promise<void> {
+  await db.runAsync('DELETE FROM recurring_items WHERE id = ?', recurringItemId);
 }
 
 async function assertNoDuplicateActiveBudgetScope(

@@ -63,6 +63,23 @@ const currentBudgetColumns = [
   'updated_at',
 ];
 
+const currentRecurringItemColumns = [
+  'id',
+  'name',
+  'kind',
+  'amount_minor',
+  'currency_code',
+  'account_id',
+  'category_id',
+  'subcategory_id',
+  'note',
+  'frequency',
+  'next_due_date',
+  'is_active',
+  'created_at',
+  'updated_at',
+];
+
 class FakeMigrationDatabase {
   readonly execStatements: string[] = [];
   readonly runStatements: string[] = [];
@@ -143,7 +160,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
@@ -158,6 +175,7 @@ describe('SQLite migrations', () => {
       transactions: currentTransactionColumns,
       transaction_lines: currentTransactionLineColumns,
       budgets: currentBudgetColumns,
+      recurring_items: currentRecurringItemColumns,
     });
 
     await runMigrations(db.asMigrationDatabase());

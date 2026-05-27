@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 7;
+export const SCHEMA_VERSION = 8;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -107,18 +107,29 @@ CREATE TABLE IF NOT EXISTS budgets (
   )
 );
 
-CREATE TABLE IF NOT EXISTS recurring_bills (
+CREATE TABLE IF NOT EXISTS recurring_items (
   id TEXT PRIMARY KEY NOT NULL,
   name TEXT NOT NULL,
+  kind TEXT NOT NULL,
   amount_minor INTEGER NOT NULL,
   currency_code TEXT NOT NULL,
   account_id TEXT NOT NULL DEFAULT '',
-  category_id TEXT NOT NULL,
-  due_day INTEGER NOT NULL,
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  frequency TEXT NOT NULL DEFAULT 'monthly',
+  next_due_date TEXT NOT NULL,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  CHECK (kind IN ('expense', 'income')),
+  CHECK (amount_minor > 0),
+  CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'yearly')),
+  CHECK (next_due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 );
+
+CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
+ON recurring_items(is_active, next_due_date);
 
 CREATE TABLE IF NOT EXISTS rainy_day_funds (
   id TEXT PRIMARY KEY NOT NULL,

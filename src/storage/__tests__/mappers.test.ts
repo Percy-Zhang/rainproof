@@ -1,6 +1,7 @@
 import {
   mapAccount,
   mapRainyDayFund,
+  mapRecurringItem,
   mapTransaction,
   mapTransactionLine,
   mapTransactionLink,
@@ -121,6 +122,38 @@ describe('storage mappers', () => {
         ['acct-1', 'acct-2'],
       ),
     ).toEqual(expect.objectContaining({ currencyCode: 'NZD', linkedAccountIds: ['acct-1', 'acct-2'] }));
+  });
+
+  it('maps recurring item rows to the domain recurring item shape', () => {
+    expect(
+      mapRecurringItem({
+        id: 'recurring-1',
+        name: 'Streaming',
+        kind: 'expense',
+        amount_minor: 1899,
+        currency_code: 'aud',
+        account_id: 'acct-1',
+        category_id: 'entertainment',
+        subcategory_id: 'streaming',
+        note: 'Family plan',
+        frequency: 'monthly',
+        next_due_date: '2026-05-14',
+        is_active: 1,
+        created_at: '2026-05-01T00:00:00.000Z',
+        updated_at: '2026-05-01T00:00:00.000Z',
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        kind: 'expense',
+        amountMinor: 1899,
+        currencyCode: 'AUD',
+        subcategoryId: 'streaming',
+        note: 'Family plan',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-14',
+        isActive: true,
+      }),
+    );
   });
 
   it('parses storage JSON fields defensively', () => {

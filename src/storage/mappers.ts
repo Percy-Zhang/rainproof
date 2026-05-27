@@ -8,7 +8,9 @@ import type {
   AccountType,
   Budget,
   RainyDayFund,
-  RecurringBill,
+  RecurringFrequency,
+  RecurringItem,
+  RecurringItemKind,
   Transaction,
   TransactionKind,
   TransactionLine,
@@ -92,14 +94,18 @@ export type BudgetRow = {
   updated_at: string;
 };
 
-export type RecurringBillRow = {
+export type RecurringItemRow = {
   id: string;
   name: string;
+  kind: RecurringItemKind;
   amount_minor: number;
   currency_code: string;
   account_id: string;
   category_id: string;
-  due_day: number;
+  subcategory_id: string | null;
+  note: string;
+  frequency: RecurringFrequency;
+  next_due_date: string;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -205,15 +211,19 @@ export function mapBudget(row: BudgetRow): Budget {
   };
 }
 
-export function mapRecurringBill(row: RecurringBillRow): RecurringBill {
+export function mapRecurringItem(row: RecurringItemRow): RecurringItem {
   return {
     id: row.id,
     name: row.name,
+    kind: row.kind,
     amountMinor: row.amount_minor,
     currencyCode: normalizeCurrencyCode(row.currency_code),
     accountId: row.account_id,
     categoryId: row.category_id,
-    dueDay: row.due_day,
+    subcategoryId: row.subcategory_id || null,
+    note: row.note,
+    frequency: row.frequency,
+    nextDueDate: row.next_due_date,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

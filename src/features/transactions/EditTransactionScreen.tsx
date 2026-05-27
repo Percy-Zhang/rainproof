@@ -46,6 +46,10 @@ import type {
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
 } from '../../domain/types';
+import type {
+  CategorySelectLaunchParams,
+  CategorySelectionResult,
+} from '../categorySelection/categorySelectionModel';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
   accountLabel,
@@ -74,6 +78,10 @@ type EditTransactionScreenProps = {
   onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
   onDeleteTransactionLink: (linkId: string) => Promise<void>;
   onOpenTransactionLink: () => void;
+  onOpenCategorySelect: (
+    params: CategorySelectLaunchParams,
+    onSelect: (selection: CategorySelectionResult) => void,
+  ) => void;
   onCancel: () => void;
   onDone: () => void;
 };
@@ -86,6 +94,7 @@ export function EditTransactionScreen({
   onUpdateTransactionLink,
   onDeleteTransactionLink,
   onOpenTransactionLink,
+  onOpenCategorySelect,
   onCancel,
   onDone,
 }: EditTransactionScreenProps) {
@@ -94,7 +103,6 @@ export function EditTransactionScreen({
   const [error, setError] = useState('');
   const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
   const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
-  const [splitCategoryLineId, setSplitCategoryLineId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -135,17 +143,11 @@ export function EditTransactionScreen({
       : fromAccount?.currencyCode ?? ''
     : '';
   const selectedCategory = draft?.categoryId ? getCategory(draft.categoryId, categories) : getDefaultCategoryForKind(draft?.kind ?? 'expense', categories);
-  const selectedSplitLine = splitCategoryLineId
-    ? draft?.splitLines?.find((line) => line.id === splitCategoryLineId)
-    : undefined;
-  const pickerCategoryId = selectedSplitLine?.categoryId ?? draft?.categoryId ?? '';
-  const pickerSubcategoryId = selectedSplitLine?.subcategoryId ?? draft?.subcategoryId ?? '';
   const canSave = draft ? canSaveDraft(draft) : false;
 
   useEffect(() => {
     setConfirmDelete(false);
     setPage('form');
-    setSplitCategoryLineId(null);
     try {
       setDraft(createTransactionEditDraft(snapshot, transactionId));
       setError('');
@@ -164,7 +166,6 @@ export function EditTransactionScreen({
 
       if (pickerMode) {
         setPickerMode(null);
-        setSplitCategoryLineId(null);
         return true;
       }
 
@@ -186,8 +187,8 @@ export function EditTransactionScreen({
         mode={pickerMode}
         accounts={snapshot.accounts}
         selectedAccountId={pickerMode === 'targetAccount' ? draft.targetAccountId : draft.accountId}
-        selectedCategoryId={pickerCategoryId}
-        selectedSubcategoryId={pickerSubcategoryId}
+        selectedCategoryId={draft.categoryId}
+        selectedSubcategoryId={draft.subcategoryId}
         kind={draft.kind}
         categories={categories}
         transactions={snapshot.transactions}
@@ -196,25 +197,12 @@ export function EditTransactionScreen({
         sourceAccountId={draft.accountId}
         onClose={() => {
           setPickerMode(null);
-          setSplitCategoryLineId(null);
         }}
         onSelectAccount={(accountId) => {
           updateDraft(pickerMode === 'targetAccount' ? { targetAccountId: accountId } : { accountId });
           setPickerMode(null);
-          setSplitCategoryLineId(null);
         }}
-        onSelectCategory={(nextCategoryId, nextSubcategoryId) => {
-          if (splitCategoryLineId) {
-            updateSplitLine(splitCategoryLineId, {
-              categoryId: nextCategoryId,
-              subcategoryId: nextSubcategoryId,
-            });
-          } else {
-            updateDraft({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId });
-          }
-          setPickerMode(null);
-          setSplitCategoryLineId(null);
-        }}
+        onSelectCategory={() => undefined}
         onExit={onCancel}
         cancelTestID="cancel-edit-transaction-picker"
       />
@@ -320,7 +308,6 @@ export function EditTransactionScreen({
     const defaultCategory = getDefaultCategoryForKind(kind, categories);
     if (kind === 'transfer' || kind !== draft?.kind) {
       setPage('form');
-      setSplitCategoryLineId(null);
     }
     setDraft((current) =>
       current
@@ -434,6 +421,47 @@ export function EditTransactionScreen({
     }
   }
 
+  function openMainCategorySelect(nextDraft: TransactionEditDraft) {
+    if (nextDraft.kind === 'transfer') {
+      return;
+    }
+
+    onOpenCategorySelect(
+      {
+        kind: nextDraft.kind,
+        selectedCategoryId: nextDraft.categoryId,
+        selectedSubcategoryId: nextDraft.subcategoryId,
+        selectionMode: 'subcategory',
+        showSuggestions: true,
+        title: 'Category',
+      },
+      ({ categoryId, subcategoryId }) => {
+        updateDraft({ categoryId, subcategoryId: subcategoryId ?? '' });
+      },
+    );
+  }
+
+  function openSplitLineCategorySelect(lineId: string, nextDraft: TransactionEditDraft) {
+    if (nextDraft.kind === 'transfer') {
+      return;
+    }
+
+    const line = getEditableSplitLines(nextDraft).find((candidate) => candidate.id === lineId);
+    onOpenCategorySelect(
+      {
+        kind: nextDraft.kind,
+        selectedCategoryId: line?.categoryId ?? nextDraft.categoryId,
+        selectedSubcategoryId: line?.subcategoryId ?? nextDraft.subcategoryId,
+        selectionMode: 'subcategory',
+        showSuggestions: true,
+        title: 'Split line category',
+      },
+      ({ categoryId, subcategoryId }) => {
+        updateSplitLine(lineId, { categoryId, subcategoryId: subcategoryId ?? '' });
+      },
+    );
+  }
+
   return (
     <View style={styles.screen}>
       <View style={styles.topBar}>
@@ -487,8 +515,7 @@ export function EditTransactionScreen({
             totalMinor={getDraftExpenseTotalMinor(draft)}
             onAddLine={addSplitLine}
             onPickCategory={(lineId) => {
-              setSplitCategoryLineId(lineId);
-              setPickerMode('category');
+              openSplitLineCategorySelect(lineId, draft);
             }}
             onRemoveLine={removeSplitLine}
             onUpdateLine={updateSplitLine}
@@ -557,7 +584,7 @@ export function EditTransactionScreen({
                 <SelectorRow
                   label="Category"
                   value={`${selectedCategory.name} / ${getSubcategoryName(selectedCategory.id, draft.subcategoryId, categories)}`}
-                  onPress={() => setPickerMode('category')}
+                  onPress={() => openMainCategorySelect(draft)}
                   color={getSubcategoryColor(selectedCategory.id, draft.subcategoryId, categories)}
                   icon={getSubcategoryIcon(selectedCategory.id, draft.subcategoryId, categories)}
                   iconColor={getSubcategoryColor(selectedCategory.id, draft.subcategoryId, categories)}

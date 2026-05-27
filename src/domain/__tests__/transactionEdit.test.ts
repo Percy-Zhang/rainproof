@@ -79,6 +79,7 @@ function snapshot(kind: Transaction['kind'], lines: TransactionLine[]): AppSnaps
     transactionLines: lines,
     transactionLinks: [],
     budgets: [],
+    recurringItems: [],
     recurringBills: [],
     rainyDayFund: {
       id: 'fund',

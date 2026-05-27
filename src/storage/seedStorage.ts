@@ -6,7 +6,7 @@ import type { SettingRow } from './mappers';
 import {
   getExpandedSampleAccounts,
   getExpandedSampleBudgets,
-  getExpandedSampleRecurringBills,
+  getExpandedSampleRecurringItems,
   getExpandedSampleTransactions,
   SAMPLE_DATA_VERSION,
   type SeedTransactionLine,
@@ -82,13 +82,14 @@ export async function seedDemoFirstRunStorage(
       now,
     );
     await db.runAsync(
-      `INSERT INTO recurring_bills (
-        id, name, amount_minor, currency_code, account_id, category_id, due_day,
-        is_active, created_at, updated_at
-      ) VALUES (?, 'Internet', 8900, ?, ?, 'bills', 12, 1, ?, ?)`,
-      createLocalId('bill'),
+      `INSERT INTO recurring_items (
+        id, name, kind, amount_minor, currency_code, account_id, category_id,
+        subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
+      ) VALUES (?, 'Internet', 'expense', 8900, ?, ?, 'bills', 'internet', '', 'monthly', ?, 1, ?, ?)`,
+      createLocalId('recurring'),
       currencyCode,
       everydayId,
+      formatSeedDateOnly(new Date()),
       now,
       now,
     );
@@ -180,20 +181,22 @@ async function seedExpandedSampleData(
       );
     }
 
-    for (const bill of getExpandedSampleRecurringBills({
+    for (const item of getExpandedSampleRecurringItems({
       billsId,
       creditCardId,
       currencyCode,
       everydayId,
+      now,
     })) {
-      await insertSeedRecurringBill(
+      await insertSeedRecurringItem(
         db,
-        bill.name,
-        bill.amountMinor,
-        bill.currencyCode,
-        bill.accountId,
-        bill.categoryId,
-        bill.dueDay,
+        item.name,
+        item.amountMinor,
+        item.currencyCode,
+        item.accountId,
+        item.categoryId,
+        item.subcategoryId,
+        item.nextDueDate,
         nowIso,
       );
     }
@@ -292,28 +295,30 @@ async function upsertSeedBudget(
   );
 }
 
-async function insertSeedRecurringBill(
+async function insertSeedRecurringItem(
   db: RepositoryDatabase,
   name: string,
   amountMinor: number,
   currencyCode: string,
   accountId: string,
   categoryId: string,
-  dueDay: number,
+  subcategoryId: string,
+  nextDueDate: string,
   now: string,
 ): Promise<void> {
   await db.runAsync(
-    `INSERT INTO recurring_bills (
-      id, name, amount_minor, currency_code, account_id, category_id, due_day,
-      is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-    createLocalId('bill'),
+    `INSERT INTO recurring_items (
+      id, name, kind, amount_minor, currency_code, account_id, category_id,
+      subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
+    ) VALUES (?, ?, 'expense', ?, ?, ?, ?, ?, '', 'monthly', ?, 1, ?, ?)`,
+    createLocalId('recurring'),
     name,
     amountMinor,
     currencyCode,
     accountId,
     categoryId,
-    dueDay,
+    subcategoryId,
+    nextDueDate,
     now,
     now,
   );
@@ -356,4 +361,12 @@ async function insertSeedTransaction(
       now,
     );
   }
+}
+
+function formatSeedDateOnly(date: Date): string {
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
 }
