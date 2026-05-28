@@ -17,14 +17,16 @@ import {
   getSplitTransactionValidationMessage,
   type SplitTransactionFormLine,
 } from '../../domain/splitTransactionForm';
+import { getFilteredTransactionItemNameSuggestions } from '../../domain/transactionItemSuggestions';
 import { formatMoney } from '../../domain/money';
 import type { CategoryDefinition, CurrencyCode } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
-import { InlineField, SelectorRow } from './TransactionFormComponents';
+import { AutocompleteField, InlineField, SelectorRow } from './TransactionFormComponents';
 
 type SplitTransactionEditorProps = {
   categories: CategoryDefinition[];
   currencyCode: CurrencyCode;
+  itemNameSuggestions?: string[];
   lines: SplitTransactionFormLine[];
   showCurrencyCodes: boolean;
   totalMinor: number;
@@ -96,6 +98,7 @@ function useKeyboardHeight(): number {
 export function SplitTransactionEditor({
   categories,
   currencyCode,
+  itemNameSuggestions = [],
   lines,
   showCurrencyCodes,
   totalMinor,
@@ -158,11 +161,12 @@ export function SplitTransactionEditor({
               iconColor={getSubcategoryColor(category.id, line.subcategoryId, categories)}
               empty={!line.subcategoryId}
             />
-            <InlineField
-              label="Line note"
+            <AutocompleteField
+              label="Line item"
               value={line.note}
               onChange={(note) => onUpdateLine(line.id, { note })}
               placeholder="Optional"
+              suggestions={getFilteredTransactionItemNameSuggestions(itemNameSuggestions, line.note)}
             />
           </Card>
         );

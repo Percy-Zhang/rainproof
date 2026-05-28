@@ -19,6 +19,7 @@ import {
   getTemplateCurrencyCodeForAccount,
   validateTransactionTemplateInput,
 } from '../../domain/transactionTemplates';
+import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type {
   AppSnapshot,
   CategoryDefinition,
@@ -32,6 +33,7 @@ import type {
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
+import { AutocompleteField, useAutocompleteOptions } from '../transactions/TransactionFormComponents';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type TransactionTemplateFormScreenProps =
@@ -85,6 +87,24 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   const [error, setError] = useState('');
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const currencyCode = getTemplateCurrencyCodeForAccount(accounts, accountId);
+  const itemNameSuggestionValues = useMemo(
+    () => getTransactionItemNameSuggestionValues({
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionTemplates: snapshot.transactionTemplates,
+      recurringItems: snapshot.recurringItems,
+      excludeTemplateId: editingTemplate?.id,
+    }),
+    [
+      editingTemplate?.id,
+      snapshot.recurringItems,
+      snapshot.transactionLines,
+      snapshot.transactionTemplates,
+      snapshot.transactions,
+    ],
+  );
+  const nameSuggestions = useAutocompleteOptions(itemNameSuggestionValues, name);
+  const titleSuggestions = useAutocompleteOptions(itemNameSuggestionValues, title);
 
   function changeKind(nextKind: TransactionTemplateKind) {
     setKind(nextKind);
@@ -247,17 +267,19 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
           </View>
         </View>
 
-        <TextField
+        <AutocompleteField
           label="Template name"
           value={name}
-          onChangeText={setName}
+          onChange={setName}
           placeholder={kind === 'income' ? 'Paycheck' : 'Coffee, groceries, lunch'}
+          suggestions={nameSuggestions}
         />
-        <TextField
+        <AutocompleteField
           label="Transaction item"
           value={title}
-          onChangeText={setTitle}
+          onChange={setTitle}
           placeholder={kind === 'income' ? 'Salary' : 'Groceries'}
+          suggestions={titleSuggestions}
         />
         <TextField
           label="Amount"

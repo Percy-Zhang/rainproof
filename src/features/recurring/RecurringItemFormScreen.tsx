@@ -25,6 +25,7 @@ import {
   toLocalDateOnly,
   validateRecurringItemInput,
 } from '../../domain/recurringItems';
+import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type {
   AppSnapshot,
   CategoryDefinition,
@@ -39,7 +40,7 @@ import type {
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
-import { getNativePickerDisplay, NativePickerRow } from '../transactions/TransactionFormComponents';
+import { AutocompleteField, getNativePickerDisplay, NativePickerRow, useAutocompleteOptions } from '../transactions/TransactionFormComponents';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type RecurringItemFormScreenProps =
@@ -106,6 +107,23 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const currencyCode = getRecurringCurrencyCodeForAccount(accounts, accountId);
   const datePickerValue = isValidDateOnly(nextDueDate) ? dateOnlyToLocalDate(nextDueDate) : new Date();
+  const itemNameSuggestionValues = useMemo(
+    () => getTransactionItemNameSuggestionValues({
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionTemplates: snapshot.transactionTemplates,
+      recurringItems: snapshot.recurringItems,
+      excludeRecurringItemId: editingItem?.id,
+    }),
+    [
+      editingItem?.id,
+      snapshot.recurringItems,
+      snapshot.transactionLines,
+      snapshot.transactionTemplates,
+      snapshot.transactions,
+    ],
+  );
+  const nameSuggestions = useAutocompleteOptions(itemNameSuggestionValues, name);
 
   function changeKind(nextKind: RecurringItemKind) {
     const nextCategory = getDefaultCategoryForKind(nextKind, categories);
@@ -260,11 +278,12 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
           </View>
         </View>
 
-        <TextField
+        <AutocompleteField
           label="Name"
           value={name}
-          onChangeText={setName}
+          onChange={setName}
           placeholder={kind === 'income' ? 'Salary' : 'Rent, subscription, insurance'}
+          suggestions={nameSuggestions}
         />
         <TextField
           label="Amount"

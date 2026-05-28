@@ -41,6 +41,7 @@ import {
   OUTSIDE_ACCOUNT_ID,
   OUTSIDE_MY_ACCOUNTS_LABEL,
 } from '../../domain/transactionEdit';
+import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type { AddTransactionTemplatePrefill } from '../../domain/transactionTemplates';
 import type {
   AppSnapshot,
@@ -142,8 +143,13 @@ export function AddTransactionScreen({
       : fromAccount?.currencyCode ?? '';
   const nativePickerValue = getNativePickerValue(date, time);
   const itemHistory = useMemo(
-    () => snapshot.transactions.map((transaction) => transaction.title),
-    [snapshot.transactions],
+    () => getTransactionItemNameSuggestionValues({
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionTemplates: snapshot.transactionTemplates,
+      recurringItems: snapshot.recurringItems,
+    }),
+    [snapshot.recurringItems, snapshot.transactionLines, snapshot.transactionTemplates, snapshot.transactions],
   );
   const groupHistory = useMemo(
     () => snapshot.transactions.map((transaction) => transaction.groupId).filter(Boolean),
@@ -603,6 +609,7 @@ export function AddTransactionScreen({
             categories={categories}
             currencyCode={fromAccount?.currencyCode ?? amountCurrencyCode}
             lines={splitLines}
+            itemNameSuggestions={itemHistory}
             showCurrencyCodes={showCurrencyCodes}
             totalMinor={splitTotalMinor}
             onAddLine={addSplitLine}

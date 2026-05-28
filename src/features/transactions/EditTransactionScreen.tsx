@@ -40,6 +40,7 @@ import {
   type TransactionEditDraft,
   type TransactionEditSplitLineDraft,
 } from '../../domain/transactionEdit';
+import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type {
   AppSnapshot,
   TransactionKind,
@@ -108,8 +109,20 @@ export function EditTransactionScreen({
   const categories = snapshot.categories ?? defaultCategories;
   const transactionExists = snapshot.transactions.some((transaction) => transaction.id === transactionId);
   const itemHistory = useMemo(
-    () => snapshot.transactions.filter((transaction) => transaction.id !== transactionId).map((transaction) => transaction.title),
-    [snapshot.transactions, transactionId],
+    () => getTransactionItemNameSuggestionValues({
+      transactions: snapshot.transactions,
+      transactionLines: snapshot.transactionLines,
+      transactionTemplates: snapshot.transactionTemplates,
+      recurringItems: snapshot.recurringItems,
+      excludeTransactionId: transactionId,
+    }),
+    [
+      snapshot.recurringItems,
+      snapshot.transactionLines,
+      snapshot.transactionTemplates,
+      snapshot.transactions,
+      transactionId,
+    ],
   );
   const groupHistory = useMemo(
     () => snapshot.transactions.map((transaction) => transaction.groupId).filter(Boolean),
@@ -511,6 +524,7 @@ export function EditTransactionScreen({
             categories={categories}
             currencyCode={amountCurrencyCode}
             lines={getEditableSplitLines(draft)}
+            itemNameSuggestions={itemHistory}
             showCurrencyCodes={showCurrencyCodes}
             totalMinor={getDraftExpenseTotalMinor(draft)}
             onAddLine={addSplitLine}

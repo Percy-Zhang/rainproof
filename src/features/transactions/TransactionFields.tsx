@@ -4,6 +4,7 @@ import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-na
 import { AccountIconBadge } from '../../components/AccountDisplay';
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
+import { getFilteredTransactionItemNameSuggestions } from '../../domain/transactionItemSuggestions';
 import type { Account } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
@@ -180,29 +181,7 @@ export function NativePickerRow({ label, value, onPress }: { label: string; valu
 
 export function useAutocompleteOptions(values: string[], query: string): string[] {
   return useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) {
-      return [];
-    }
-
-    const seen = new Set<string>();
-    const matches: string[] = [];
-
-    for (const value of values) {
-      const trimmed = value.trim();
-      const key = trimmed.toLowerCase();
-      if (!trimmed || seen.has(key) || !key.includes(normalizedQuery)) {
-        continue;
-      }
-
-      seen.add(key);
-      matches.push(trimmed);
-      if (matches.length >= 4) {
-        break;
-      }
-    }
-
-    return matches;
+    return getFilteredTransactionItemNameSuggestions(values, query);
   }, [values, query]);
 }
 
