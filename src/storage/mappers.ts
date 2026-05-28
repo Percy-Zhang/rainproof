@@ -12,6 +12,8 @@ import type {
   RecurringItem,
   RecurringItemKind,
   Transaction,
+  TransactionTemplate,
+  TransactionTemplateKind,
   TransactionKind,
   TransactionLine,
   TransactionLink,
@@ -106,6 +108,22 @@ export type RecurringItemRow = {
   note: string;
   frequency: RecurringFrequency;
   next_due_date: string;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TransactionTemplateRow = {
+  id: string;
+  name: string;
+  kind: TransactionTemplateKind;
+  title: string;
+  account_id: string;
+  amount_minor: number | null;
+  currency_code: string;
+  category_id: string | null;
+  subcategory_id: string | null;
+  notes: string;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -224,6 +242,24 @@ export function mapRecurringItem(row: RecurringItemRow): RecurringItem {
     note: row.note,
     frequency: row.frequency,
     nextDueDate: row.next_due_date,
+    isActive: row.is_active === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function mapTransactionTemplate(row: TransactionTemplateRow): TransactionTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    title: row.title,
+    accountId: row.account_id,
+    amountMinor: row.amount_minor ?? null,
+    currencyCode: normalizeCurrencyCode(row.currency_code),
+    categoryId: row.category_id || null,
+    subcategoryId: row.subcategory_id || null,
+    notes: row.notes,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

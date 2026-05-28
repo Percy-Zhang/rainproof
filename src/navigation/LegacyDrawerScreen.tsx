@@ -20,6 +20,7 @@ import { DashboardScreen } from '../features/dashboard/DashboardScreen';
 import { RecurringItemsScreen } from '../features/recurring/RecurringItemsScreen';
 import { SettingsScreen } from '../features/settings/SettingsScreen';
 import { StatsScreen } from '../features/stats/StatsScreen';
+import { TransactionTemplatesScreen } from '../features/templates/TransactionTemplatesScreen';
 import {
   createDefaultTransactionPeriodState,
   TransactionsScreen,
@@ -28,7 +29,15 @@ import {
 import { colors, spacing, typography } from '../theme/tokens';
 import type { MainDrawerParamList, RootStackParamList } from './routes';
 
-type RootScreenKey = 'dashboard' | 'accounts' | 'transactions' | 'stats' | 'budgets' | 'recurring' | 'settings';
+type RootScreenKey =
+  | 'dashboard'
+  | 'accounts'
+  | 'transactions'
+  | 'stats'
+  | 'budgets'
+  | 'recurring'
+  | 'templates'
+  | 'settings';
 
 type LegacyDrawerScreenProps = {
   rootScreen: RootScreenKey;
@@ -56,6 +65,10 @@ export function BudgetsDrawerScreen() {
 
 export function RecurringDrawerScreen() {
   return <LegacyDrawerScreen rootScreen="recurring" />;
+}
+
+export function TemplatesDrawerScreen() {
+  return <LegacyDrawerScreen rootScreen="templates" />;
 }
 
 export function SettingsDrawerScreen() {
@@ -119,6 +132,7 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           onOpenBudgets={() => navigation.navigate('Budgets')}
           onOpenDashboardEdit={() => rootNavigation?.navigate('DashboardEdit')}
           onOpenRecurring={() => navigation.navigate('Recurring')}
+          onOpenTemplates={() => navigation.navigate('Templates')}
           onUpdateSelectedAccountIds={actions.updateDashboardSelectedAccountIds}
         />
       ) : rootScreen === 'stats' ? (
@@ -149,6 +163,13 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           onCreateTransaction={(recurringItemId) =>
             rootNavigation?.navigate('CreateRecurringTransaction', { recurringItemId })}
           onEditRecurringItem={(recurringItemId) => rootNavigation?.navigate('EditRecurringItem', { recurringItemId })}
+        />
+      ) : rootScreen === 'templates' ? (
+        <TransactionTemplatesScreen
+          snapshot={snapshot}
+          onAddTemplate={() => rootNavigation?.navigate('AddTransactionTemplate')}
+          onEditTemplate={(templateId) => rootNavigation?.navigate('EditTransactionTemplate', { templateId })}
+          onUseTemplate={(templateId) => rootNavigation?.navigate('AddTransaction', { templateId })}
         />
       ) : (
         <ScrollView

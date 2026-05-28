@@ -314,8 +314,23 @@ describe('SQLite finance repository integration', () => {
           'next_due_date',
         ]),
       );
+      expect(await getColumnNames(db, 'transaction_templates')).toEqual(
+        expect.arrayContaining([
+          'name',
+          'kind',
+          'title',
+          'account_id',
+          'amount_minor',
+          'currency_code',
+          'category_id',
+          'subcategory_id',
+          'notes',
+          'is_active',
+        ]),
+      );
       expect(snapshot.recurringItems).toEqual([]);
       expect(snapshot.recurringBills).toEqual([]);
+      expect(snapshot.transactionTemplates).toEqual([]);
       expect(snapshot.rainyDayFund.goalMinor).toBe(0);
       expect(snapshot.rainyDayFund.linkedAccountIds).toEqual([]);
     });
@@ -515,6 +530,76 @@ describe('SQLite finance repository integration', () => {
 
       await repository.deleteRecurringItem(item.id);
       expect((await repository.getSnapshot()).recurringItems).toEqual([]);
+    });
+  });
+
+  it('persists transaction templates without creating ledger activity', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+
+      await repository.addTransactionTemplate({
+        name: 'Coffee quick add',
+        kind: 'expense',
+        title: 'Coffee',
+        accountId: everyday.id,
+        amountMinor: 650,
+        currencyCode: 'USD',
+        categoryId: 'food-dining',
+        subcategoryId: 'coffee',
+        notes: 'Takeaway',
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const template = snapshot.transactionTemplates[0];
+      expect(template).toEqual(
+        expect.objectContaining({
+          name: 'Coffee quick add',
+          kind: 'expense',
+          title: 'Coffee',
+          accountId: everyday.id,
+          amountMinor: 650,
+          currencyCode: 'AUD',
+          categoryId: 'food-dining',
+          subcategoryId: 'coffee',
+          notes: 'Takeaway',
+          isActive: true,
+        }),
+      );
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
+
+      await repository.updateTransactionTemplate({
+        id: template.id,
+        name: 'Coffee updated',
+        kind: 'expense',
+        title: 'Flat white',
+        accountId: everyday.id,
+        amountMinor: null,
+        currencyCode: 'AUD',
+        categoryId: null,
+        subcategoryId: null,
+        notes: 'Choose category later',
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactionTemplates.find((candidate) => candidate.id === template.id)).toEqual(
+        expect.objectContaining({
+          name: 'Coffee updated',
+          title: 'Flat white',
+          amountMinor: null,
+          categoryId: null,
+          subcategoryId: null,
+          isActive: true,
+        }),
+      );
+
+      await repository.archiveTransactionTemplate(template.id);
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactionTemplates.find((candidate) => candidate.id === template.id)?.isActive).toBe(false);
+
+      await repository.deleteTransactionTemplate(template.id);
+      expect((await repository.getSnapshot()).transactionTemplates).toEqual([]);
     });
   });
 

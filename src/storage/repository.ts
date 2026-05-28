@@ -5,7 +5,9 @@ import type {
   NewBudgetInput,
   Budget,
   NewRecurringItemInput,
+  NewTransactionTemplateInput,
   RecurringItem,
+  TransactionTemplate,
   NewTransactionInput,
   NewTransactionLinkInput,
   TransactionLink,
@@ -15,6 +17,7 @@ import type {
   UpdateDashboardCardSettingsInput,
   UpdateBudgetInput,
   UpdateRecurringItemInput,
+  UpdateTransactionTemplateInput,
   UpdateRainyDayFundInput,
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
@@ -71,6 +74,13 @@ import {
   deleteTransactionStorage,
   updateTransactionStorage,
 } from './transactionStorage';
+import {
+  addTransactionTemplateStorage,
+  archiveTransactionTemplateStorage,
+  deleteTransactionTemplateStorage,
+  listTransactionTemplatesStorage,
+  updateTransactionTemplateStorage,
+} from './transactionTemplateStorage';
 import { shouldSeedDemoData } from './seedConfig';
 
 export type { RepositoryDatabase } from './database';
@@ -100,6 +110,11 @@ export type FinanceRepository = {
   updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
   archiveRecurringItem(recurringItemId: string): Promise<void>;
   deleteRecurringItem(recurringItemId: string): Promise<void>;
+  listTransactionTemplates(): Promise<TransactionTemplate[]>;
+  addTransactionTemplate(input: NewTransactionTemplateInput): Promise<void>;
+  updateTransactionTemplate(input: UpdateTransactionTemplateInput): Promise<void>;
+  archiveTransactionTemplate(templateId: string): Promise<void>;
+  deleteTransactionTemplate(templateId: string): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
@@ -234,6 +249,26 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async deleteRecurringItem(recurringItemId: string): Promise<void> {
     return deleteRecurringItemStorage(this.db, recurringItemId);
+  }
+
+  async listTransactionTemplates(): Promise<TransactionTemplate[]> {
+    return listTransactionTemplatesStorage(this.db);
+  }
+
+  async addTransactionTemplate(input: NewTransactionTemplateInput): Promise<void> {
+    return addTransactionTemplateStorage(this.db, input);
+  }
+
+  async updateTransactionTemplate(input: UpdateTransactionTemplateInput): Promise<void> {
+    return updateTransactionTemplateStorage(this.db, input);
+  }
+
+  async archiveTransactionTemplate(templateId: string): Promise<void> {
+    return archiveTransactionTemplateStorage(this.db, templateId);
+  }
+
+  async deleteTransactionTemplate(templateId: string): Promise<void> {
+    return deleteTransactionTemplateStorage(this.db, templateId);
   }
 
   async updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void> {

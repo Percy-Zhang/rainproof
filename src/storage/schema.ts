@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 8;
+export const SCHEMA_VERSION = 9;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -130,6 +130,27 @@ CREATE TABLE IF NOT EXISTS recurring_items (
 
 CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
 ON recurring_items(is_active, next_due_date);
+
+CREATE TABLE IF NOT EXISTS transaction_templates (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  account_id TEXT NOT NULL DEFAULT '',
+  amount_minor INTEGER,
+  currency_code TEXT NOT NULL,
+  category_id TEXT,
+  subcategory_id TEXT,
+  notes TEXT NOT NULL DEFAULT '',
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (kind IN ('expense', 'income')),
+  CHECK (amount_minor IS NULL OR amount_minor > 0)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_templates_active_name
+ON transaction_templates(is_active, name);
 
 CREATE TABLE IF NOT EXISTS rainy_day_funds (
   id TEXT PRIMARY KEY NOT NULL,

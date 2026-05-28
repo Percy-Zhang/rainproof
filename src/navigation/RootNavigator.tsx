@@ -14,6 +14,7 @@ import {
   RecurringDrawerScreen,
   SettingsDrawerScreen,
   StatisticsDrawerScreen,
+  TemplatesDrawerScreen,
   TransactionsDrawerScreen,
 } from './LegacyDrawerScreen';
 import type { MainDrawerParamList, RootStackParamList } from './routes';
@@ -32,9 +33,11 @@ import {
   AddBudgetRouteScreen,
   DashboardAddCardsRouteScreen,
   DashboardEditRouteScreen,
+  AddTransactionTemplateRouteScreen,
   CategorySelectRouteScreen,
   CreateRecurringTransactionRouteScreen,
   EditBudgetRouteScreen,
+  EditTransactionTemplateRouteScreen,
   LinkTransactionRouteScreen,
   RainyDayFundRouteScreen,
   StatsDrilldownRouteScreen,
@@ -95,6 +98,16 @@ export function RootNavigator() {
           <RootStack.Screen
             name="CreateRecurringTransaction"
             component={CreateRecurringTransactionRouteScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="AddTransactionTemplate"
+            component={AddTransactionTemplateRouteScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="EditTransactionTemplate"
+            component={EditTransactionTemplateRouteScreen}
             options={{ headerShown: false }}
           />
           <RootStack.Screen
@@ -199,6 +212,14 @@ function MainDrawerNavigator() {
         options={{
           drawerIcon: ({ color, size }) => <Ionicons name="repeat-outline" color={color} size={size} />,
           title: 'Recurring',
+        }}
+      />
+      <Drawer.Screen
+        name="Templates"
+        component={TemplatesDrawerScreen}
+        options={{
+          drawerIcon: ({ color, size }) => <Ionicons name="flash-outline" color={color} size={size} />,
+          title: 'Templates',
         }}
       />
       <Drawer.Screen

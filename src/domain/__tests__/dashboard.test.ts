@@ -87,6 +87,7 @@ function snapshot(accounts: Account[], transactions: Transaction[], transactionL
     budgets: [],
     recurringItems: [],
     recurringBills: [],
+    transactionTemplates: [],
     rainyDayFund: {
       id: 'fund-1',
       name: 'Rainy day',

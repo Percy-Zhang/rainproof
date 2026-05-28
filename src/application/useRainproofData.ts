@@ -21,6 +21,7 @@ import type {
   NewAccountInput,
   NewBudgetInput,
   NewRecurringItemInput,
+  NewTransactionTemplateInput,
   NewTransactionLinkInput,
   NewTransactionInput,
   RainyDayProgress,
@@ -32,6 +33,7 @@ import type {
   UpdateAccountInput,
   UpdateBudgetInput,
   UpdateRecurringItemInput,
+  UpdateTransactionTemplateInput,
   UpdateRainyDayFundInput,
   UpdateTransactionLinkInput,
   UpdateTransactionInput,
@@ -65,6 +67,10 @@ type RainproofActions = {
   updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
   archiveRecurringItem(recurringItemId: string): Promise<void>;
   deleteRecurringItem(recurringItemId: string): Promise<void>;
+  addTransactionTemplate(input: NewTransactionTemplateInput): Promise<void>;
+  updateTransactionTemplate(input: UpdateTransactionTemplateInput): Promise<void>;
+  archiveTransactionTemplate(templateId: string): Promise<void>;
+  deleteTransactionTemplate(templateId: string): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
@@ -279,6 +285,14 @@ export function useRainproofData(): RainproofDataState {
         runMutation((repository) => repository.archiveRecurringItem(recurringItemId)),
       deleteRecurringItem: (recurringItemId) =>
         runMutation((repository) => repository.deleteRecurringItem(recurringItemId)),
+      addTransactionTemplate: (input) =>
+        runMutation((repository) => repository.addTransactionTemplate(input), { rethrow: true }),
+      updateTransactionTemplate: (input) =>
+        runMutation((repository) => repository.updateTransactionTemplate(input), { rethrow: true }),
+      archiveTransactionTemplate: (templateId) =>
+        runMutation((repository) => repository.archiveTransactionTemplate(templateId), { rethrow: true }),
+      deleteTransactionTemplate: (templateId) =>
+        runMutation((repository) => repository.deleteTransactionTemplate(templateId), { rethrow: true }),
       updateRainyDayFund: (input) => runMutation((repository) => repository.updateRainyDayFund(input)),
       updateSettings: (input) => runMutation((repository) => repository.updateSettings(input)),
       updateCategoryCatalog: (input) => runMutation((repository) => repository.updateCategoryCatalog(input)),

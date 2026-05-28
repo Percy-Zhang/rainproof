@@ -41,6 +41,7 @@ import {
   OUTSIDE_ACCOUNT_ID,
   OUTSIDE_MY_ACCOUNTS_LABEL,
 } from '../../domain/transactionEdit';
+import type { AddTransactionTemplatePrefill } from '../../domain/transactionTemplates';
 import type {
   AppSnapshot,
   NewTransactionInput,
@@ -57,6 +58,7 @@ import {
   DateTimePickerFields,
   getNativePickerDisplay,
   getNativePickerValue,
+  InlineField,
   SelectorRow,
   TransactionPickerScreen,
   TransactionTypeTabs,
@@ -70,6 +72,7 @@ import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from '.
 
 type AddTransactionScreenProps = {
   snapshot: AppSnapshot;
+  initialTemplate?: AddTransactionTemplatePrefill;
   onAddTransaction: (input: NewTransactionInput) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
@@ -88,31 +91,37 @@ function createSplitLineId(): string {
 }
 
 export function AddTransactionScreen({
+  initialTemplate,
   snapshot,
   onAddTransaction,
   onOpenCategorySelect,
   onDone,
 }: AddTransactionScreenProps) {
   const now = new Date();
+  const categories = snapshot.categories ?? defaultCategories;
+  const initialKind = initialTemplate?.kind ?? 'expense';
+  const initialDefaultCategory = getDefaultCategoryForKind(initialKind, categories);
+  const initialCategoryId = initialTemplate?.categoryId ?? initialDefaultCategory.id;
+  const initialCategory = getCategory(initialCategoryId, categories);
   const [page, setPage] = useState<Page>('amount');
   const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
   const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
-  const [kind, setKind] = useState<TransactionKind>('expense');
-  const [item, setItem] = useState('');
-  const [amountExpression, setAmountExpression] = useState('');
+  const [kind, setKind] = useState<TransactionKind>(initialKind);
+  const [item, setItem] = useState(initialTemplate?.title ?? '');
+  const [amountExpression, setAmountExpression] = useState(initialTemplate?.amountExpression ?? '');
   const [replaceAmountOnNextKey, setReplaceAmountOnNextKey] = useState(false);
-  const [date, setDate] = useState(toDateInputValue(now));
-  const [time, setTime] = useState(toTimeInputValue(now));
-  const [fromAccountId, setFromAccountId] = useState(snapshot.accounts[0]?.id ?? '');
+  const [date, setDate] = useState(initialTemplate?.date ?? toDateInputValue(now));
+  const [time, setTime] = useState(initialTemplate?.time ?? toTimeInputValue(now));
+  const [fromAccountId, setFromAccountId] = useState(initialTemplate?.accountId ?? snapshot.accounts[0]?.id ?? '');
   const [toAccountId, setToAccountId] = useState(snapshot.accounts[1]?.id ?? OUTSIDE_ACCOUNT_ID);
-  const [categoryId, setCategoryId] = useState(getDefaultCategoryForKind('expense').id);
-  const [subcategoryId, setSubcategoryId] = useState(getDefaultSubcategoryId(getDefaultCategoryForKind('expense')));
+  const [categoryId, setCategoryId] = useState(initialCategory.id);
+  const [subcategoryId, setSubcategoryId] = useState(initialTemplate?.subcategoryId ?? getDefaultSubcategoryId(initialCategory));
+  const [notes, setNotes] = useState(initialTemplate?.notes ?? '');
   const [labels, setLabels] = useState('');
   const [groupId, setGroupId] = useState('');
   const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>([]);
   const [error, setError] = useState('');
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
-  const categories = snapshot.categories ?? defaultCategories;
   const fromAccount = isOutsideAccountId(fromAccountId)
     ? undefined
     : snapshot.accounts.find((account) => account.id === fromAccountId) ?? snapshot.accounts[0];
@@ -266,7 +275,7 @@ export function AddTransactionScreen({
         kind,
         title: item,
         datetime,
-        notes: '',
+        notes,
         labels: cleanLabels,
         groupId,
         lines: buildLines(),
@@ -661,6 +670,12 @@ export function AddTransactionScreen({
               )
             ) : null}
 
+            <InlineField
+              label="Notes"
+              value={notes}
+              onChange={setNotes}
+              placeholder="Optional"
+            />
             <AutocompleteField
               label="Group"
               value={groupId}

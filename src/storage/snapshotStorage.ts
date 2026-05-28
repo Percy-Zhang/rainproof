@@ -13,6 +13,7 @@ import {
   mapBudget,
   mapRainyDayFund,
   mapRecurringItem,
+  mapTransactionTemplate,
   mapTransaction,
   mapTransactionLine,
   mapTransactionLink,
@@ -25,6 +26,7 @@ import {
   type TransactionLineRow,
   type TransactionLinkRow,
   type TransactionRow,
+  type TransactionTemplateRow,
 } from './mappers';
 
 export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSnapshot> {
@@ -57,6 +59,9 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   );
   const recurringItemRows = await db.getAllAsync<RecurringItemRow>(
     'SELECT * FROM recurring_items ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC',
+  );
+  const transactionTemplateRows = await db.getAllAsync<TransactionTemplateRow>(
+    'SELECT * FROM transaction_templates ORDER BY is_active DESC, name ASC, created_at ASC, id ASC',
   );
   const storedEnabledCurrencyCodes = safeParseCurrencyCodes(
     (await db.getFirstAsync<SettingRow>(
@@ -141,6 +146,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     budgets: budgetRows.map(mapBudget),
     recurringItems,
     recurringBills: recurringItems,
+    transactionTemplates: transactionTemplateRows.map(mapTransactionTemplate),
     rainyDayFund,
   };
 }

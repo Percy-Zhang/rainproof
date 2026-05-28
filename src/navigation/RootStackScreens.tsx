@@ -11,6 +11,7 @@ import { FormError } from '../components/ui';
 import { getDashboardRecurringSummary } from '../domain/dashboardRecurring';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
 import { BudgetFormScreen } from '../features/budgets/BudgetFormScreen';
+import { buildAddTransactionPrefillFromTemplate } from '../domain/transactionTemplates';
 import {
   createCategorySelectionRequestId,
   useCategorySelectionRequests,
@@ -28,6 +29,7 @@ import {
   DashboardEditScreen,
 } from '../features/dashboard/DashboardCardCustomizationScreens';
 import { StatsDrilldownScreen } from '../features/stats/StatsDrilldownScreen';
+import { TransactionTemplateFormScreen } from '../features/templates/TransactionTemplateFormScreen';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
@@ -109,6 +111,7 @@ export function EditAccountRouteScreen() {
 
 export function AddTransactionRouteScreen() {
   const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'AddTransaction'>>();
   const { snapshot, actions } = useRainproofDataContext();
   const openCategorySelect = useOpenCategorySelect(navigation);
 
@@ -116,10 +119,29 @@ export function AddTransactionRouteScreen() {
     return <MissingDataShell message="Preparing Rainproof" />;
   }
 
+  const templateId = route.params?.templateId;
+  const template = templateId ? snapshot.transactionTemplates.find((item) => item.id === templateId) : undefined;
+  if (templateId && !template) {
+    return <MissingDataShell message="Transaction template not found." />;
+  }
+
+  let initialTemplate;
+  try {
+    initialTemplate = template
+      ? buildAddTransactionPrefillFromTemplate({
+          accounts: snapshot.accounts,
+          template,
+        })
+      : undefined;
+  } catch (caught) {
+    return <MissingDataShell message={caught instanceof Error ? caught.message : 'Transaction template needs attention.'} />;
+  }
+
   return (
     <DetailSafeArea>
       <ComposerScreenScaffold screenKey="addTransaction">
         <AddTransactionScreen
+          initialTemplate={initialTemplate}
           snapshot={snapshot}
           onAddTransaction={actions.addTransaction}
           onOpenCategorySelect={openCategorySelect}
@@ -389,6 +411,65 @@ export function CreateRecurringTransactionRouteScreen() {
           recurringItem={recurringItem}
           onAddTransaction={actions.addTransaction}
           onUpdateRecurringItem={actions.updateRecurringItem}
+          onOpenCategorySelect={openCategorySelect}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function AddTransactionTemplateRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const { snapshot, actions } = useRainproofDataContext();
+  const openCategorySelect = useOpenCategorySelect(navigation);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="addTransactionTemplate">
+        <TransactionTemplateFormScreen
+          mode="add"
+          snapshot={snapshot}
+          onAddTemplate={actions.addTransactionTemplate}
+          onOpenCategorySelect={openCategorySelect}
+          onCancel={() => navigation.goBack()}
+          onDone={() => navigation.goBack()}
+        />
+      </ComposerScreenScaffold>
+    </DetailSafeArea>
+  );
+}
+
+export function EditTransactionTemplateRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const route = useRoute<RouteProp<RootStackParamList, 'EditTransactionTemplate'>>();
+  const { snapshot, actions } = useRainproofDataContext();
+  const template = snapshot?.transactionTemplates.find((item) => item.id === route.params.templateId);
+  const openCategorySelect = useOpenCategorySelect(navigation);
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  if (!template) {
+    return <MissingDataShell message="Transaction template not found." />;
+  }
+
+  return (
+    <DetailSafeArea>
+      <ComposerScreenScaffold screenKey="editTransactionTemplate">
+        <TransactionTemplateFormScreen
+          mode="edit"
+          snapshot={snapshot}
+          template={template}
+          onUpdateTemplate={actions.updateTransactionTemplate}
+          onArchiveTemplate={actions.archiveTransactionTemplate}
+          onDeleteTemplate={actions.deleteTransactionTemplate}
           onOpenCategorySelect={openCategorySelect}
           onCancel={() => navigation.goBack()}
           onDone={() => navigation.goBack()}

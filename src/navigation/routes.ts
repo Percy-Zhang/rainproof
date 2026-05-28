@@ -26,6 +26,10 @@ export type RecurringStackParamList = {
   Recurring: undefined;
 };
 
+export type TemplatesStackParamList = {
+  Templates: undefined;
+};
+
 export type SettingsStackParamList = {
   Settings: undefined;
 };
@@ -37,6 +41,7 @@ export type MainDrawerParamList = {
   Statistics: NavigatorScreenParams<StatisticsStackParamList> | undefined;
   Budgets: NavigatorScreenParams<BudgetsStackParamList> | undefined;
   Recurring: NavigatorScreenParams<RecurringStackParamList> | undefined;
+  Templates: NavigatorScreenParams<TemplatesStackParamList> | undefined;
   Settings: NavigatorScreenParams<SettingsStackParamList> | undefined;
 };
 
@@ -44,7 +49,7 @@ export type RootStackParamList = {
   MainDrawer: NavigatorScreenParams<MainDrawerParamList> | undefined;
   AddAccount: undefined;
   EditAccount: { accountId: string };
-  AddTransaction: undefined;
+  AddTransaction: { templateId?: string } | undefined;
   EditTransaction: { transactionId: string };
   LinkTransaction: { transactionId: string };
   StatsDrilldown: {
@@ -63,6 +68,8 @@ export type RootStackParamList = {
   AddRecurringItem: undefined;
   EditRecurringItem: { recurringItemId: string };
   CreateRecurringTransaction: { recurringItemId: string };
+  AddTransactionTemplate: undefined;
+  EditTransactionTemplate: { templateId: string };
   CategorySelect: CategorySelectRouteParams;
   DashboardEdit: undefined;
   DashboardAddCards: undefined;

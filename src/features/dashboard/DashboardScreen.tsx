@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { BackHandler, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { ActionButton, Card, ProgressBar } from '../../components/ui';
@@ -70,6 +70,7 @@ type DashboardScreenProps = {
   onOpenBudgets: () => void;
   onOpenDashboardEdit: () => void;
   onOpenRecurring: () => void;
+  onOpenTemplates: () => void;
   onUpdateSelectedAccountIds: (accountIds: string[]) => Promise<void>;
 };
 
@@ -86,6 +87,7 @@ export function DashboardScreen({
   onOpenBudgets,
   onOpenDashboardEdit,
   onOpenRecurring,
+  onOpenTemplates,
   onUpdateSelectedAccountIds,
 }: DashboardScreenProps) {
   const hasAnyAccounts = snapshot.accounts.length > 0;
@@ -94,6 +96,7 @@ export function DashboardScreen({
   const [selectedAccountIds, setSelectedAccountIds] = useState(() =>
     getDashboardSelectedAccountIds(accountBalances, snapshot.settings.dashboardSelectedAccountIds),
   );
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
   const accountById = useMemo(
     () => new Map(snapshot.accounts.map((account) => [account.id, account])),
     [snapshot.accounts],
@@ -169,6 +172,19 @@ export function DashboardScreen({
       return areSameIds(currentIds, nextIds) ? currentIds : nextIds;
     });
   }, [accountBalances, snapshot.settings.dashboardSelectedAccountIds]);
+
+  useEffect(() => {
+    if (!quickActionsOpen) {
+      return undefined;
+    }
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setQuickActionsOpen(false);
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [quickActionsOpen]);
 
   function toggleAccount(accountId: string) {
     setSelectedAccountIds((currentIds) => {
@@ -275,6 +291,16 @@ export function DashboardScreen({
 
   const renderedCards = dashboardCardIds.map(renderDashboardCard).filter(Boolean);
 
+  function openAddTransaction() {
+    setQuickActionsOpen(false);
+    onAddTransaction();
+  }
+
+  function openTemplates() {
+    setQuickActionsOpen(false);
+    onOpenTemplates();
+  }
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -300,16 +326,75 @@ export function DashboardScreen({
           </Card>
         )}
       </ScrollView>
+      {quickActionsOpen ? (
+        <Pressable
+          accessibilityLabel="Close dashboard quick actions"
+          accessibilityRole="button"
+          onPress={() => setQuickActionsOpen(false)}
+          style={styles.quickActionBackdrop}
+          testID="dashboard-quick-action-backdrop"
+        />
+      ) : null}
+      {quickActionsOpen ? (
+        <View pointerEvents="box-none" style={styles.quickActionMenu} testID="dashboard-quick-action-menu">
+          <DashboardQuickAction
+            accessibilityLabel="Add Transaction"
+            icon="receipt-outline"
+            label="Add Transaction"
+            onPress={openAddTransaction}
+            testID="dashboard-quick-action-add-transaction"
+          />
+          <DashboardQuickAction
+            accessibilityLabel="Use Template"
+            icon="flash-outline"
+            label="Use Template"
+            onPress={openTemplates}
+            testID="dashboard-quick-action-use-template"
+          />
+        </View>
+      ) : null}
       <Pressable
-        accessibilityLabel="Add transaction"
+        accessibilityLabel={quickActionsOpen ? 'Close dashboard quick actions' : 'Open dashboard quick actions'}
+        accessibilityHint="Shows actions for adding a transaction or using a template."
         accessibilityRole="button"
-        onPress={onAddTransaction}
+        onPress={() => setQuickActionsOpen((current) => !current)}
         style={({ pressed }) => [styles.floatingAddButton, pressed && styles.pressedRow]}
         testID="dashboard-add-transaction"
       >
-        <Ionicons name="add" size={30} color={colors.surface} />
+        <Ionicons name={quickActionsOpen ? 'close' : 'add'} size={30} color={colors.surface} />
       </Pressable>
     </View>
+  );
+}
+
+function DashboardQuickAction({
+  accessibilityLabel,
+  icon,
+  label,
+  onPress,
+  testID,
+}: {
+  accessibilityLabel: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  testID: string;
+}) {
+  return (
+    <Pressable
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.quickActionRow, pressed && styles.pressedRow]}
+      testID={testID}
+    >
+      <View style={styles.quickActionLabelPill}>
+        <Text style={styles.quickActionLabel}>{label}</Text>
+      </View>
+      <View style={styles.quickActionIconButton}>
+        <Ionicons name={icon} size={20} color={colors.surface} />
+      </View>
+    </Pressable>
   );
 }
 
@@ -1436,6 +1521,59 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: typography.body,
     fontWeight: '900',
+  },
+  quickActionBackdrop: {
+    bottom: 0,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    zIndex: 18,
+  },
+  quickActionIconButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    elevation: 5,
+    height: 44,
+    justifyContent: 'center',
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 10,
+    width: 44,
+  },
+  quickActionLabel: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  quickActionLabelPill: {
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+  },
+  quickActionMenu: {
+    alignItems: 'flex-end',
+    bottom: spacing.xl + 68,
+    gap: spacing.sm,
+    position: 'absolute',
+    right: spacing.lg + 7,
+    zIndex: 22,
+  },
+  quickActionRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'flex-end',
+    minHeight: 48,
   },
   floatingAddButton: {
     alignItems: 'center',
