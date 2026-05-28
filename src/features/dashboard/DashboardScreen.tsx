@@ -18,6 +18,12 @@ import {
   getRenderableDashboardCardIds,
   type DashboardCardAvailability,
 } from '../../domain/dashboardCards';
+import {
+  getDashboardBalanceTotals,
+  getDashboardCashFlowByCurrency,
+  getDashboardTopSpendingByCurrency,
+  type DashboardTopSpendingCurrencyGroup,
+} from '../../domain/dashboardFinancial';
 import { getDashboardRecurringSummary } from '../../domain/dashboardRecurring';
 import {
   getDashboardAccountPreview,
@@ -34,7 +40,7 @@ import {
   type CreditCardBalanceSummary,
   type CreditCardCurrencySummary,
 } from '../../domain/creditCards';
-import { formatLongDateLabel } from '../../domain/dates';
+import { formatLongDateLabel, getDateRangeForPreset } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
 import { getStatsReport } from '../../domain/statsReports';
 import type {
@@ -46,7 +52,6 @@ import type {
   CurrencyTotal,
   DashboardCardId,
   RainyDayProgress,
-  SpendingByCategory,
   UpcomingRecurringItem,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -55,10 +60,7 @@ import { CompactTransactionListItem } from '../transactions/TransactionListItems
 type DashboardScreenProps = {
   snapshot: AppSnapshot;
   accountBalances: AccountBalance[];
-  totalsByCurrency: CurrencyTotal[];
   rainyDayProgress: RainyDayProgress;
-  cashFlow: CashFlowSummary | null;
-  currentMonthSpending: SpendingByCategory[];
   onAddAccount: () => void;
   onAddTransaction: () => void;
   onOpenRainyDayFund: () => void;
@@ -74,10 +76,7 @@ type DashboardScreenProps = {
 export function DashboardScreen({
   snapshot,
   accountBalances,
-  totalsByCurrency,
   rainyDayProgress,
-  cashFlow,
-  currentMonthSpending,
   onAddAccount,
   onAddTransaction,
   onOpenRainyDayFund,
@@ -103,6 +102,31 @@ export function DashboardScreen({
   const previewAccountIds = useMemo(
     () => accountPreview.map(({ account }) => account.id),
     [accountPreview],
+  );
+  const dashboardMonthRange = useMemo(() => getDateRangeForPreset('last_month'), []);
+  const dashboardBalanceTotals = useMemo(
+    () => getDashboardBalanceTotals({ accountBalances, selectedAccountIds }),
+    [accountBalances, selectedAccountIds],
+  );
+  const dashboardCashFlow = useMemo(
+    () => getDashboardCashFlowByCurrency({
+      accountIds: selectedAccountIds,
+      lines: snapshot.transactionLines,
+      range: dashboardMonthRange,
+      transactionLinks: snapshot.transactionLinks,
+      transactions: snapshot.transactions,
+    }),
+    [dashboardMonthRange, selectedAccountIds, snapshot.transactionLines, snapshot.transactionLinks, snapshot.transactions],
+  );
+  const dashboardTopSpending = useMemo(
+    () => getDashboardTopSpendingByCurrency({
+      accountIds: selectedAccountIds,
+      lines: snapshot.transactionLines,
+      range: dashboardMonthRange,
+      transactionLinks: snapshot.transactionLinks,
+      transactions: snapshot.transactions,
+    }),
+    [dashboardMonthRange, selectedAccountIds, snapshot.transactionLines, snapshot.transactionLinks, snapshot.transactions],
   );
   const recentTransactions = useMemo(
     () =>
@@ -161,14 +185,14 @@ export function DashboardScreen({
           <BalanceSummaryCard
             key={cardId}
             showCurrencyCodes={showCurrencyCodes}
-            totalsByCurrency={totalsByCurrency}
+            totalsByCurrency={dashboardBalanceTotals}
           />
         );
       case 'cashFlow':
         return (
           <CashFlowCard
             key={cardId}
-            cashFlow={cashFlow}
+            cashFlow={dashboardCashFlow}
             showCurrencyCodes={showCurrencyCodes}
           />
         );
@@ -227,7 +251,7 @@ export function DashboardScreen({
           <TopSpendingCard
             key={cardId}
             categories={categories}
-            currentMonthSpending={currentMonthSpending}
+            topSpendingByCurrency={dashboardTopSpending}
             showCurrencyCodes={showCurrencyCodes}
           />
         );
@@ -682,65 +706,80 @@ function CashFlowCard({
   cashFlow,
   showCurrencyCodes,
 }: {
-  cashFlow: CashFlowSummary | null;
+  cashFlow: CashFlowSummary[];
   showCurrencyCodes: boolean;
 }) {
-  const currencyCode = cashFlow?.currencyCode ?? 'AUD';
-
   return (
     <Card testID="dashboard-cash-flow-card" style={styles.compactCard}>
       <Text style={styles.cardTitle}>{getDashboardCardDefinition('cashFlow').title}</Text>
-      <View style={styles.creditSummaryMetrics}>
-        <CreditMetric
-          label="Income"
-          value={formatMoney(cashFlow?.incomeMinor ?? 0, currencyCode, { showCurrencyCode: showCurrencyCodes })}
-          tone="income"
-        />
-        <CreditMetric
-          label="Spending"
-          value={formatMoney(cashFlow?.expenseMinor ?? 0, currencyCode, { showCurrencyCode: showCurrencyCodes })}
-          tone="expense"
-        />
-        <CreditMetric
-          label="Net"
-          value={formatMoney(cashFlow?.netMinor ?? 0, currencyCode, { showCurrencyCode: showCurrencyCodes })}
-          tone={getNetMetricTone(cashFlow?.netMinor ?? 0)}
-        />
-      </View>
+      {cashFlow.length ? (
+        <View style={styles.cashFlowGroups}>
+          {cashFlow.map((summary) => (
+            <View key={summary.currencyCode} style={styles.cashFlowGroup}>
+              <Text style={styles.currencySectionLabel}>{summary.currencyCode}</Text>
+              <View style={styles.creditSummaryMetrics}>
+                <CreditMetric
+                  label="Income"
+                  value={formatMoney(summary.incomeMinor, summary.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+                  tone="income"
+                />
+                <CreditMetric
+                  label="Spending"
+                  value={formatMoney(summary.expenseMinor, summary.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+                  tone="expense"
+                />
+                <CreditMetric
+                  label="Net"
+                  value={formatMoney(summary.netMinor, summary.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+                  tone={getNetMetricTone(summary.netMinor)}
+                />
+              </View>
+            </View>
+          ))}
+        </View>
+      ) : (
+        <Text style={styles.emptyText}>No income or spending in the current month.</Text>
+      )}
     </Card>
   );
 }
 
 function TopSpendingCard({
   categories,
-  currentMonthSpending,
+  topSpendingByCurrency,
   showCurrencyCodes,
 }: {
   categories: CategoryDefinition[];
-  currentMonthSpending: SpendingByCategory[];
+  topSpendingByCurrency: DashboardTopSpendingCurrencyGroup[];
   showCurrencyCodes: boolean;
 }) {
   const categoryById = new Map(categories.map((category) => [category.id, category]));
-  const topSpending = currentMonthSpending.slice(0, 3);
 
   return (
     <Card testID="dashboard-top-spending-card" style={styles.compactCard}>
       <Text style={styles.cardTitle}>{getDashboardCardDefinition('topSpending').title}</Text>
-      {topSpending.length ? (
-        <View style={styles.topSpendingRows}>
-          {topSpending.map((item) => (
-            <View key={`${item.currencyCode}-${item.categoryId}`} style={styles.topSpendingRow}>
-              <CategoryIconBadge
-                color={categoryById.get(item.categoryId)?.color ?? colors.muted}
-                icon={categoryById.get(item.categoryId)?.icon ?? 'pricetag-outline'}
-                size="sm"
-              />
-              <Text numberOfLines={1} style={styles.topSpendingLabel}>
-                {categoryById.get(item.categoryId)?.name ?? 'Uncategorized'}
-              </Text>
-              <Text style={styles.topSpendingAmount}>
-                {formatMoney(item.amountMinor, item.currencyCode, { showCurrencyCode: showCurrencyCodes })}
-              </Text>
+      {topSpendingByCurrency.length ? (
+        <View style={styles.topSpendingCurrencyGroups}>
+          {topSpendingByCurrency.map((group) => (
+            <View key={group.currencyCode} style={styles.topSpendingCurrencyGroup}>
+              <Text style={styles.currencySectionLabel}>{group.currencyCode}</Text>
+              <View style={styles.topSpendingRows}>
+                {group.rows.map((item) => (
+                  <View key={`${item.currencyCode}-${item.categoryId}`} style={styles.topSpendingRow}>
+                    <CategoryIconBadge
+                      color={categoryById.get(item.categoryId)?.color ?? colors.muted}
+                      icon={categoryById.get(item.categoryId)?.icon ?? 'pricetag-outline'}
+                      size="sm"
+                    />
+                    <Text numberOfLines={1} style={styles.topSpendingLabel}>
+                      {categoryById.get(item.categoryId)?.name ?? 'Uncategorized'}
+                    </Text>
+                    <Text style={styles.topSpendingAmount}>
+                      {formatMoney(item.amountMinor, item.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+                    </Text>
+                  </View>
+                ))}
+              </View>
             </View>
           ))}
         </View>
@@ -1223,6 +1262,12 @@ const styles = StyleSheet.create({
   creditMetricValueIncome: {
     color: colors.success,
   },
+  cashFlowGroup: {
+    gap: spacing.sm,
+  },
+  cashFlowGroups: {
+    gap: spacing.md,
+  },
   creditSummaryBlock: {
     gap: spacing.sm,
   },
@@ -1233,6 +1278,12 @@ const styles = StyleSheet.create({
   },
   creditSummaryStack: {
     gap: spacing.md,
+  },
+  currencySectionLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   budgetProgressAmounts: {
     flexDirection: 'row',
@@ -1358,6 +1409,12 @@ const styles = StyleSheet.create({
   },
   topSpendingRows: {
     gap: spacing.sm,
+  },
+  topSpendingCurrencyGroup: {
+    gap: spacing.sm,
+  },
+  topSpendingCurrencyGroups: {
+    gap: spacing.md,
   },
   emptyText: {
     color: colors.muted,

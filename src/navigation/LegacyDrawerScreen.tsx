@@ -109,10 +109,7 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
         <DashboardScreen
           snapshot={snapshot}
           accountBalances={derived.accountBalances}
-          totalsByCurrency={derived.totalsByCurrency}
           rainyDayProgress={derived.rainyDayProgress}
-          cashFlow={derived.cashFlow}
-          currentMonthSpending={derived.currentMonthSpending}
           onAddAccount={() => rootNavigation?.navigate('AddAccount')}
           onAddTransaction={() => rootNavigation?.navigate('AddTransaction')}
           onOpenRainyDayFund={() => rootNavigation?.navigate('RainyDayFund')}

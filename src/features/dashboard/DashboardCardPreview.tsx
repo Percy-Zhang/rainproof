@@ -54,10 +54,19 @@ function renderPreviewContent(cardId: DashboardCardId) {
       );
     case 'cashFlow':
       return (
-        <View style={styles.metricGrid}>
-          <PreviewMetric label="Income" value="$4,800" tone="income" />
-          <PreviewMetric label="Spending" value="$2,150" tone="expense" />
-          <PreviewMetric label="Net" value="$2,650" tone="income" />
+        <View style={styles.previewStack}>
+          <Text style={styles.currencyLabel}>AUD</Text>
+          <View style={styles.metricGrid}>
+            <PreviewMetric label="Income" value="$4,800" tone="income" />
+            <PreviewMetric label="Spending" value="$2,150" tone="expense" />
+            <PreviewMetric label="Net" value="$2,650" tone="income" />
+          </View>
+          <Text style={styles.currencyLabel}>USD</Text>
+          <View style={styles.metricGrid}>
+            <PreviewMetric label="Income" value="$0" tone="income" />
+            <PreviewMetric label="Spending" value="$45" tone="expense" />
+            <PreviewMetric label="Net" value="-$45" tone="expense" />
+          </View>
         </View>
       );
     case 'budgetProgress':
@@ -78,8 +87,11 @@ function renderPreviewContent(cardId: DashboardCardId) {
     case 'topSpending':
       return (
         <View style={styles.previewStack}>
+          <Text style={styles.currencyLabel}>AUD</Text>
           <PreviewCategoryRow color="#2E7D62" icon="cart-outline" label="Groceries" amount="$410" />
           <PreviewCategoryRow color="#B95C42" icon="restaurant-outline" label="Dining" amount="$216" />
+          <Text style={styles.currencyLabel}>USD</Text>
+          <PreviewCategoryRow color="#574FA3" icon="cloud-outline" label="Subscriptions" amount="$15" />
         </View>
       );
     case 'creditCards':
@@ -236,6 +248,11 @@ const styles = StyleSheet.create({
   },
   accountTilePrimary: {
     backgroundColor: colors.surfaceMuted,
+  },
+  currencyLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '900',
   },
   disabled: {
     opacity: 0.64,
