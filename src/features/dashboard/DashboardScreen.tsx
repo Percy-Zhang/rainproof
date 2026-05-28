@@ -18,6 +18,7 @@ import {
   getRenderableDashboardCardIds,
   type DashboardCardAvailability,
 } from '../../domain/dashboardCards';
+import { getDashboardRecurringSummary } from '../../domain/dashboardRecurring';
 import {
   getDashboardAccountPreview,
   getDashboardInitialSelectedAccountIds,
@@ -33,6 +34,7 @@ import {
   type CreditCardBalanceSummary,
   type CreditCardCurrencySummary,
 } from '../../domain/creditCards';
+import { formatLongDateLabel } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
 import { getStatsReport } from '../../domain/statsReports';
 import type {
@@ -45,6 +47,7 @@ import type {
   DashboardCardId,
   RainyDayProgress,
   SpendingByCategory,
+  UpcomingRecurringItem,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { CompactTransactionListItem } from '../transactions/TransactionListItems';
@@ -64,6 +67,7 @@ type DashboardScreenProps = {
   onOpenAccount: () => void;
   onOpenBudgets: () => void;
   onOpenDashboardEdit: () => void;
+  onOpenRecurring: () => void;
   onUpdateSelectedAccountIds: (accountIds: string[]) => Promise<void>;
 };
 
@@ -82,6 +86,7 @@ export function DashboardScreen({
   onOpenAccount,
   onOpenBudgets,
   onOpenDashboardEdit,
+  onOpenRecurring,
   onUpdateSelectedAccountIds,
 }: DashboardScreenProps) {
   const hasAnyAccounts = snapshot.accounts.length > 0;
@@ -89,6 +94,10 @@ export function DashboardScreen({
   const categories = snapshot.categories ?? defaultCategories;
   const [selectedAccountIds, setSelectedAccountIds] = useState(() =>
     getDashboardSelectedAccountIds(accountBalances, snapshot.settings.dashboardSelectedAccountIds),
+  );
+  const accountById = useMemo(
+    () => new Map(snapshot.accounts.map((account) => [account.id, account])),
+    [snapshot.accounts],
   );
   const accountPreview = useMemo(() => getDashboardAccountPreview(accountBalances), [accountBalances]);
   const previewAccountIds = useMemo(
@@ -112,10 +121,15 @@ export function DashboardScreen({
     () => getDashboardBudgetProgressData(snapshot, categories),
     [categories, snapshot],
   );
+  const recurringSummary = useMemo(
+    () => getDashboardRecurringSummary(snapshot.recurringItems, { limit: 4 }),
+    [snapshot.recurringItems],
+  );
   const cardAvailability = useMemo<DashboardCardAvailability>(() => ({
     budgetProgress: budgetProgress.activeBudgetCount > 0,
     creditCards: creditCardSummaries.length > 0,
-  }), [budgetProgress.activeBudgetCount, creditCardSummaries.length]);
+    upcomingPayments: recurringSummary.activeCount > 0,
+  }), [budgetProgress.activeBudgetCount, creditCardSummaries.length, recurringSummary.activeCount]);
   const dashboardCardIds = useMemo(
     () =>
       getRenderableDashboardCardIds(snapshot.settings.dashboardCardSettings, cardAvailability),
@@ -196,6 +210,16 @@ export function DashboardScreen({
             rows={budgetProgress.rows}
             showCurrencyCodes={showCurrencyCodes}
             onOpenBudgets={onOpenBudgets}
+          />
+        );
+      case 'upcomingPayments':
+        return (
+          <UpcomingPaymentsDashboardCard
+            key={cardId}
+            accountById={accountById}
+            rows={recurringSummary.rows}
+            showCurrencyCodes={showCurrencyCodes}
+            onOpenRecurring={onOpenRecurring}
           />
         );
       case 'topSpending':
@@ -461,6 +485,83 @@ function BudgetProgressRow({
           {row.remainingMinor < 0 ? 'Over ' : 'Left '}
           {formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode, { showCurrencyCode: showCurrencyCodes })}
         </Text>
+      </View>
+    </View>
+  );
+}
+
+function UpcomingPaymentsDashboardCard({
+  accountById,
+  rows,
+  showCurrencyCodes,
+  onOpenRecurring,
+}: {
+  accountById: Map<string, Account>;
+  rows: UpcomingRecurringItem[];
+  showCurrencyCodes: boolean;
+  onOpenRecurring: () => void;
+}) {
+  if (!rows.length) {
+    return null;
+  }
+
+  return (
+    <Card testID="dashboard-upcoming-payments-card" style={styles.compactCard}>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onOpenRecurring}
+        style={({ pressed }) => [styles.upcomingPaymentsContent, pressed && styles.pressedRow]}
+      >
+        <View style={styles.sectionCardHeader}>
+          <View style={styles.headerText}>
+            <Text style={styles.cardTitle}>{getDashboardCardDefinition('upcomingPayments').title}</Text>
+            <Text style={styles.smallMuted}>Recurring items that need attention next.</Text>
+          </View>
+          <Text style={styles.headerActionText}>View</Text>
+        </View>
+
+        <View style={styles.upcomingPaymentRows}>
+          {rows.map((item) => (
+            <UpcomingPaymentRow
+              key={item.id}
+              account={accountById.get(item.accountId)}
+              item={item}
+              showCurrencyCodes={showCurrencyCodes}
+            />
+          ))}
+        </View>
+      </Pressable>
+    </Card>
+  );
+}
+
+function UpcomingPaymentRow({
+  account,
+  item,
+  showCurrencyCodes,
+}: {
+  account?: Account;
+  item: UpcomingRecurringItem;
+  showCurrencyCodes: boolean;
+}) {
+  const status = getRecurringDashboardStatus(item);
+  const amountTone = item.kind === 'income' ? colors.success : colors.danger;
+  const kindLabel = item.kind === 'income' ? 'Receive' : 'Pay';
+
+  return (
+    <View style={styles.upcomingPaymentRow}>
+      <View style={styles.upcomingPaymentText}>
+        <Text numberOfLines={1} style={styles.upcomingPaymentName}>{item.name}</Text>
+        <Text numberOfLines={1} style={styles.upcomingPaymentDetail}>
+          {kindLabel} {formatLongDateLabel(item.nextDueDate)}
+          {account ? ` / ${account.name}` : ''}
+        </Text>
+      </View>
+      <View style={styles.upcomingPaymentTrailing}>
+        <Text style={[styles.upcomingPaymentAmount, { color: amountTone }]}>
+          {formatMoney(item.amountMinor, item.currencyCode, { showCurrencyCode: showCurrencyCodes })}
+        </Text>
+        <Text style={[styles.upcomingPaymentStatus, { color: status.color }]}>{status.label}</Text>
       </View>
     </View>
   );
@@ -904,6 +1005,17 @@ function getBudgetStatusColor(status: BudgetUsageDisplayRow['status']): string {
   }
 }
 
+function getRecurringDashboardStatus(item: UpcomingRecurringItem): { label: string; color: string } {
+  switch (item.dueStatus) {
+    case 'overdue':
+      return { label: 'Overdue', color: colors.danger };
+    case 'due_soon':
+      return { label: 'Due soon', color: '#9B6B12' };
+    case 'upcoming':
+      return { label: 'Upcoming', color: colors.primaryDark };
+  }
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -1170,6 +1282,54 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 2,
     minWidth: 0,
+  },
+  upcomingPaymentsContent: {
+    gap: spacing.sm,
+  },
+  upcomingPaymentAmount: {
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  upcomingPaymentDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+  },
+  upcomingPaymentName: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  upcomingPaymentRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+    minHeight: 48,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  upcomingPaymentRows: {
+    gap: spacing.sm,
+  },
+  upcomingPaymentStatus: {
+    fontSize: typography.small,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  upcomingPaymentText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  upcomingPaymentTrailing: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: 2,
   },
   topSpendingAmount: {
     color: colors.ink,

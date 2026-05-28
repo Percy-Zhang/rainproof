@@ -17,6 +17,7 @@ describe('dashboard card helpers', () => {
       { id: 'rainyDay', visible: true },
       { id: 'accounts', visible: true },
       { id: 'recentTransactions', visible: true },
+      { id: 'upcomingPayments', visible: true },
       { id: 'cashFlow', visible: true },
       { id: 'budgetProgress', visible: true },
       { id: 'topSpending', visible: true },
@@ -53,6 +54,7 @@ describe('dashboard card helpers', () => {
       { id: 'accounts', visible: true },
       { id: 'recentTransactions', visible: true },
       { id: 'cashFlow', visible: true },
+      { id: 'budgetProgress', visible: true },
       { id: 'topSpending', visible: true },
       { id: 'creditCards', visible: true },
       { id: 'balanceSummary', visible: false },
@@ -79,7 +81,15 @@ describe('dashboard card helpers', () => {
       { id: 'accounts', visible: false },
     ]);
     expect(normalized.map((setting) => setting.id)).toEqual(
-      expect.arrayContaining(['balanceSummary', 'cashFlow', 'rainyDay', 'creditCards', 'budgetProgress', 'topSpending']),
+      expect.arrayContaining([
+        'balanceSummary',
+        'cashFlow',
+        'rainyDay',
+        'creditCards',
+        'budgetProgress',
+        'upcomingPayments',
+        'topSpending',
+      ]),
     );
   });
 
@@ -110,16 +120,25 @@ describe('dashboard card helpers', () => {
   it('returns renderable visible cards and suppresses unavailable cards', () => {
     const settings = toggleDashboardCardSetting(getDefaultDashboardCardSettings(), 'topSpending');
 
-    expect(getRenderableDashboardCardIds(settings, { creditCards: false, budgetProgress: false })).toEqual([
+    expect(getRenderableDashboardCardIds(settings, {
+      budgetProgress: false,
+      creditCards: false,
+      upcomingPayments: false,
+    })).toEqual([
       'rainyDay',
       'accounts',
       'recentTransactions',
       'cashFlow',
     ]);
-    expect(getRenderableDashboardCardIds(getDefaultDashboardCardSettings(), { creditCards: true, budgetProgress: true })).toEqual([
+    expect(getRenderableDashboardCardIds(getDefaultDashboardCardSettings(), {
+      budgetProgress: true,
+      creditCards: true,
+      upcomingPayments: true,
+    })).toEqual([
       'rainyDay',
       'accounts',
       'recentTransactions',
+      'upcomingPayments',
       'cashFlow',
       'budgetProgress',
       'topSpending',
@@ -136,6 +155,7 @@ describe('dashboard card helpers', () => {
       'rainyDay',
       'accounts',
       'recentTransactions',
+      'upcomingPayments',
       'cashFlow',
       'budgetProgress',
       'topSpending',
@@ -145,14 +165,20 @@ describe('dashboard card helpers', () => {
 
   it('lists hidden and unavailable cards for add-card UI', () => {
     const settings = getDefaultDashboardCardSettings().map((setting) => (
-      setting.id === 'creditCards' ? { ...setting, visible: false } : setting
+      setting.id === 'creditCards' || setting.id === 'upcomingPayments' ? { ...setting, visible: false } : setting
     ));
     const options = getDashboardCardAddOptions(settings, {
       budgetProgress: false,
       creditCards: false,
+      upcomingPayments: false,
     });
 
-    expect(options.map((option) => option.id)).toEqual(['creditCards', 'balanceSummary']);
+    expect(options.map((option) => option.id)).toEqual(['upcomingPayments', 'creditCards', 'balanceSummary']);
+    expect(options.find((option) => option.id === 'upcomingPayments')).toEqual(expect.objectContaining({
+      available: false,
+      title: 'Upcoming Payments',
+      unavailableReason: 'Add an active recurring item to use this card.',
+    }));
     expect(options.find((option) => option.id === 'creditCards')).toEqual(expect.objectContaining({
       available: false,
       unavailableReason: 'Add a credit card account to use this card.',

@@ -202,6 +202,7 @@ export type DashboardCardId =
   | 'accounts'
   | 'creditCards'
   | 'budgetProgress'
+  | 'upcomingPayments'
   | 'topSpending'
   | 'recentTransactions';
 

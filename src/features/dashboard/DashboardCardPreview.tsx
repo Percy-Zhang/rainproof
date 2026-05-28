@@ -67,6 +67,14 @@ function renderPreviewContent(cardId: DashboardCardId) {
           <PreviewProgressRow label="Dining" percent={108} amount="$216 / $200" />
         </View>
       );
+    case 'upcomingPayments':
+      return (
+        <View style={styles.previewStack}>
+          <PreviewDueRow label="Rent" amount="$2,150" due="Overdue" tone="overdue" />
+          <PreviewDueRow label="Streaming" amount="$18.99" due="Due soon" tone="soon" />
+          <PreviewDueRow label="Salary" amount="$3,200" due="Upcoming" tone="upcoming" />
+        </View>
+      );
     case 'topSpending':
       return (
         <View style={styles.previewStack}>
@@ -106,6 +114,28 @@ function renderPreviewContent(cardId: DashboardCardId) {
   }
 }
 
+function PreviewDueRow({
+  amount,
+  due,
+  label,
+  tone,
+}: {
+  amount: string;
+  due: string;
+  label: string;
+  tone: 'overdue' | 'soon' | 'upcoming';
+}) {
+  return (
+    <View style={styles.previewRow}>
+      <View style={styles.previewDueText}>
+        <Text style={styles.previewLabel}>{label}</Text>
+        <Text style={[styles.previewMuted, getPreviewDueToneStyle(tone)]}>{due}</Text>
+      </View>
+      <Text style={styles.previewStrong}>{amount}</Text>
+    </View>
+  );
+}
+
 function PreviewMetric({
   label,
   tone,
@@ -121,6 +151,17 @@ function PreviewMetric({
       <Text style={[styles.previewStrong, tone === 'income' ? styles.income : styles.expense]}>{value}</Text>
     </View>
   );
+}
+
+function getPreviewDueToneStyle(tone: 'overdue' | 'soon' | 'upcoming') {
+  switch (tone) {
+    case 'overdue':
+      return styles.expense;
+    case 'soon':
+      return styles.warning;
+    case 'upcoming':
+      return styles.primary;
+  }
 }
 
 function PreviewProgressRow({
@@ -205,6 +246,9 @@ const styles = StyleSheet.create({
   income: {
     color: colors.success,
   },
+  primary: {
+    color: colors.primaryDark,
+  },
   kicker: {
     color: colors.muted,
     fontSize: typography.small,
@@ -231,6 +275,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: typography.small,
     fontWeight: '800',
+  },
+  previewDueText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
   },
   previewMuted: {
     color: colors.muted,
@@ -266,5 +315,8 @@ const styles = StyleSheet.create({
   tileGrid: {
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  warning: {
+    color: '#9B6B12',
   },
 });

@@ -25,7 +25,7 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
     description: 'Totals grouped by currency.',
     previewText: 'AUD total, USD total, and other account currencies.',
     defaultVisible: false,
-    defaultOrder: 7,
+    defaultOrder: 8,
   },
   {
     id: 'cashFlow',
@@ -33,7 +33,7 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
     description: 'Income, spending, and net cash flow for this month.',
     previewText: 'Income, spending, and net amount at a glance.',
     defaultVisible: true,
-    defaultOrder: 3,
+    defaultOrder: 4,
   },
   {
     id: 'rainyDay',
@@ -57,7 +57,7 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
     description: 'Owed, available credit, and utilization when credit cards exist.',
     previewText: 'Total owed, available credit, utilization, and per-card summary.',
     defaultVisible: true,
-    defaultOrder: 6,
+    defaultOrder: 7,
     hidesWhenUnavailable: true,
     unavailableReason: 'Add a credit card account to use this card.',
   },
@@ -67,9 +67,19 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
     description: 'Monthly budget progress when active budgets exist.',
     previewText: 'Highest-risk budgets with used, limit, remaining, and progress.',
     defaultVisible: true,
-    defaultOrder: 4,
+    defaultOrder: 5,
     hidesWhenUnavailable: true,
     unavailableReason: 'Create an active budget to use this card.',
+  },
+  {
+    id: 'upcomingPayments',
+    title: 'Upcoming Payments',
+    description: 'Overdue, due-soon, and upcoming recurring items.',
+    previewText: 'Next rent, subscriptions, bills, and income templates.',
+    defaultVisible: true,
+    defaultOrder: 3,
+    hidesWhenUnavailable: true,
+    unavailableReason: 'Add an active recurring item to use this card.',
   },
   {
     id: 'topSpending',
@@ -77,7 +87,7 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
     description: 'Largest spending categories for this month.',
     previewText: 'Top categories with icons and amounts.',
     defaultVisible: true,
-    defaultOrder: 5,
+    defaultOrder: 6,
   },
   {
     id: 'recentTransactions',
@@ -110,6 +120,17 @@ const previousUntouchedDefaultSettings: DashboardCardSetting[] = [
   { id: 'balanceSummary', visible: false },
 ];
 
+const currentUntouchedDefaultSettings: DashboardCardSetting[] = [
+  { id: 'rainyDay', visible: true },
+  { id: 'accounts', visible: true },
+  { id: 'recentTransactions', visible: true },
+  { id: 'cashFlow', visible: true },
+  { id: 'budgetProgress', visible: true },
+  { id: 'topSpending', visible: true },
+  { id: 'creditCards', visible: true },
+  { id: 'balanceSummary', visible: false },
+];
+
 export function getDefaultDashboardCardSettings(): DashboardCardSetting[] {
   return dashboardCardRegistry
     .slice()
@@ -128,7 +149,8 @@ export function normalizeDashboardCardSettings(value: unknown): DashboardCardSet
 
   if (
     isSameDashboardCardSettings(value, oldUntouchedDefaultSettings) ||
-    isSameDashboardCardSettings(value, previousUntouchedDefaultSettings)
+    isSameDashboardCardSettings(value, previousUntouchedDefaultSettings) ||
+    isSameDashboardCardSettings(value, currentUntouchedDefaultSettings)
   ) {
     return defaults;
   }

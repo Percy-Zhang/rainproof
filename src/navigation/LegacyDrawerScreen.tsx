@@ -121,6 +121,7 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           onOpenAccount={() => navigation.navigate('Accounts')}
           onOpenBudgets={() => navigation.navigate('Budgets')}
           onOpenDashboardEdit={() => rootNavigation?.navigate('DashboardEdit')}
+          onOpenRecurring={() => navigation.navigate('Recurring')}
           onUpdateSelectedAccountIds={actions.updateDashboardSelectedAccountIds}
         />
       ) : rootScreen === 'stats' ? (

@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { ComposerScreenScaffold } from '../components/ScreenScaffold';
 import { FormError } from '../components/ui';
+import { getDashboardRecurringSummary } from '../domain/dashboardRecurring';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
 import { BudgetFormScreen } from '../features/budgets/BudgetFormScreen';
 import {
@@ -31,7 +32,7 @@ import { AddTransactionScreen } from '../features/transactions/AddTransactionScr
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
 import { colors, spacing, typography } from '../theme/tokens';
-import type { AccountBalance, Budget } from '../domain/types';
+import type { AccountBalance, Budget, RecurringItem } from '../domain/types';
 import type { RootStackParamList } from './routes';
 
 type RootStackNavigation = NativeStackNavigationProp<RootStackParamList>;
@@ -474,7 +475,7 @@ export function DashboardEditRouteScreen() {
         <View style={styles.headerSpacer} />
       </View>
       <DashboardEditScreen
-        availability={getDashboardCardAvailability(snapshot.budgets, derived.accountBalances)}
+        availability={getDashboardCardAvailability(snapshot.budgets, derived.accountBalances, snapshot.recurringItems)}
         onOpenAddCards={() => navigation.navigate('DashboardAddCards')}
         settings={snapshot.settings.dashboardCardSettings}
         onUpdateSettings={(dashboardCardSettings) =>
@@ -507,7 +508,7 @@ export function DashboardAddCardsRouteScreen() {
         <View style={styles.headerSpacer} />
       </View>
       <DashboardAddCardsScreen
-        availability={getDashboardCardAvailability(snapshot.budgets, derived.accountBalances)}
+        availability={getDashboardCardAvailability(snapshot.budgets, derived.accountBalances, snapshot.recurringItems)}
         settings={snapshot.settings.dashboardCardSettings}
         onUpdateSettings={(dashboardCardSettings) =>
           actions.updateDashboardCardSettings({ dashboardCardSettings })}
@@ -519,10 +520,12 @@ export function DashboardAddCardsRouteScreen() {
 function getDashboardCardAvailability(
   budgets: Budget[],
   accountBalances: AccountBalance[],
+  recurringItems: RecurringItem[],
 ) {
   return {
     budgetProgress: budgets.some((budget) => budget.isActive),
     creditCards: accountBalances.some(({ account }) => account.type === 'credit_card'),
+    upcomingPayments: getDashboardRecurringSummary(recurringItems).activeCount > 0,
   };
 }
 
