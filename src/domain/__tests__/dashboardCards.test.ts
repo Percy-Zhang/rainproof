@@ -1,8 +1,13 @@
 import {
+  addDashboardCardSetting,
   getDefaultDashboardCardSettings,
+  getDashboardCardAddOptions,
   getDashboardCardDefinition,
   getRenderableDashboardCardIds,
+  getVisibleDashboardCardSettings,
+  hideDashboardCardSetting,
   normalizeDashboardCardSettings,
+  reorderVisibleDashboardCardSettings,
   toggleDashboardCardSetting,
 } from '../dashboardCards';
 
@@ -24,6 +29,8 @@ describe('dashboard card helpers', () => {
     expect(getDashboardCardDefinition('balanceSummary')).toEqual(expect.objectContaining({
       id: 'balanceSummary',
       title: 'Balance summary',
+      description: 'Totals grouped by currency.',
+      previewText: 'AUD total, USD total, and other account currencies.',
     }));
     expect(getDefaultDashboardCardSettings().find((setting) => setting.id === 'balanceSummary')?.visible).toBe(false);
   });
@@ -122,5 +129,71 @@ describe('dashboard card helpers', () => {
       hidesWhenUnavailable: true,
       title: 'Budget progress',
     }));
+  });
+
+  it('returns visible settings in saved order', () => {
+    expect(getVisibleDashboardCardSettings(getDefaultDashboardCardSettings()).map((setting) => setting.id)).toEqual([
+      'rainyDay',
+      'accounts',
+      'recentTransactions',
+      'cashFlow',
+      'budgetProgress',
+      'topSpending',
+      'creditCards',
+    ]);
+  });
+
+  it('lists hidden and unavailable cards for add-card UI', () => {
+    const settings = getDefaultDashboardCardSettings().map((setting) => (
+      setting.id === 'creditCards' ? { ...setting, visible: false } : setting
+    ));
+    const options = getDashboardCardAddOptions(settings, {
+      budgetProgress: false,
+      creditCards: false,
+    });
+
+    expect(options.map((option) => option.id)).toEqual(['creditCards', 'balanceSummary']);
+    expect(options.find((option) => option.id === 'creditCards')).toEqual(expect.objectContaining({
+      available: false,
+      unavailableReason: 'Add a credit card account to use this card.',
+    }));
+    expect(options.find((option) => option.id === 'balanceSummary')).toEqual(expect.objectContaining({
+      available: true,
+      description: 'Totals grouped by currency.',
+      previewText: 'AUD total, USD total, and other account currencies.',
+    }));
+  });
+
+  it('adds a hidden card without changing the saved order', () => {
+    const settings = addDashboardCardSetting(getDefaultDashboardCardSettings(), 'balanceSummary');
+
+    expect(settings[settings.length - 1]).toEqual({ id: 'balanceSummary', visible: true });
+  });
+
+  it('hides a card without hiding the final visible card', () => {
+    const settings = hideDashboardCardSetting(getDefaultDashboardCardSettings(), 'topSpending');
+
+    expect(settings.find((setting) => setting.id === 'topSpending')?.visible).toBe(false);
+
+    const oneVisible = getDefaultDashboardCardSettings().map((setting) => ({
+      ...setting,
+      visible: setting.id === 'accounts',
+    }));
+    expect(hideDashboardCardSetting(oneVisible, 'accounts')).toEqual(oneVisible);
+  });
+
+  it('reorders visible cards while keeping hidden cards available', () => {
+    const settings = hideDashboardCardSetting(getDefaultDashboardCardSettings(), 'topSpending');
+    const reordered = reorderVisibleDashboardCardSettings(settings, ['cashFlow', 'accounts', 'rainyDay']);
+
+    expect(reordered.slice(0, 3)).toEqual([
+      { id: 'cashFlow', visible: true },
+      { id: 'accounts', visible: true },
+      { id: 'rainyDay', visible: true },
+    ]);
+    expect(reordered.slice(-2)).toEqual([
+      { id: 'topSpending', visible: false },
+      { id: 'balanceSummary', visible: false },
+    ]);
   });
 });

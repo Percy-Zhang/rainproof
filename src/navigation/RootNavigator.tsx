@@ -30,7 +30,8 @@ import {
   EditRecurringItemRouteScreen,
   EditTransactionRouteScreen,
   AddBudgetRouteScreen,
-  DashboardCardsRouteScreen,
+  DashboardAddCardsRouteScreen,
+  DashboardEditRouteScreen,
   CategorySelectRouteScreen,
   CreateRecurringTransactionRouteScreen,
   EditBudgetRouteScreen,
@@ -102,8 +103,13 @@ export function RootNavigator() {
             options={{ headerShown: false }}
           />
           <RootStack.Screen
-            name="DashboardCards"
-            component={DashboardCardsRouteScreen}
+            name="DashboardEdit"
+            component={DashboardEditRouteScreen}
+            options={{ headerShown: false }}
+          />
+          <RootStack.Screen
+            name="DashboardAddCards"
+            component={DashboardAddCardsRouteScreen}
             options={{ headerShown: false }}
           />
           <RootStack.Screen

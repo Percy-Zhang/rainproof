@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
@@ -10,7 +9,6 @@ import { colors, spacing, typography } from '../../theme/tokens';
 
 type SettingsScreenProps = {
   snapshot: AppSnapshot;
-  onOpenDashboardCards: () => void;
   onOpenCategoryManagement: () => void;
   onUpdateSettings: (input: UpdateAppSettingsInput) => Promise<void>;
   showHeader?: boolean;
@@ -18,7 +16,6 @@ type SettingsScreenProps = {
 
 export function SettingsScreen({
   snapshot,
-  onOpenDashboardCards,
   onOpenCategoryManagement,
   showHeader = true,
 }: SettingsScreenProps) {
@@ -69,22 +66,6 @@ export function SettingsScreen({
         </View>
       </Card>
 
-      <Card testID="dashboard-card-settings-card">
-        <Text style={styles.cardTitle}>Dashboard</Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onOpenDashboardCards}
-          style={({ pressed }) => [styles.settingsNavRow, pressed && styles.pressed]}
-        >
-          <CategoryIconBadge color={colors.primary} icon="grid-outline" size="md" />
-          <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Dashboard cards</Text>
-            <Text style={styles.smallMuted}>Choose visible cards and reorder the Dashboard.</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-        </Pressable>
-      </Card>
-
       <Card testID="category-settings-card">
         <Text style={styles.cardTitle}>Categories</Text>
         <Pressable
@@ -97,7 +78,7 @@ export function SettingsScreen({
             <Text style={styles.settingTitle}>Edit categories</Text>
             <Text style={styles.smallMuted}>Names, colors, icons, and subcategories.</Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+          <Text style={styles.chevron}>›</Text>
         </Pressable>
       </Card>
 
@@ -181,5 +162,10 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.78,
+  },
+  chevron: {
+    color: colors.muted,
+    fontSize: 24,
+    fontWeight: '700',
   },
 });

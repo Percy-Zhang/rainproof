@@ -1,9 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
-import { Card, ProgressBar } from '../../components/ui';
+import { ActionButton, Card, ProgressBar } from '../../components/ui';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
 import {
   getBudgetMonthlyRange,
@@ -16,6 +16,7 @@ import { defaultCategories } from '../../domain/categories';
 import {
   getDashboardCardDefinition,
   getRenderableDashboardCardIds,
+  type DashboardCardAvailability,
 } from '../../domain/dashboardCards';
 import {
   getDashboardAccountPreview,
@@ -56,11 +57,13 @@ type DashboardScreenProps = {
   cashFlow: CashFlowSummary | null;
   currentMonthSpending: SpendingByCategory[];
   onAddAccount: () => void;
+  onAddTransaction: () => void;
   onOpenRainyDayFund: () => void;
   onOpenTransactions: () => void;
   onOpenTransaction: (transactionId: string) => void;
   onOpenAccount: () => void;
   onOpenBudgets: () => void;
+  onOpenDashboardEdit: () => void;
   onUpdateSelectedAccountIds: (accountIds: string[]) => Promise<void>;
 };
 
@@ -72,11 +75,13 @@ export function DashboardScreen({
   cashFlow,
   currentMonthSpending,
   onAddAccount,
+  onAddTransaction,
   onOpenRainyDayFund,
   onOpenTransactions,
   onOpenTransaction,
   onOpenAccount,
   onOpenBudgets,
+  onOpenDashboardEdit,
   onUpdateSelectedAccountIds,
 }: DashboardScreenProps) {
   const hasAnyAccounts = snapshot.accounts.length > 0;
@@ -107,13 +112,14 @@ export function DashboardScreen({
     () => getDashboardBudgetProgressData(snapshot, categories),
     [categories, snapshot],
   );
+  const cardAvailability = useMemo<DashboardCardAvailability>(() => ({
+    budgetProgress: budgetProgress.activeBudgetCount > 0,
+    creditCards: creditCardSummaries.length > 0,
+  }), [budgetProgress.activeBudgetCount, creditCardSummaries.length]);
   const dashboardCardIds = useMemo(
     () =>
-      getRenderableDashboardCardIds(snapshot.settings.dashboardCardSettings, {
-        budgetProgress: budgetProgress.activeBudgetCount > 0,
-        creditCards: creditCardSummaries.length > 0,
-      }),
-    [budgetProgress.activeBudgetCount, creditCardSummaries.length, snapshot.settings.dashboardCardSettings],
+      getRenderableDashboardCardIds(snapshot.settings.dashboardCardSettings, cardAvailability),
+    [cardAvailability, snapshot.settings.dashboardCardSettings],
   );
 
   useEffect(() => {
@@ -222,13 +228,39 @@ export function DashboardScreen({
   const renderedCards = dashboardCardIds.map(renderDashboardCard).filter(Boolean);
 
   return (
-    <View style={styles.stack}>
-      {renderedCards.length ? renderedCards : (
-        <Card testID="dashboard-empty-cards-card" style={styles.compactCard}>
-          <Text style={styles.cardTitle}>Dashboard</Text>
-          <Text style={styles.emptyText}>All dashboard cards are hidden. Turn cards back on in Settings.</Text>
-        </Card>
-      )}
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        testID="screen-dashboard"
+      >
+        <View style={styles.dashboardHeader}>
+          <View style={styles.headerText}>
+            <Text style={styles.dashboardTitle}>Dashboard</Text>
+            <Text style={styles.smallMuted}>Your selected cards and account view.</Text>
+          </View>
+          <HeaderAction label="Edit Dashboard" onPress={onOpenDashboardEdit} testID="dashboard-edit-start" />
+        </View>
+        {renderedCards.length ? renderedCards : (
+          <Card testID="dashboard-empty-cards-card" style={styles.compactCard}>
+            <Text style={styles.cardTitle}>Dashboard</Text>
+            <Text style={styles.emptyText}>No dashboard cards are available. Edit Dashboard to add or show cards.</Text>
+            <ActionButton variant="secondary" onPress={onOpenDashboardEdit}>
+              Edit Dashboard
+            </ActionButton>
+          </Card>
+        )}
+      </ScrollView>
+      <Pressable
+        accessibilityLabel="Add transaction"
+        accessibilityRole="button"
+        onPress={onAddTransaction}
+        style={({ pressed }) => [styles.floatingAddButton, pressed && styles.pressedRow]}
+        testID="dashboard-add-transaction"
+      >
+        <Ionicons name="add" size={30} color={colors.surface} />
+      </Pressable>
     </View>
   );
 }
@@ -873,8 +905,24 @@ function getBudgetStatusColor(status: BudgetUsageDisplayRow['status']): string {
 }
 
 const styles = StyleSheet.create({
-  stack: {
+  screen: {
+    flex: 1,
+  },
+  scrollContent: {
     gap: spacing.md,
+    padding: spacing.lg,
+    paddingBottom: 96,
+  },
+  dashboardHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'space-between',
+  },
+  dashboardTitle: {
+    color: colors.ink,
+    fontSize: typography.h2,
+    fontWeight: '900',
   },
   compactCard: {
     gap: spacing.sm,
@@ -1171,6 +1219,23 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: typography.body,
     fontWeight: '900',
+  },
+  floatingAddButton: {
+    alignItems: 'center',
+    backgroundColor: colors.primary,
+    borderRadius: 999,
+    bottom: spacing.xl,
+    elevation: 7,
+    height: 58,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: spacing.lg,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    width: 58,
+    zIndex: 20,
   },
   pressedRow: {
     opacity: 0.78,

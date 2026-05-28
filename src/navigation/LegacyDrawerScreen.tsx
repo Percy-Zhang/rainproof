@@ -1,4 +1,3 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -6,7 +5,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useLayoutEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,7 +13,6 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
-import { DashboardScrollScaffold } from '../components/ScreenScaffold';
 import { FormError } from '../components/ui';
 import { AccountsScreen } from '../features/accounts/AccountsScreen';
 import { BudgetsScreen } from '../features/budgets/BudgetsScreen';
@@ -109,23 +106,23 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
           />
         </View>
       ) : rootScreen === 'dashboard' ? (
-        <DashboardScrollScaffold screenKey="dashboard">
-          <DashboardScreen
-            snapshot={snapshot}
-            accountBalances={derived.accountBalances}
-            totalsByCurrency={derived.totalsByCurrency}
-            rainyDayProgress={derived.rainyDayProgress}
-            cashFlow={derived.cashFlow}
-            currentMonthSpending={derived.currentMonthSpending}
-            onAddAccount={() => rootNavigation?.navigate('AddAccount')}
-            onOpenRainyDayFund={() => rootNavigation?.navigate('RainyDayFund')}
-            onOpenTransactions={() => navigation.navigate('Transactions')}
-            onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
-            onOpenAccount={() => navigation.navigate('Accounts')}
-            onOpenBudgets={() => navigation.navigate('Budgets')}
-            onUpdateSelectedAccountIds={actions.updateDashboardSelectedAccountIds}
-          />
-        </DashboardScrollScaffold>
+        <DashboardScreen
+          snapshot={snapshot}
+          accountBalances={derived.accountBalances}
+          totalsByCurrency={derived.totalsByCurrency}
+          rainyDayProgress={derived.rainyDayProgress}
+          cashFlow={derived.cashFlow}
+          currentMonthSpending={derived.currentMonthSpending}
+          onAddAccount={() => rootNavigation?.navigate('AddAccount')}
+          onAddTransaction={() => rootNavigation?.navigate('AddTransaction')}
+          onOpenRainyDayFund={() => rootNavigation?.navigate('RainyDayFund')}
+          onOpenTransactions={() => navigation.navigate('Transactions')}
+          onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
+          onOpenAccount={() => navigation.navigate('Accounts')}
+          onOpenBudgets={() => navigation.navigate('Budgets')}
+          onOpenDashboardEdit={() => rootNavigation?.navigate('DashboardEdit')}
+          onUpdateSelectedAccountIds={actions.updateDashboardSelectedAccountIds}
+        />
       ) : rootScreen === 'stats' ? (
         <StatsScreen
           snapshot={snapshot}
@@ -163,7 +160,6 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
         >
           <SettingsScreen
             snapshot={snapshot}
-            onOpenDashboardCards={() => rootNavigation?.navigate('DashboardCards')}
             onOpenCategoryManagement={() => rootNavigation?.navigate('CategoryManagement')}
             onUpdateSettings={actions.updateSettings}
             showHeader={false}
@@ -171,17 +167,6 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
         </ScrollView>
       )}
 
-      {rootScreen === 'dashboard' ? (
-        <Pressable
-          accessibilityLabel="Add transaction"
-          accessibilityRole="button"
-          onPress={() => rootNavigation?.navigate('AddTransaction')}
-          style={({ pressed }) => [styles.floatingAddButton, pressed && styles.pressed]}
-          testID="dashboard-add-transaction"
-        >
-          <Ionicons name="add" size={30} color={colors.surface} />
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -216,25 +201,5 @@ const styles = StyleSheet.create({
   paddedScrollContent: {
     padding: spacing.lg,
     paddingBottom: spacing.xl,
-  },
-  floatingAddButton: {
-    alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 999,
-    bottom: spacing.xl,
-    elevation: 7,
-    height: 58,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: spacing.lg,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    width: 58,
-    zIndex: 20,
-  },
-  pressed: {
-    opacity: 0.78,
   },
 });

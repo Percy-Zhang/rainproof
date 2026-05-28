@@ -64,7 +64,8 @@ export type RootStackParamList = {
   EditRecurringItem: { recurringItemId: string };
   CreateRecurringTransaction: { recurringItemId: string };
   CategorySelect: CategorySelectRouteParams;
-  DashboardCards: undefined;
+  DashboardEdit: undefined;
+  DashboardAddCards: undefined;
   CategoryManagement: undefined;
   CategoryEdit: { categoryId: string };
   SubcategoryEdit: { categoryId: string; subcategoryId: string };

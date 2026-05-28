@@ -22,12 +22,16 @@ import type {
 import { RainyDayFundScreen } from '../features/rainyDay/RainyDayFundScreen';
 import { RecurringItemFormScreen } from '../features/recurring/RecurringItemFormScreen';
 import { RecurringTransactionReviewScreen } from '../features/recurring/RecurringTransactionReviewScreen';
-import { DashboardCardsScreen } from '../features/settings/DashboardCardsScreen';
+import {
+  DashboardAddCardsScreen,
+  DashboardEditScreen,
+} from '../features/dashboard/DashboardCardCustomizationScreens';
 import { StatsDrilldownScreen } from '../features/stats/StatsDrilldownScreen';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
 import { colors, spacing, typography } from '../theme/tokens';
+import type { AccountBalance, Budget } from '../domain/types';
 import type { RootStackParamList } from './routes';
 
 type RootStackNavigation = NativeStackNavigationProp<RootStackParamList>;
@@ -447,16 +451,16 @@ export function CategorySelectRouteScreen() {
   );
 }
 
-export function DashboardCardsRouteScreen() {
+export function DashboardEditRouteScreen() {
   const navigation = useNavigation<RootStackNavigation>();
-  const { snapshot, actions } = useRainproofDataContext();
+  const { snapshot, derived, actions } = useRainproofDataContext();
 
   if (!snapshot) {
     return <MissingDataShell message="Preparing Rainproof" />;
   }
 
   return (
-    <DetailSafeArea testID="screen-dashboardCards">
+    <DetailSafeArea testID="screen-dashboardEdit">
       <View style={styles.detailTopBar}>
         <Pressable
           accessibilityRole="button"
@@ -466,16 +470,60 @@ export function DashboardCardsRouteScreen() {
           <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
           <Text style={styles.backButtonText}>Back</Text>
         </Pressable>
-        <Text numberOfLines={1} style={styles.detailTitle}>Dashboard cards</Text>
+        <Text numberOfLines={1} style={styles.detailTitle}>Edit Dashboard</Text>
         <View style={styles.headerSpacer} />
       </View>
-      <DashboardCardsScreen
+      <DashboardEditScreen
+        availability={getDashboardCardAvailability(snapshot.budgets, derived.accountBalances)}
+        onOpenAddCards={() => navigation.navigate('DashboardAddCards')}
         settings={snapshot.settings.dashboardCardSettings}
         onUpdateSettings={(dashboardCardSettings) =>
           actions.updateDashboardCardSettings({ dashboardCardSettings })}
       />
     </DetailSafeArea>
   );
+}
+
+export function DashboardAddCardsRouteScreen() {
+  const navigation = useNavigation<RootStackNavigation>();
+  const { snapshot, derived, actions } = useRainproofDataContext();
+
+  if (!snapshot) {
+    return <MissingDataShell message="Preparing Rainproof" />;
+  }
+
+  return (
+    <DetailSafeArea testID="screen-dashboardAddCards">
+      <View style={styles.detailTopBar}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => navigation.goBack()}
+          style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
+        >
+          <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
+          <Text style={styles.backButtonText}>Back</Text>
+        </Pressable>
+        <Text numberOfLines={1} style={styles.detailTitle}>Add cards</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      <DashboardAddCardsScreen
+        availability={getDashboardCardAvailability(snapshot.budgets, derived.accountBalances)}
+        settings={snapshot.settings.dashboardCardSettings}
+        onUpdateSettings={(dashboardCardSettings) =>
+          actions.updateDashboardCardSettings({ dashboardCardSettings })}
+      />
+    </DetailSafeArea>
+  );
+}
+
+function getDashboardCardAvailability(
+  budgets: Budget[],
+  accountBalances: AccountBalance[],
+) {
+  return {
+    budgetProgress: budgets.some((budget) => budget.isActive),
+    creditCards: accountBalances.some(({ account }) => account.type === 'credit_card'),
+  };
 }
 
 function DetailSafeArea({ children, testID }: { children: ReactNode; testID?: string }) {
