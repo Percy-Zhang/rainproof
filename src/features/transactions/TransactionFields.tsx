@@ -66,6 +66,8 @@ export function AutocompleteField({
   placeholder,
   suggestions,
   onSelectSuggestion,
+  onBlur,
+  onFocus,
 }: {
   label: string;
   value: string;
@@ -73,10 +75,19 @@ export function AutocompleteField({
   placeholder: string;
   suggestions: string[];
   onSelectSuggestion?: (suggestion: string) => void;
+  onBlur?: () => void;
+  onFocus?: () => void;
 }) {
   return (
     <View style={styles.fieldBlock}>
-      <InlineField label={label} value={value} onChange={onChange} placeholder={placeholder} />
+      <InlineField
+        label={label}
+        value={value}
+        onBlur={onBlur}
+        onChange={onChange}
+        onFocus={onFocus}
+        placeholder={placeholder}
+      />
       {suggestions.length ? (
         <View style={styles.suggestionRow}>
           {suggestions.map((suggestion) => (
@@ -103,6 +114,8 @@ export function InlineField({
   keyboardType,
   rightLabel,
   selectAllOnFocus = false,
+  onBlur,
+  onFocus,
 }: {
   label: string;
   value: string;
@@ -111,6 +124,8 @@ export function InlineField({
   keyboardType?: 'default' | 'decimal-pad';
   rightLabel?: string;
   selectAllOnFocus?: boolean;
+  onBlur?: () => void;
+  onFocus?: () => void;
 }) {
   const [selection, setSelection] = useState<{ start: number; end: number } | undefined>();
   const isEmpty = !value.trim();
@@ -124,6 +139,7 @@ export function InlineField({
       <View style={styles.inputFrame}>
         <TextInput
           keyboardType={keyboardType}
+          onBlur={onBlur}
           value={value}
           onChangeText={(nextValue) => {
             setSelection(undefined);
@@ -133,6 +149,7 @@ export function InlineField({
             if (selectAllOnFocus) {
               setSelection({ start: 0, end: value.length });
             }
+            onFocus?.();
           }}
           placeholder={placeholder}
           placeholderTextColor={placeholderColor}

@@ -1,7 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import type { ReactNode } from 'react';
-import { useEffect, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Card, FormError } from '../../components/ui';
@@ -41,34 +52,121 @@ type SplitTransactionEditorScrollContainerProps = {
   testID?: string;
 };
 
+type SplitEditorScrollContextValue = {
+  revealNode: (node: View | null) => void;
+};
+
+const SplitEditorScrollContext = createContext<SplitEditorScrollContextValue | null>(null);
+
 export function SplitTransactionEditorScrollContainer({
   children,
   testID,
 }: SplitTransactionEditorScrollContainerProps) {
   const insets = useSafeAreaInsets();
+  const scrollViewportRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollYRef = useRef(0);
+  const pendingFocusedNodeRef = useRef<View | null>(null);
   const keyboardHeight = useKeyboardHeight();
-  const keyboardBottomPadding = Math.max(0, keyboardHeight - insets.bottom);
+
+  const revealNodeNow = useCallback((node: View | null) => {
+    if (!node || !scrollViewportRef.current) {
+      return;
+    }
+
+    scrollViewportRef.current.measureInWindow((_: number, scrollWindowY: number, __: number, scrollHeight: number) => {
+      node.measureInWindow((___: number, fieldWindowY: number, ____: number, fieldHeight: number) => {
+        const topGuard = spacing.md;
+        const bottomGuard = spacing.xxl + spacing.md;
+        const visibleTop = scrollWindowY + topGuard;
+        const visibleBottom = scrollWindowY + scrollHeight - bottomGuard;
+        const fieldTop = fieldWindowY;
+        const fieldBottom = fieldWindowY + fieldHeight;
+
+        if (fieldBottom > visibleBottom) {
+          scrollRef.current?.scrollTo({
+            animated: true,
+            y: Math.max(0, scrollYRef.current + fieldBottom - visibleBottom),
+          });
+          return;
+        }
+
+        if (fieldTop < visibleTop) {
+          scrollRef.current?.scrollTo({
+            animated: true,
+            y: Math.max(0, scrollYRef.current - (visibleTop - fieldTop)),
+          });
+        }
+      });
+    });
+  }, []);
+
+  const revealNode = useCallback((node: View | null) => {
+    pendingFocusedNodeRef.current = node;
+    requestAnimationFrame(() => revealNodeNow(node));
+    setTimeout(() => revealNodeNow(node), Platform.OS === 'android' ? 140 : 90);
+  }, [revealNodeNow]);
+
+  const contextValue = useMemo<SplitEditorScrollContextValue>(() => ({
+    revealNode,
+  }), [revealNode]);
+
+  useEffect(() => {
+    if (keyboardHeight <= 0 || !pendingFocusedNodeRef.current) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      if (pendingFocusedNodeRef.current) {
+        revealNodeNow(pendingFocusedNodeRef.current);
+      }
+    }, Platform.OS === 'android' ? 80 : 50);
+
+    return () => clearTimeout(timer);
+  }, [keyboardHeight, revealNodeNow]);
+
+  function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
+    scrollYRef.current = event.nativeEvent.contentOffset.y;
+  }
+
+  function handleLayout() {
+    if (pendingFocusedNodeRef.current) {
+      requestAnimationFrame(() => {
+        if (pendingFocusedNodeRef.current) {
+          revealNodeNow(pendingFocusedNodeRef.current);
+        }
+      });
+    }
+  }
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={spacing.xl}
       style={styles.keyboardPane}
     >
-      <ScrollView
-        contentContainerStyle={[
-          styles.keyboardScrollContent,
-          { paddingBottom: insets.bottom + keyboardBottomPadding + spacing.xxl },
-        ]}
-        keyboardDismissMode="none"
-        keyboardShouldPersistTaps="always"
-        nestedScrollEnabled
-        showsVerticalScrollIndicator={false}
-        style={styles.keyboardScroll}
-        testID={testID}
-      >
-        {children}
-      </ScrollView>
+      <SplitEditorScrollContext.Provider value={contextValue}>
+        <View ref={scrollViewportRef} style={styles.keyboardScrollWrapper}>
+          <ScrollView
+            ref={scrollRef}
+            contentContainerStyle={[
+              styles.keyboardScrollContent,
+              { paddingBottom: insets.bottom + spacing.xxl },
+            ]}
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+            onLayout={handleLayout}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            style={styles.keyboardScroll}
+            testID={testID}
+          >
+            {children}
+          </ScrollView>
+        </View>
+      </SplitEditorScrollContext.Provider>
     </KeyboardAvoidingView>
   );
 }
@@ -143,15 +241,21 @@ export function SplitTransactionEditor({
                 <Ionicons name="trash-outline" size={18} color={colors.danger} />
               </Pressable>
             </View>
-            <InlineField
-              label="Amount"
-              value={line.amount}
-              onChange={(amount) => onUpdateLine(line.id, { amount })}
-              placeholder={formatMinorInput(0)}
-              keyboardType="decimal-pad"
-              rightLabel={showCurrencyCodes ? currencyCode : undefined}
-              selectAllOnFocus
-            />
+            <RevealableSplitField>
+              {({ onBlur, onFocus }) => (
+                <InlineField
+                  label="Amount"
+                  value={line.amount}
+                  onChange={(amount) => onUpdateLine(line.id, { amount })}
+                  onBlur={onBlur}
+                  onFocus={onFocus}
+                  placeholder={formatMinorInput(0)}
+                  keyboardType="decimal-pad"
+                  rightLabel={showCurrencyCodes ? currencyCode : undefined}
+                  selectAllOnFocus
+                />
+              )}
+            </RevealableSplitField>
             <SelectorRow
               label="Category"
               value={`${category.name} / ${getSubcategoryName(category.id, line.subcategoryId, categories)}`}
@@ -161,13 +265,19 @@ export function SplitTransactionEditor({
               iconColor={getSubcategoryColor(category.id, line.subcategoryId, categories)}
               empty={!line.subcategoryId}
             />
-            <AutocompleteField
-              label="Line item"
-              value={line.note}
-              onChange={(note) => onUpdateLine(line.id, { note })}
-              placeholder="Optional"
-              suggestions={getFilteredTransactionItemNameSuggestions(itemNameSuggestions, line.note)}
-            />
+            <RevealableSplitField>
+              {({ onBlur, onFocus }) => (
+                <AutocompleteField
+                  label="Line item"
+                  value={line.note}
+                  onChange={(note) => onUpdateLine(line.id, { note })}
+                  onBlur={onBlur}
+                  onFocus={onFocus}
+                  placeholder="Optional"
+                  suggestions={getFilteredTransactionItemNameSuggestions(itemNameSuggestions, line.note)}
+                />
+              )}
+            </RevealableSplitField>
           </Card>
         );
       })}
@@ -181,6 +291,34 @@ export function SplitTransactionEditor({
         <Ionicons name="add" size={18} color={colors.primaryDark} />
         <Text style={styles.addLineText}>Add split line</Text>
       </Pressable>
+    </View>
+  );
+}
+
+function RevealableSplitField({
+  children,
+}: {
+  children: (handlers: { onBlur: () => void; onFocus: () => void }) => ReactNode;
+}) {
+  const scrollContext = useContext(SplitEditorScrollContext);
+  const fieldRef = useRef<View>(null);
+  const isFocusedRef = useRef(false);
+  const onLayout = useCallback(() => {
+    if (isFocusedRef.current) {
+      scrollContext?.revealNode(fieldRef.current);
+    }
+  }, [scrollContext]);
+  const onBlur = useCallback(() => {
+    isFocusedRef.current = false;
+  }, []);
+  const onFocus = useCallback(() => {
+    isFocusedRef.current = true;
+    scrollContext?.revealNode(fieldRef.current);
+  }, [scrollContext]);
+
+  return (
+    <View ref={fieldRef} onLayout={onLayout}>
+      {children({ onBlur, onFocus })}
     </View>
   );
 }
@@ -204,6 +342,9 @@ function SummaryCell({
 
 const styles = StyleSheet.create({
   keyboardPane: {
+    flex: 1,
+  },
+  keyboardScrollWrapper: {
     flex: 1,
   },
   keyboardScroll: {
