@@ -1,11 +1,14 @@
 import { defaultCategories, sanitizeCategoryCatalog } from '../domain/categories';
 import { getDefaultEnabledCurrencyCodes, uniqueCurrencyCodes } from '../domain/currencyCatalog';
 import { normalizeDefaultCurrencyMode } from '../domain/currency';
+import { normalizeAddTransactionDefaults } from '../domain/addTransactionDefaults';
 import { getDefaultDashboardCardSettings, normalizeDashboardCardSettings } from '../domain/dashboardCards';
 import { normalizeCurrencyCode } from '../domain/money';
 import type {
+  AddTransactionDefaults,
   DashboardCardSetting,
   UpdateAppSettingsInput,
+  UpdateAddTransactionDefaultsInput,
   UpdateCategoryCatalogInput,
   UpdateDashboardCardSettingsInput,
 } from '../domain/types';
@@ -18,6 +21,7 @@ import {
 } from './mappers';
 
 export const DEFAULT_CURRENCY_MODE_SETTING_KEY = 'default_currency_mode';
+export const ADD_TRANSACTION_DEFAULTS_SETTING_KEY = 'add_transaction_defaults_json';
 
 export async function initializeRequiredSettings(
   db: RepositoryDatabase,
@@ -52,6 +56,11 @@ export async function initializeRequiredSettings(
     'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
     'dashboard_card_settings',
     JSON.stringify(getDefaultDashboardCardSettings()),
+  );
+  await db.runAsync(
+    'INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)',
+    ADD_TRANSACTION_DEFAULTS_SETTING_KEY,
+    JSON.stringify({}),
   );
 }
 
@@ -185,6 +194,13 @@ export async function updateDashboardCardSettingsStorage(
   await writeDashboardCardSettingsStorage(db, input.dashboardCardSettings);
 }
 
+export async function updateAddTransactionDefaultsStorage(
+  db: RepositoryDatabase,
+  input: UpdateAddTransactionDefaultsInput,
+): Promise<void> {
+  await writeAddTransactionDefaultsStorage(db, input.addTransactionDefaults);
+}
+
 export async function addAccountToStoredDashboardSelection(
   db: RepositoryDatabase,
   accountId: string,
@@ -216,5 +232,18 @@ async function writeDashboardCardSettingsStorage(
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     'dashboard_card_settings',
     JSON.stringify(normalizeDashboardCardSettings(dashboardCardSettings)),
+  );
+}
+
+async function writeAddTransactionDefaultsStorage(
+  db: RepositoryDatabase,
+  defaults: AddTransactionDefaults,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO settings (key, value)
+     VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ADD_TRANSACTION_DEFAULTS_SETTING_KEY,
+    JSON.stringify(normalizeAddTransactionDefaults(defaults)),
   );
 }

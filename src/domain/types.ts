@@ -229,6 +229,16 @@ export type DashboardCardSetting = {
   visible: boolean;
 };
 
+export type AddTransactionCategoryDefault = {
+  categoryId: string;
+  subcategoryId: string | null;
+};
+
+export type AddTransactionDefaults = {
+  lastManualAccountId?: string | null;
+  lastCategoryByKind?: Partial<Record<Extract<TransactionKind, 'expense' | 'income'>, AddTransactionCategoryDefault>>;
+};
+
 export type UpcomingRecurringItem = RecurringItem & {
   dueStatus: 'overdue' | 'due_soon' | 'upcoming';
 };
@@ -242,6 +252,7 @@ export type AppSettings = {
   enabledCurrencyCodes: CurrencyCode[];
   dashboardSelectedAccountIds: string[] | null;
   dashboardCardSettings?: DashboardCardSetting[];
+  addTransactionDefaults?: AddTransactionDefaults;
 };
 
 export type AppSnapshot = {
@@ -390,6 +401,10 @@ export type UpdateAppSettingsInput = {
 
 export type UpdateDashboardCardSettingsInput = {
   dashboardCardSettings: DashboardCardSetting[];
+};
+
+export type UpdateAddTransactionDefaultsInput = {
+  addTransactionDefaults: AddTransactionDefaults;
 };
 
 export type UpdateCategoryCatalogInput = {

@@ -279,6 +279,7 @@ describe('SQLite finance repository integration', () => {
       expect(settings.map((setting) => setting.key)).toEqual(
         expect.arrayContaining([
           'category_catalog_json',
+          'add_transaction_defaults_json',
           'dashboard_card_settings',
           'default_currency_code',
           'default_currency_mode',
@@ -289,6 +290,7 @@ describe('SQLite finance repository integration', () => {
       expect(snapshot.defaultCurrencyCode).toBe('AUD');
       expect(snapshot.settings.defaultCurrencyMode).toBe('auto');
       expect(snapshot.settings.enabledCurrencyCodes).toContain('AUD');
+      expect(snapshot.settings.addTransactionDefaults).toEqual({});
       expect(snapshot.categories?.length).toBeGreaterThan(0);
       expect(snapshot.accounts).toEqual([]);
       expect(snapshot.transactions).toEqual([]);
@@ -356,6 +358,30 @@ describe('SQLite finance repository integration', () => {
         { id: 'recentTransactions', visible: true },
         { id: 'accounts', visible: false },
       ]);
+    });
+  });
+
+  it('persists Add Transaction defaults through the settings store', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await repository.updateAddTransactionDefaults({
+        addTransactionDefaults: {
+          lastManualAccountId: 'checking',
+          lastCategoryByKind: {
+            expense: { categoryId: 'food', subcategoryId: 'groceries' },
+            income: { categoryId: 'income', subcategoryId: 'salary' },
+          },
+        },
+      });
+
+      const snapshot = await repository.getSnapshot();
+
+      expect(snapshot.settings.addTransactionDefaults).toEqual({
+        lastManualAccountId: 'checking',
+        lastCategoryByKind: {
+          expense: { categoryId: 'food', subcategoryId: 'groceries' },
+          income: { categoryId: 'income', subcategoryId: 'salary' },
+        },
+      });
     });
   });
 

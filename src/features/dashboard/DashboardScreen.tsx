@@ -62,7 +62,7 @@ type DashboardScreenProps = {
   accountBalances: AccountBalance[];
   rainyDayProgress: RainyDayProgress;
   onAddAccount: () => void;
-  onAddTransaction: () => void;
+  onAddTransaction: (params?: { dashboardAccountIds?: string[] }) => void;
   onOpenRainyDayFund: () => void;
   onOpenTransactions: () => void;
   onOpenTransaction: (transactionId: string) => void;
@@ -293,7 +293,7 @@ export function DashboardScreen({
 
   function openAddTransaction() {
     setQuickActionsOpen(false);
-    onAddTransaction();
+    onAddTransaction({ dashboardAccountIds: selectedAccountIds });
   }
 
   function openTemplates() {
@@ -338,18 +338,18 @@ export function DashboardScreen({
       {quickActionsOpen ? (
         <View pointerEvents="box-none" style={styles.quickActionMenu} testID="dashboard-quick-action-menu">
           <DashboardQuickAction
-            accessibilityLabel="Add Transaction"
-            icon="receipt-outline"
-            label="Add Transaction"
-            onPress={openAddTransaction}
-            testID="dashboard-quick-action-add-transaction"
-          />
-          <DashboardQuickAction
             accessibilityLabel="Use Template"
             icon="flash-outline"
             label="Use Template"
             onPress={openTemplates}
             testID="dashboard-quick-action-use-template"
+          />
+          <DashboardQuickAction
+            accessibilityLabel="Add Transaction"
+            icon="receipt-outline"
+            label="Add Transaction"
+            onPress={openAddTransaction}
+            testID="dashboard-quick-action-add-transaction"
           />
         </View>
       ) : null}

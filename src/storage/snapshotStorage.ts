@@ -1,10 +1,12 @@
 import { sanitizeCategoryCatalog } from '../domain/categories';
+import { normalizeAddTransactionDefaults } from '../domain/addTransactionDefaults';
 import { uniqueCurrencyCodes } from '../domain/currencyCatalog';
 import { getEffectiveDisplayCurrency, normalizeDefaultCurrencyMode } from '../domain/currency';
 import { normalizeDashboardCardSettings } from '../domain/dashboardCards';
 import { normalizeCurrencyCode } from '../domain/money';
 import type { AppSnapshot, RainyDayFund } from '../domain/types';
 import type { RepositoryDatabase } from './database';
+import { ADD_TRANSACTION_DEFAULTS_SETTING_KEY } from './settingsStorage';
 import {
   type AccountRow,
   type BudgetRow,
@@ -83,6 +85,14 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       ))?.value,
     ),
   );
+  const addTransactionDefaults = normalizeAddTransactionDefaults(
+    safeParseJson(
+      (await db.getFirstAsync<SettingRow>(
+        'SELECT value FROM settings WHERE key = ?',
+        ADD_TRANSACTION_DEFAULTS_SETTING_KEY,
+      ))?.value,
+    ),
+  );
   const categories = sanitizeCategoryCatalog(
     safeParseJson(
       (await db.getFirstAsync<SettingRow>(
@@ -137,6 +147,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       enabledCurrencyCodes,
       dashboardSelectedAccountIds,
       dashboardCardSettings,
+      addTransactionDefaults,
     },
     categories,
     accounts: accountRows.map(mapAccount),

@@ -31,6 +31,7 @@ import type {
   UpdateCategoryCatalogInput,
   UpdateDashboardCardSettingsInput,
   UpdateAccountInput,
+  UpdateAddTransactionDefaultsInput,
   UpdateBudgetInput,
   UpdateRecurringItemInput,
   UpdateTransactionTemplateInput,
@@ -73,6 +74,7 @@ type RainproofActions = {
   deleteTransactionTemplate(templateId: string): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
+  updateAddTransactionDefaults(input: UpdateAddTransactionDefaultsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
   updateDashboardCardSettings(input: UpdateDashboardCardSettingsInput): Promise<void>;
   updateDashboardSelectedAccountIds(accountIds: string[]): Promise<void>;
@@ -295,6 +297,8 @@ export function useRainproofData(): RainproofDataState {
         runMutation((repository) => repository.deleteTransactionTemplate(templateId), { rethrow: true }),
       updateRainyDayFund: (input) => runMutation((repository) => repository.updateRainyDayFund(input)),
       updateSettings: (input) => runMutation((repository) => repository.updateSettings(input)),
+      updateAddTransactionDefaults: (input) =>
+        runMutation((repository) => repository.updateAddTransactionDefaults(input), { showSaving: false }),
       updateCategoryCatalog: (input) => runMutation((repository) => repository.updateCategoryCatalog(input)),
       updateDashboardCardSettings: (input) =>
         runMutation((repository) => repository.updateDashboardCardSettings(input)),

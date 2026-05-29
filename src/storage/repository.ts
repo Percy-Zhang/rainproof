@@ -12,6 +12,7 @@ import type {
   NewTransactionLinkInput,
   TransactionLink,
   UpdateAccountInput,
+  UpdateAddTransactionDefaultsInput,
   UpdateAppSettingsInput,
   UpdateCategoryCatalogInput,
   UpdateDashboardCardSettingsInput,
@@ -53,6 +54,7 @@ import {
 } from './seedStorage';
 import {
   initializeRequiredSettings,
+  updateAddTransactionDefaultsStorage,
   updateCategoryCatalogStorage,
   updateDashboardCardSettingsStorage,
   updateDashboardSelectedAccountIdsStorage,
@@ -117,6 +119,7 @@ export type FinanceRepository = {
   deleteTransactionTemplate(templateId: string): Promise<void>;
   updateRainyDayFund(input: UpdateRainyDayFundInput): Promise<void>;
   updateSettings(input: UpdateAppSettingsInput): Promise<void>;
+  updateAddTransactionDefaults(input: UpdateAddTransactionDefaultsInput): Promise<void>;
   updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void>;
   updateDashboardCardSettings(input: UpdateDashboardCardSettingsInput): Promise<void>;
   updateDashboardSelectedAccountIds(accountIds: string[]): Promise<void>;
@@ -277,6 +280,10 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async updateSettings(input: UpdateAppSettingsInput): Promise<void> {
     return updateSettingsStorage(this.db, input);
+  }
+
+  async updateAddTransactionDefaults(input: UpdateAddTransactionDefaultsInput): Promise<void> {
+    return updateAddTransactionDefaultsStorage(this.db, input);
   }
 
   async updateCategoryCatalog(input: UpdateCategoryCatalogInput): Promise<void> {

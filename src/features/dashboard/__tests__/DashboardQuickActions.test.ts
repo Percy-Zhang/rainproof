@@ -2,7 +2,7 @@ import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
 
 import { DashboardScreen } from '../DashboardScreen';
-import type { AppSnapshot, RainyDayProgress } from '../../../domain/types';
+import type { Account, AppSnapshot, RainyDayProgress } from '../../../domain/types';
 
 jest.mock('@expo/vector-icons', () => {
   return { Ionicons: 'Ionicons' };
@@ -18,6 +18,10 @@ describe('Dashboard quick actions', () => {
     expect(screen.getByTestId('dashboard-quick-action-menu')).toBeTruthy();
     expect(screen.getByText('Add Transaction')).toBeTruthy();
     expect(screen.getByText('Use Template')).toBeTruthy();
+    expect(screen.getAllByText(/Use Template|Add Transaction/).map((item) => item.props.children)).toEqual([
+      'Use Template',
+      'Add Transaction',
+    ]);
 
     fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
     expect(screen.queryByTestId('dashboard-quick-action-menu')).toBeNull();
@@ -30,8 +34,23 @@ describe('Dashboard quick actions', () => {
     fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
     fireEvent.press(screen.getByTestId('dashboard-quick-action-add-transaction'));
 
-    expect(onAddTransaction).toHaveBeenCalledTimes(1);
+    expect(onAddTransaction).toHaveBeenCalledWith({ dashboardAccountIds: [] });
     expect(screen.queryByTestId('dashboard-quick-action-menu')).toBeNull();
+  });
+
+  it('passes the selected dashboard account context to Add Transaction', () => {
+    const onAddTransaction = jest.fn();
+    const accounts = [account('bank'), account('wallet')];
+    const screen = renderDashboard({
+      accountBalances: accounts.map((item) => ({ account: item, balanceMinor: 1000 })),
+      onAddTransaction,
+      snapshot: snapshot(accounts),
+    });
+
+    fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
+    fireEvent.press(screen.getByTestId('dashboard-quick-action-add-transaction'));
+
+    expect(onAddTransaction).toHaveBeenCalledWith({ dashboardAccountIds: ['bank', 'wallet'] });
   });
 
   it('opens Templates from the Use Template action and closes the menu', () => {
@@ -70,7 +89,7 @@ function renderDashboard(overrides: Partial<DashboardProps> = {}) {
 
 type DashboardProps = Parameters<typeof DashboardScreen>[0];
 
-function snapshot(): AppSnapshot {
+function snapshot(accounts: Account[] = []): AppSnapshot {
   const now = '2026-05-28T00:00:00.000Z';
   return {
     defaultCurrencyCode: 'AUD',
@@ -82,7 +101,7 @@ function snapshot(): AppSnapshot {
       dashboardSelectedAccountIds: null,
     },
     categories: [],
-    accounts: [],
+    accounts,
     transactions: [],
     transactionLines: [],
     transactionLinks: [],
@@ -108,5 +127,26 @@ function rainyDayProgress(): RainyDayProgress {
     currentMinor: 0,
     remainingMinor: 100000,
     percentage: 0,
+  };
+}
+
+function account(id: string): Account {
+  return {
+    id,
+    name: id,
+    nickname: '',
+    type: 'checking',
+    currencyCode: 'AUD',
+    openingBalanceMinor: 0,
+    notes: '',
+    institutionName: '',
+    includeInRainyDay: true,
+    themeColor: '#1876A8',
+    iconName: 'business-outline',
+    showOnDashboard: true,
+    sortOrder: 0,
+    isArchived: false,
+    createdAt: '',
+    updatedAt: '',
   };
 }

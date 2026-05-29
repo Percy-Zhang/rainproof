@@ -141,9 +141,12 @@ export function AddTransactionRouteScreen() {
     <DetailSafeArea>
       <ComposerScreenScaffold screenKey="addTransaction">
         <AddTransactionScreen
+          dashboardAccountIds={route.params?.dashboardAccountIds}
           initialTemplate={initialTemplate}
           snapshot={snapshot}
           onAddTransaction={actions.addTransaction}
+          onUpdateAddTransactionDefaults={(addTransactionDefaults) =>
+            actions.updateAddTransactionDefaults({ addTransactionDefaults })}
           onOpenCategorySelect={openCategorySelect}
           onDone={() => navigation.goBack()}
         />

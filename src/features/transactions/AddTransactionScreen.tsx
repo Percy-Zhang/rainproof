@@ -18,12 +18,15 @@ import { evaluateMoneyExpression } from '../../domain/calculator';
 import {
   defaultCategories,
   getCategory,
-  getDefaultCategoryForKind,
-  getDefaultSubcategoryId,
   getSubcategoryColor,
   getSubcategoryIcon,
   getSubcategoryName,
 } from '../../domain/categories';
+import {
+  getAddTransactionDefaultsAfterSave,
+  resolveAddTransactionDefaultAccountId,
+  resolveAddTransactionDefaultCategory,
+} from '../../domain/addTransactionDefaults';
 import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputValue } from '../../domain/dates';
 import { applyLabelSuggestion, getLabelAutocompleteOptions, parseLabelsInput } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
@@ -45,6 +48,7 @@ import { getTransactionItemNameSuggestionValues } from '../../domain/transaction
 import type { AddTransactionTemplatePrefill } from '../../domain/transactionTemplates';
 import type {
   AppSnapshot,
+  AddTransactionDefaults,
   NewTransactionInput,
   TransactionKind,
 } from '../../domain/types';
@@ -74,7 +78,9 @@ import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from '.
 type AddTransactionScreenProps = {
   snapshot: AppSnapshot;
   initialTemplate?: AddTransactionTemplatePrefill;
+  dashboardAccountIds?: string[];
   onAddTransaction: (input: NewTransactionInput) => Promise<void>;
+  onUpdateAddTransactionDefaults?: (defaults: AddTransactionDefaults) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
@@ -93,17 +99,30 @@ function createSplitLineId(): string {
 
 export function AddTransactionScreen({
   initialTemplate,
+  dashboardAccountIds,
   snapshot,
   onAddTransaction,
+  onUpdateAddTransactionDefaults,
   onOpenCategorySelect,
   onDone,
 }: AddTransactionScreenProps) {
   const now = new Date();
   const categories = snapshot.categories ?? defaultCategories;
   const initialKind = initialTemplate?.kind ?? 'expense';
-  const initialDefaultCategory = getDefaultCategoryForKind(initialKind, categories);
-  const initialCategoryId = initialTemplate?.categoryId ?? initialDefaultCategory.id;
-  const initialCategory = getCategory(initialCategoryId, categories);
+  const addTransactionDefaults = snapshot.settings.addTransactionDefaults;
+  const initialCategorySelection = resolveAddTransactionDefaultCategory({
+    categories,
+    defaults: addTransactionDefaults,
+    explicitCategoryId: initialTemplate?.categoryId,
+    explicitSubcategoryId: initialTemplate?.subcategoryId,
+    kind: initialKind,
+  });
+  const initialAccountId = resolveAddTransactionDefaultAccountId({
+    accounts: snapshot.accounts,
+    dashboardAccountIds,
+    explicitAccountId: initialTemplate?.accountId,
+    rememberedAccountId: addTransactionDefaults?.lastManualAccountId,
+  });
   const [page, setPage] = useState<Page>('amount');
   const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
   const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
@@ -113,10 +132,10 @@ export function AddTransactionScreen({
   const [replaceAmountOnNextKey, setReplaceAmountOnNextKey] = useState(false);
   const [date, setDate] = useState(initialTemplate?.date ?? toDateInputValue(now));
   const [time, setTime] = useState(initialTemplate?.time ?? toTimeInputValue(now));
-  const [fromAccountId, setFromAccountId] = useState(initialTemplate?.accountId ?? snapshot.accounts[0]?.id ?? '');
+  const [fromAccountId, setFromAccountId] = useState(initialAccountId);
   const [toAccountId, setToAccountId] = useState(snapshot.accounts[1]?.id ?? OUTSIDE_ACCOUNT_ID);
-  const [categoryId, setCategoryId] = useState(initialCategory.id);
-  const [subcategoryId, setSubcategoryId] = useState(initialTemplate?.subcategoryId ?? getDefaultSubcategoryId(initialCategory));
+  const [categoryId, setCategoryId] = useState(initialCategorySelection.categoryId);
+  const [subcategoryId, setSubcategoryId] = useState(initialCategorySelection.subcategoryId ?? '');
   const [notes, setNotes] = useState(initialTemplate?.notes ?? '');
   const [labels, setLabels] = useState('');
   const [groupId, setGroupId] = useState('');
@@ -198,7 +217,11 @@ export function AddTransactionScreen({
   }, [nativePickerMode, onDone, page, pickerMode]);
 
   function changeKind(nextKind: TransactionKind) {
-    const defaultCategory = getDefaultCategoryForKind(nextKind, categories);
+    const defaultCategorySelection = resolveAddTransactionDefaultCategory({
+      categories,
+      defaults: addTransactionDefaults,
+      kind: nextKind,
+    });
     setKind(nextKind);
     if (nextKind === 'transfer' || nextKind !== kind) {
       setSplitLines([]);
@@ -207,10 +230,14 @@ export function AddTransactionScreen({
       }
     }
     if (nextKind !== 'transfer' && isOutsideAccountId(fromAccountId)) {
-      setFromAccountId(snapshot.accounts[0]?.id ?? '');
+      setFromAccountId(resolveAddTransactionDefaultAccountId({
+        accounts: snapshot.accounts,
+        dashboardAccountIds,
+        rememberedAccountId: addTransactionDefaults?.lastManualAccountId,
+      }));
     }
-    setCategoryId(nextKind === 'transfer' ? '' : defaultCategory.id);
-    setSubcategoryId(nextKind === 'transfer' ? '' : getDefaultSubcategoryId(defaultCategory));
+    setCategoryId(defaultCategorySelection.categoryId);
+    setSubcategoryId(defaultCategorySelection.subcategoryId ?? '');
     setError('');
   }
 
@@ -277,7 +304,7 @@ export function AddTransactionScreen({
       const datetime = parseDateTimeInput(date, time);
       const cleanLabels = parseLabelsInput(labels);
 
-      await onAddTransaction({
+      const input: NewTransactionInput = {
         kind,
         title: item,
         datetime,
@@ -285,7 +312,20 @@ export function AddTransactionScreen({
         labels: cleanLabels,
         groupId,
         lines: buildLines(),
-      });
+      };
+
+      await onAddTransaction(input);
+
+      if (onUpdateAddTransactionDefaults) {
+        await onUpdateAddTransactionDefaults(
+          getAddTransactionDefaultsAfterSave({
+            accounts: snapshot.accounts,
+            categories,
+            currentDefaults: addTransactionDefaults,
+            input,
+          }),
+        );
+      }
 
       onDone();
     } catch (caught) {

@@ -49,7 +49,7 @@ export type RootStackParamList = {
   MainDrawer: NavigatorScreenParams<MainDrawerParamList> | undefined;
   AddAccount: undefined;
   EditAccount: { accountId: string };
-  AddTransaction: { templateId?: string } | undefined;
+  AddTransaction: { templateId?: string; dashboardAccountIds?: string[] } | undefined;
   EditTransaction: { transactionId: string };
   LinkTransaction: { transactionId: string };
   StatsDrilldown: {
