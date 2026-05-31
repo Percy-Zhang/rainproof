@@ -2,7 +2,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { DrawerNavigationProp } from '@react-navigation/drawer';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
-import { useLayoutEffect, useState } from 'react';
+import { useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   ScrollView,
@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { FormError } from '../components/ui';
+import { getDashboardDefaultSelectedAccountIds } from '../domain/dashboard';
 import { AccountsScreen } from '../features/accounts/AccountsScreen';
 import { BudgetsScreen } from '../features/budgets/BudgetsScreen';
 import { DashboardScreen } from '../features/dashboard/DashboardScreen';
@@ -82,6 +83,17 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
     createDefaultTransactionPeriodState,
   );
   const { snapshot, derived, actions, loading, error } = useRainproofDataContext();
+  const defaultDashboardSelectedAccountIds = useMemo(
+    () =>
+      snapshot
+        ? getDashboardDefaultSelectedAccountIds({
+            accountBalances: derived.accountBalances,
+            fallbackAccounts: snapshot.accounts,
+            storedSelectedAccountIds: snapshot.settings.dashboardSelectedAccountIds,
+          })
+        : [],
+    [derived.accountBalances, snapshot],
+  );
   const shouldHideDrawerHeader = loading || !snapshot || !derived.rainyDayProgress;
 
   useLayoutEffect(() => {
@@ -137,14 +149,18 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
         />
       ) : rootScreen === 'stats' ? (
         <StatsScreen
+          accountBalances={derived.accountBalances}
           snapshot={snapshot}
+          defaultSelectedAccountIds={defaultDashboardSelectedAccountIds}
           onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
           onOpenStatsDrilldown={(params) => rootNavigation?.navigate('StatsDrilldown', params)}
           showHeader={false}
         />
       ) : rootScreen === 'transactions' ? (
         <TransactionsScreen
+          accountBalances={derived.accountBalances}
           snapshot={snapshot}
+          defaultSelectedAccountIds={defaultDashboardSelectedAccountIds}
           periodState={transactionPeriodState}
           onPeriodStateChange={setTransactionPeriodState}
           onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}

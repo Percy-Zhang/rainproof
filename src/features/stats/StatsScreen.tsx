@@ -1,8 +1,9 @@
-import { ScrollView, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { SectionHeader } from '../../components/ui';
-import type { AppSnapshot } from '../../domain/types';
+import { CompactAccountSelector } from '../../components/CompactAccountSelector';
+import { Chip, SectionHeader } from '../../components/ui';
+import type { AccountBalance, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
 import { StatsBottomControls } from './StatsBottomControls';
 import { StatsCategoryColorsCard } from './StatsCategoryColorsCard';
@@ -20,14 +21,18 @@ import {
 import { useStatsViewModel } from './useStatsViewModel';
 
 type StatsScreenProps = {
+  accountBalances: AccountBalance[];
   snapshot: AppSnapshot;
+  defaultSelectedAccountIds?: string[];
   onOpenTransaction?: (transactionId: string) => void;
   onOpenStatsDrilldown?: (params: RootStackParamList['StatsDrilldown']) => void;
   showHeader?: boolean;
 };
 
 export function StatsScreen({
+  accountBalances,
   snapshot,
+  defaultSelectedAccountIds,
   onOpenTransaction,
   onOpenStatsDrilldown,
   showHeader = true,
@@ -35,24 +40,44 @@ export function StatsScreen({
   const insets = useSafeAreaInsets();
   const viewModel = useStatsViewModel({
     bottomInset: insets.bottom,
+    defaultSelectedAccountIds,
     onOpenStatsDrilldown,
     snapshot,
   });
 
   return (
     <View style={styles.screen}>
+      <View style={styles.fixedFilter}>
+        {showHeader ? (
+          <SectionHeader
+            title="Statistics"
+            detail="Review spending and cash flow by period and account."
+          />
+        ) : null}
+
+        <CompactAccountSelector
+          accounts={viewModel.selectableAccounts}
+          accountBalances={accountBalances}
+          selectedAccountIds={viewModel.selectedAccountIds}
+          title="Accounts"
+          onClearSelection={viewModel.clearSelectedAccounts}
+          onSelectAll={viewModel.selectAllAccounts}
+          onToggleAccount={viewModel.toggleAccount}
+          testID="stats-account-selector"
+        />
+
+        <StatsCurrencyScopeBar
+          availableCurrencyCodes={viewModel.availableCurrencyCodes}
+          currencyCode={viewModel.currencyCode}
+          onSelectCurrencyScope={viewModel.selectCurrencyScope}
+        />
+      </View>
+
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: viewModel.bottomPadding }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {showHeader ? (
-          <SectionHeader
-            title="Statistics"
-            detail="Shared period, currency, and account filters for spending and cash flow."
-          />
-        ) : null}
-
         <CashFlowCard cashFlow={viewModel.cashFlow} currencyCode={viewModel.currencyCode} />
         <MonthlyAveragesCard
           currencyCode={viewModel.currencyCode}
@@ -84,23 +109,47 @@ export function StatsScreen({
       </ScrollView>
 
       <StatsBottomControls
-        accountsForCurrency={viewModel.accountsForCurrency}
-        currencies={viewModel.currencies}
-        currencyCode={viewModel.currencyCode}
         customEndDate={viewModel.customEndDate}
         customStartDate={viewModel.customStartDate}
         datePickerTarget={viewModel.datePickerTarget}
-        effectiveAccountId={viewModel.effectiveAccountId}
-        onChangeCurrency={viewModel.changeCurrency}
         onCloseDatePicker={() => viewModel.setDatePickerTarget(null)}
         onDatePickerChange={viewModel.handleDatePickerChange}
         onOpenDatePicker={viewModel.setDatePickerTarget}
-        onSelectAccount={viewModel.setAccountId}
         onSelectPeriodOption={viewModel.selectPeriodOption}
         rangeMode={viewModel.rangeMode}
         selectedPeriodOption={viewModel.selectedPeriodOption}
-        showCurrencyCodes={viewModel.showCurrencyCodes}
       />
+    </View>
+  );
+}
+
+function StatsCurrencyScopeBar({
+  availableCurrencyCodes,
+  currencyCode,
+  onSelectCurrencyScope,
+}: {
+  availableCurrencyCodes: string[];
+  currencyCode: string;
+  onSelectCurrencyScope: (currencyCode: string) => void;
+}) {
+  if (availableCurrencyCodes.length <= 1) {
+    return null;
+  }
+
+  return (
+    <View style={styles.currencyScopeBar} testID="stats-currency-scope-card">
+      <Text style={styles.currencyScopeLabel}>Currency</Text>
+      <View style={styles.wrap}>
+        {availableCurrencyCodes.map((availableCurrencyCode) => (
+          <Chip
+            key={availableCurrencyCode}
+            selected={currencyCode === availableCurrencyCode}
+            onPress={() => onSelectCurrencyScope(availableCurrencyCode)}
+          >
+            {availableCurrencyCode}
+          </Chip>
+        ))}
+      </View>
     </View>
   );
 }

@@ -1,5 +1,5 @@
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
 import {
@@ -7,6 +7,7 @@ import {
   getBalanceAfterDisplayEntries,
   getTransactionDisplayEntries,
 } from '../../domain/aggregates';
+import { getInitialSelectedAccountIds, getSelectableAccounts, getSelectableAccountIds } from '../../domain/accountSelection';
 import { defaultCategories } from '../../domain/categories';
 import { getDateRangeForPreset, getInclusiveDateRange, isWithinDateRange, toDateInputValue } from '../../domain/dates';
 import {
@@ -39,22 +40,29 @@ export function createDefaultTransactionPeriodState(): TransactionPeriodState {
 
 export function useTransactionsViewModel({
   bottomInset,
+  defaultSelectedAccountIds,
   onPeriodStateChange,
   periodState,
   snapshot,
 }: {
   bottomInset: number;
+  defaultSelectedAccountIds?: string[];
   onPeriodStateChange: (periodState: TransactionPeriodState) => void;
   periodState: TransactionPeriodState;
   snapshot: AppSnapshot;
 }) {
   const [datePickerTarget, setDatePickerTarget] = useState<TransactionDatePickerTarget | null>(null);
-  const [selectedAccountIds, setSelectedAccountIds] = useState(() => snapshot.accounts.map((account) => account.id));
+  const initialSelectedAccountIds = useMemo(
+    () => getTransactionsInitialSelectedAccountIds(snapshot.accounts, defaultSelectedAccountIds),
+    [defaultSelectedAccountIds, snapshot.accounts],
+  );
+  const selectableAccounts = useMemo(() => getSelectableAccounts(snapshot.accounts), [snapshot.accounts]);
+  const [selectedAccountIds, setSelectedAccountIds] = useState(initialSelectedAccountIds);
+  const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const { customEndDate, customStartDate, preset, rangeMode } = periodState;
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
-  const allAccountsSelected = selectedAccountIds.length === snapshot.accounts.length;
   const range = useMemo(
     () =>
       rangeMode === 'custom'
@@ -96,18 +104,35 @@ export function useTransactionsViewModel({
     snapshot.transactions,
   ]);
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
-  const bottomPadding = (rangeMode === 'custom' ? 280 : 220) + bottomInset;
+  const bottomPadding = (rangeMode === 'custom' ? 220 : 140) + bottomInset;
   const emptyMessage = selectedAccountIds.length
     ? searchQuery.trim()
       ? 'No transactions match this search.'
       : 'No transactions in this period.'
     : 'No accounts selected.';
 
-  function toggleAllAccounts() {
-    setSelectedAccountIds(allAccountsSelected ? [] : snapshot.accounts.map((account) => account.id));
+  useEffect(() => {
+    if (hasLocalAccountOverride) {
+      return;
+    }
+
+    setSelectedAccountIds((currentIds) =>
+      areAccountIdListsEqual(currentIds, initialSelectedAccountIds) ? currentIds : initialSelectedAccountIds,
+    );
+  }, [hasLocalAccountOverride, initialSelectedAccountIds]);
+
+  function selectAllAccounts() {
+    setHasLocalAccountOverride(true);
+    setSelectedAccountIds(getSelectableAccountIds(snapshot.accounts));
+  }
+
+  function clearSelectedAccounts() {
+    setHasLocalAccountOverride(true);
+    setSelectedAccountIds([]);
   }
 
   function toggleAccount(accountId: string) {
+    setHasLocalAccountOverride(true);
     setSelectedAccountIds((currentIds) =>
       currentIds.includes(accountId)
         ? currentIds.filter((id) => id !== accountId)
@@ -153,7 +178,6 @@ export function useTransactionsViewModel({
   }
 
   return {
-    allAccountsSelected,
     balanceAfterByEntryId,
     bottomPadding,
     categories,
@@ -167,11 +191,24 @@ export function useTransactionsViewModel({
     searchQuery,
     selectedAccountIds,
     selectedPeriodOption,
+    selectableAccounts,
     setDatePickerTarget,
     setSearchQuery,
     showCurrencyCodes,
     toggleAccount,
-    toggleAllAccounts,
+    selectAllAccounts,
+    clearSelectedAccounts,
     selectPeriodOption,
   };
+}
+
+export function getTransactionsInitialSelectedAccountIds(
+  accounts: AppSnapshot['accounts'],
+  defaultSelectedAccountIds?: string[],
+): string[] {
+  return getInitialSelectedAccountIds(accounts, defaultSelectedAccountIds);
+}
+
+function areAccountIdListsEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((accountId, index) => accountId === right[index]);
 }

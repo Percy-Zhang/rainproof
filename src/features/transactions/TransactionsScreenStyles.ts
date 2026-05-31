@@ -8,13 +8,22 @@ export const transactionsScreenStyles = StyleSheet.create({
   screen: {
     flex: 1,
   },
+  fixedFilter: {
+    backgroundColor: colors.background,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    zIndex: 5,
+  },
   scrollContent: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
-  controlBlock: {
-    gap: spacing.xs,
+  searchCard: {
+    gap: 0,
+    padding: spacing.sm,
   },
   label: {
     color: colors.muted,

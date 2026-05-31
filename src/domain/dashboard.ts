@@ -2,7 +2,7 @@ import {
   compareTransactionDisplayEntriesDescending,
   type TransactionDisplayEntry,
 } from './aggregates';
-import type { AccountBalance, AppSnapshot, CurrencyCode, Transaction, TransactionLine } from './types';
+import type { Account, AccountBalance, AppSnapshot, CurrencyCode, Transaction, TransactionLine } from './types';
 
 export const dashboardRecentTransactionLimit = 5;
 
@@ -26,6 +26,33 @@ export function getDashboardSelectedAccountIds(
 
   const previewIds = new Set(previewAccountIds);
   return storedSelectedAccountIds.filter((accountId) => previewIds.has(accountId));
+}
+
+export function getDashboardDefaultSelectedAccountIds({
+  accountBalances,
+  fallbackAccounts,
+  storedSelectedAccountIds,
+}: {
+  accountBalances: AccountBalance[];
+  fallbackAccounts?: Account[];
+  storedSelectedAccountIds: string[] | null;
+}): string[] {
+  const previewAccountIds = getDashboardInitialSelectedAccountIds(accountBalances);
+
+  if (storedSelectedAccountIds === null) {
+    return previewAccountIds.length ? previewAccountIds : getFallbackActiveAccountIds(accountBalances, fallbackAccounts);
+  }
+
+  if (storedSelectedAccountIds.length === 0) {
+    return [];
+  }
+
+  const selectedAccountIds = getDashboardSelectedAccountIds(accountBalances, storedSelectedAccountIds);
+  if (selectedAccountIds.length) {
+    return selectedAccountIds;
+  }
+
+  return previewAccountIds.length ? previewAccountIds : getFallbackActiveAccountIds(accountBalances, fallbackAccounts);
 }
 
 export function toggleDashboardAccountSelection(
@@ -136,4 +163,9 @@ function sumLinesByCurrency(lines: TransactionLine[], currencyCode: CurrencyCode
   return lines
     .filter((line) => line.currencyCode === currencyCode)
     .reduce((sum, line) => sum + line.amountMinor, 0);
+}
+
+function getFallbackActiveAccountIds(accountBalances: AccountBalance[], fallbackAccounts?: Account[]): string[] {
+  const accounts = fallbackAccounts ?? accountBalances.map(({ account }) => account);
+  return accounts.filter((account) => !account.isArchived).map((account) => account.id);
 }

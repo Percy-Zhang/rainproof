@@ -6,6 +6,14 @@ export const statsStyles = StyleSheet.create({
   screen: {
     flex: 1,
   },
+  fixedFilter: {
+    backgroundColor: colors.background,
+    gap: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.sm,
+    zIndex: 5,
+  },
   scrollContent: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
@@ -24,6 +32,23 @@ export const statsStyles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  currencyScopeBar: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    padding: spacing.sm,
+  },
+  currencyScopeLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '900',
+    textTransform: 'uppercase',
   },
   customRangeRow: {
     alignItems: 'stretch',

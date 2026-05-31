@@ -1,9 +1,7 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Platform, Pressable, Text, View } from 'react-native';
 
-import { AccountFilterCarousel } from '../../components/AccountFilterCarousel';
 import { BottomSelectorPanel } from '../../components/BottomSelectorPanel';
-import type { Account } from '../../domain/types';
 import { PeriodCarousel, type PeriodCarouselOption } from './PeriodCarousel';
 import {
   transactionsScreenStyles as styles,
@@ -11,50 +9,26 @@ import {
 import type { TransactionDatePickerTarget, TransactionPeriodState } from './useTransactionsViewModel';
 
 export function TransactionsBottomControls({
-  accounts,
-  allAccountsSelected,
   datePickerTarget,
   onCloseDatePicker,
   onDatePickerChange,
   onOpenDatePicker,
-  onPressAccount,
-  onPressAll,
   onSelectPeriodOption,
   periodState,
-  selectedAccountIds,
   selectedPeriodOption,
-  showCurrencyCodes,
 }: {
-  accounts: Account[];
-  allAccountsSelected: boolean;
   datePickerTarget: TransactionDatePickerTarget | null;
   onCloseDatePicker: () => void;
   onDatePickerChange: (event: DateTimePickerEvent, selectedDate?: Date) => void;
   onOpenDatePicker: (target: TransactionDatePickerTarget) => void;
-  onPressAccount: (accountId: string) => void;
-  onPressAll: () => void;
   onSelectPeriodOption: (option: PeriodCarouselOption) => void;
   periodState: TransactionPeriodState;
-  selectedAccountIds: string[];
   selectedPeriodOption: PeriodCarouselOption;
-  showCurrencyCodes: boolean;
 }) {
   const { customEndDate, customStartDate, rangeMode } = periodState;
 
   return (
     <BottomSelectorPanel testID="transactions-bottom-controls">
-      <View style={styles.controlBlock}>
-        <Text style={styles.label}>Accounts</Text>
-        <AccountFilterCarousel
-          accounts={accounts}
-          allSelected={allAccountsSelected}
-          selectedAccountIds={selectedAccountIds}
-          showCurrencyCodes={showCurrencyCodes}
-          onPressAccount={onPressAccount}
-          onPressAll={onPressAll}
-        />
-      </View>
-
       {rangeMode === 'custom' ? (
         <View style={styles.customRangeRow}>
           <DateSelector label="From" value={customStartDate} onPress={() => onOpenDatePicker('start')} />

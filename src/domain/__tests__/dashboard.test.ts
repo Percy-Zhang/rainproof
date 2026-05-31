@@ -1,5 +1,6 @@
 import {
   getDashboardAccountPreview,
+  getDashboardDefaultSelectedAccountIds,
   getDashboardInitialSelectedAccountIds,
   getDashboardRecentTransactions,
   getDashboardSelectedAccountIds,
@@ -157,6 +158,58 @@ describe('dashboard helpers', () => {
     ];
 
     expect(getDashboardSelectedAccountIds(balances, ['a1', 'hidden', 'archived'])).toEqual(['a1']);
+  });
+
+  it('resolves null dashboard selection to all visible dashboard accounts for screen defaults', () => {
+    const hiddenBalance = accountBalance('hidden', 1);
+    hiddenBalance.account.showOnDashboard = false;
+    const balances = [
+      accountBalance('a1', 0),
+      hiddenBalance,
+      accountBalance('a2', 2),
+    ];
+
+    expect(getDashboardDefaultSelectedAccountIds({
+      accountBalances: balances,
+      storedSelectedAccountIds: null,
+    })).toEqual(['a1', 'a2']);
+  });
+
+  it('does not include dashboard-hidden accounts in stored screen defaults when visible accounts exist', () => {
+    const hiddenBalance = accountBalance('hidden', 1);
+    hiddenBalance.account.showOnDashboard = false;
+    const balances = [
+      accountBalance('a1', 0),
+      hiddenBalance,
+      accountBalance('a2', 2),
+    ];
+
+    expect(getDashboardDefaultSelectedAccountIds({
+      accountBalances: balances,
+      storedSelectedAccountIds: ['hidden'],
+    })).toEqual(['a1', 'a2']);
+  });
+
+  it('keeps an explicitly empty dashboard selection empty for screen defaults', () => {
+    const balances = [accountBalance('a1', 0), accountBalance('a2', 1)];
+
+    expect(getDashboardDefaultSelectedAccountIds({
+      accountBalances: balances,
+      storedSelectedAccountIds: [],
+    })).toEqual([]);
+  });
+
+  it('falls back to active accounts when no dashboard default is available', () => {
+    const hiddenBalance = accountBalance('hidden', 1);
+    hiddenBalance.account.showOnDashboard = false;
+    const archived = account('archived', 2);
+    archived.isArchived = true;
+
+    expect(getDashboardDefaultSelectedAccountIds({
+      accountBalances: [hiddenBalance],
+      fallbackAccounts: [hiddenBalance.account, archived],
+      storedSelectedAccountIds: null,
+    })).toEqual(['hidden']);
   });
 
   it('filters recent transactions by selected accounts', () => {

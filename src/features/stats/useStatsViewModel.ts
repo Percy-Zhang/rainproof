@@ -3,9 +3,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
 import { getCashFlowSummary } from '../../domain/aggregates';
+import { getSelectableAccounts, getSelectableAccountIds } from '../../domain/accountSelection';
 import { defaultCategories } from '../../domain/categories';
-import { getCurrenciesInUse, getEffectiveDisplayCurrency } from '../../domain/currency';
+import { getEffectiveDisplayCurrency } from '../../domain/currency';
 import { getDateRangeForPreset, getInclusiveDateRange, toDateInputValue } from '../../domain/dates';
+import {
+  getStatsInitialSelectedAccountIds,
+  getStatsSelectedAccountIdsForCurrency,
+  getStatsSelectedCurrencyCodes,
+  resolveStatsCurrencyScope,
+} from '../../domain/statsAccountSelection';
 import { getStatsDonutViewModel, type StatsDonutMode } from '../../domain/statsChart';
 import { getStatsReport } from '../../domain/statsReports';
 import {
@@ -21,10 +28,12 @@ export type StatsDatePickerTarget = 'start' | 'end';
 
 export function useStatsViewModel({
   bottomInset,
+  defaultSelectedAccountIds,
   onOpenStatsDrilldown,
   snapshot,
 }: {
   bottomInset: number;
+  defaultSelectedAccountIds?: string[];
   onOpenStatsDrilldown?: (params: RootStackParamList['StatsDrilldown']) => void;
   snapshot: AppSnapshot;
 }) {
@@ -44,49 +53,65 @@ export function useStatsViewModel({
       }),
     [snapshot.accounts, snapshot.defaultCurrencyCode, snapshot.settings.defaultCurrencyMode],
   );
-  const [currencyCode, setCurrencyCode] = useState(effectiveDisplayCurrency);
-  const [accountId, setAccountId] = useState('all');
+  const initialSelectedAccountIds = useMemo(
+    () => getStatsInitialSelectedAccountIds(snapshot.accounts, defaultSelectedAccountIds),
+    [defaultSelectedAccountIds, snapshot.accounts],
+  );
+  const selectableAccounts = useMemo(() => getSelectableAccounts(snapshot.accounts), [snapshot.accounts]);
+  const [selectedAccountIds, setSelectedAccountIds] = useState(initialSelectedAccountIds);
+  const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
+  const [requestedCurrencyCode, setRequestedCurrencyCode] = useState(effectiveDisplayCurrency);
   const [spendingDonutMode, setSpendingDonutMode] = useState<StatsDonutMode>('category');
   const [selectedSpendingCategoryRollupId, setSelectedSpendingCategoryRollupId] = useState('');
   const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState('');
-  const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
 
-  const currencies = useMemo(
+  useEffect(() => {
+    if (hasLocalAccountOverride) {
+      return;
+    }
+
+    setSelectedAccountIds((currentIds) =>
+      areAccountIdListsEqual(currentIds, initialSelectedAccountIds) ? currentIds : initialSelectedAccountIds,
+    );
+  }, [hasLocalAccountOverride, initialSelectedAccountIds]);
+
+  const availableCurrencyCodes = useMemo(
+    () => getStatsSelectedCurrencyCodes(snapshot.accounts, selectedAccountIds),
+    [selectedAccountIds, snapshot.accounts],
+  );
+  const currencyCode = useMemo(
     () =>
-      getCurrenciesInUse([
-        effectiveDisplayCurrency,
-        ...snapshot.accounts.map((account) => account.currencyCode),
-        ...snapshot.budgets.map((budget) => budget.currencyCode),
-      ]),
-    [effectiveDisplayCurrency, snapshot.accounts, snapshot.budgets],
+      resolveStatsCurrencyScope({
+        fallbackCurrencyCode: effectiveDisplayCurrency,
+        requestedCurrencyCode,
+        selectedCurrencyCodes: availableCurrencyCodes,
+      }),
+    [availableCurrencyCodes, effectiveDisplayCurrency, requestedCurrencyCode],
   );
 
   useEffect(() => {
-    const canKeepCurrency =
-      currencies.includes(currencyCode) && (showCurrencyCodes || currencyCode === effectiveDisplayCurrency);
-    if (!canKeepCurrency) {
-      setCurrencyCode(effectiveDisplayCurrency);
-      setAccountId('all');
+    if (requestedCurrencyCode !== currencyCode) {
+      setRequestedCurrencyCode(currencyCode);
     }
-  }, [currencies, currencyCode, effectiveDisplayCurrency, showCurrencyCodes]);
+  }, [currencyCode, requestedCurrencyCode]);
 
-  const accountsForCurrency = useMemo(
-    () => snapshot.accounts.filter((account) => account.currencyCode === currencyCode),
-    [currencyCode, snapshot.accounts],
+  const accountIds = useMemo(
+    () =>
+      getStatsSelectedAccountIdsForCurrency({
+        accounts: snapshot.accounts,
+        currencyCode,
+        selectedAccountIds,
+      }),
+    [currencyCode, selectedAccountIds, snapshot.accounts],
   );
-  const effectiveAccountId = accountsForCurrency.some((account) => account.id === accountId) ? accountId : 'all';
   const range = useMemo(
     () =>
       rangeMode === 'custom'
         ? getInclusiveDateRange(customStartDate, customEndDate)
         : getDateRangeForPreset(preset),
     [customEndDate, customStartDate, preset, rangeMode],
-  );
-  const accountIds = useMemo(
-    () => (effectiveAccountId === 'all' ? undefined : [effectiveAccountId]),
-    [effectiveAccountId],
   );
   const spendingReport = useMemo(() => getStatsReport({
     reportKind: 'expense',
@@ -152,14 +177,25 @@ export function useStatsViewModel({
     rollupId: selectedSpendingRollup?.id,
     range,
   }), [range, selectedSpendingRollup?.id, spendingDonutMode, spendingReport]);
-  const cashFlow = useMemo(() => getCashFlowSummary({
-    transactions: snapshot.transactions,
-    lines: snapshot.transactionLines,
-    transactionLinks: snapshot.transactionLinks,
-    range,
-    currencyCode,
-    accountIds,
-  }), [
+  const cashFlow = useMemo(() => {
+    if (!accountIds.length) {
+      return {
+        currencyCode,
+        incomeMinor: 0,
+        expenseMinor: 0,
+        netMinor: 0,
+      };
+    }
+
+    return getCashFlowSummary({
+      transactions: snapshot.transactions,
+      lines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
+      range,
+      currencyCode,
+      accountIds,
+    });
+  }, [
     accountIds,
     currencyCode,
     range,
@@ -167,7 +203,7 @@ export function useStatsViewModel({
     snapshot.transactionLinks,
     snapshot.transactions,
   ]);
-  const bottomPadding = (showCurrencyCodes ? 330 : rangeMode === 'custom' ? 280 : 230) + bottomInset;
+  const bottomPadding = (rangeMode === 'custom' ? 220 : 140) + bottomInset;
 
   function selectPeriodOption(option: PeriodCarouselOption) {
     if (option === 'custom') {
@@ -176,11 +212,6 @@ export function useStatsViewModel({
       setPreset(option);
       setRangeMode('preset');
     }
-  }
-
-  function changeCurrency(nextCurrencyCode: string) {
-    setCurrencyCode(nextCurrencyCode);
-    setAccountId('all');
   }
 
   function selectSpendingRollup(rollupId: string) {
@@ -218,7 +249,7 @@ export function useStatsViewModel({
       subcategoryId: spendingDonutMode === 'subcategory' ? selectedSpendingRollup.subcategoryId : undefined,
       startIso: range.startIso,
       endIso: range.endIso,
-      accountIds,
+      accountIds: accountIds.length ? accountIds : [],
       currencyCode,
       initialSort: 'date_newest',
     });
@@ -246,19 +277,36 @@ export function useStatsViewModel({
     }
   }
 
+  function selectAllAccounts() {
+    setHasLocalAccountOverride(true);
+    setSelectedAccountIds(getSelectableAccountIds(snapshot.accounts));
+  }
+
+  function clearSelectedAccounts() {
+    setHasLocalAccountOverride(true);
+    setSelectedAccountIds([]);
+  }
+
+  function toggleAccount(accountId: string) {
+    setHasLocalAccountOverride(true);
+    setSelectedAccountIds((currentIds) =>
+      currentIds.includes(accountId)
+        ? currentIds.filter((id) => id !== accountId)
+        : [...currentIds, accountId],
+    );
+  }
+
   return {
     accountIds,
-    accountsForCurrency,
+    availableCurrencyCodes,
     bottomPadding,
     cashFlow,
     categories,
-    changeCurrency,
-    currencies,
+    clearSelectedAccounts,
     currencyCode,
     customEndDate,
     customStartDate,
     datePickerTarget,
-    effectiveAccountId,
     handleDatePickerChange,
     monthlyTrendSummary,
     openSpendingDetailedView,
@@ -266,14 +314,21 @@ export function useStatsViewModel({
     rangeMode,
     returnToSpendingCategories,
     selectedPeriodOption,
+    selectedAccountIds,
     selectedSpendingRollup,
     selectedSpendingTrend,
+    selectableAccounts,
+    selectAllAccounts,
+    selectCurrencyScope: setRequestedCurrencyCode,
     selectPeriodOption,
     selectSpendingRollup,
-    setAccountId,
     setDatePickerTarget,
-    showCurrencyCodes,
     spendingDonut,
     spendingDonutMode,
+    toggleAccount,
   };
+}
+
+function areAccountIdListsEqual(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((accountId, index) => accountId === right[index]);
 }

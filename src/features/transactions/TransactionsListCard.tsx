@@ -1,4 +1,4 @@
-import { Text, TextInput, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { Card } from '../../components/ui';
 import {
@@ -7,10 +7,7 @@ import {
   type TransactionDisplayGroup,
 } from '../../domain/transactionList';
 import type { Account, CategoryDefinition } from '../../domain/types';
-import {
-  transactionSearchPlaceholderColor,
-  transactionsScreenStyles as styles,
-} from './TransactionsScreenStyles';
+import { transactionsScreenStyles as styles } from './TransactionsScreenStyles';
 import { TransactionListItem } from './TransactionListItems';
 
 export function TransactionsListCard({
@@ -21,8 +18,6 @@ export function TransactionsListCard({
   emptyMessage,
   groups,
   onOpenTransaction,
-  onSearchQueryChange,
-  searchQuery,
   showCurrencyCodes,
 }: {
   accounts: Account[];
@@ -32,25 +27,11 @@ export function TransactionsListCard({
   emptyMessage: string;
   groups: TransactionDisplayGroup[];
   onOpenTransaction: (transactionId: string) => void;
-  onSearchQueryChange: (query: string) => void;
-  searchQuery: string;
   showCurrencyCodes: boolean;
 }) {
   return (
     <Card testID="transaction-list-card">
       <Text style={styles.cardTitle}>Transactions</Text>
-      <TextInput
-        accessibilityLabel="Search transactions"
-        autoCapitalize="none"
-        autoCorrect={false}
-        clearButtonMode="while-editing"
-        onChangeText={onSearchQueryChange}
-        placeholder="Search item, split line, category, account"
-        placeholderTextColor={transactionSearchPlaceholderColor}
-        returnKeyType="search"
-        style={styles.searchInput}
-        value={searchQuery}
-      />
 
       {groups.length ? (
         <View style={styles.groups}>
