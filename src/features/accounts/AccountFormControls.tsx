@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, TextInput, View } from 'react-native';
 
+import { FormSection } from '../../components/FormLayout';
 import { accountThemeColors, getTransparentColor } from '../../domain/accountThemes';
 import { colors, spacing, typography } from '../../theme/tokens';
 
@@ -22,8 +23,7 @@ export function AccountField({
   multiline?: boolean;
 }) {
   return (
-    <View style={styles.field}>
-      <Text style={styles.label}>{label}</Text>
+    <FormSection label={label}>
       <TextInput
         keyboardType={keyboardType}
         multiline={multiline}
@@ -33,7 +33,7 @@ export function AccountField({
         style={[styles.input, multiline && styles.multilineInput]}
         value={value}
       />
-    </View>
+    </FormSection>
   );
 }
 
@@ -77,8 +77,7 @@ export function AccountColorPicker({
   onChange: (color: string) => void;
 }) {
   return (
-    <View style={styles.colorPicker}>
-      <Text style={styles.label}>Account color</Text>
+    <FormSection label="Account color">
       <View style={styles.colorSwatches}>
         {accountThemeColors.map((color) => (
           <Pressable
@@ -95,20 +94,11 @@ export function AccountColorPicker({
           </Pressable>
         ))}
       </View>
-    </View>
+    </FormSection>
   );
 }
 
 const styles = StyleSheet.create({
-  field: {
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
   input: {
     backgroundColor: colors.surface,
     borderColor: colors.faint,
@@ -137,9 +127,6 @@ const styles = StyleSheet.create({
   iconToggleSelected: {
     backgroundColor: colors.surfaceMuted,
     borderColor: colors.primary,
-  },
-  colorPicker: {
-    gap: spacing.xs,
   },
   colorSwatches: {
     flexDirection: 'row',

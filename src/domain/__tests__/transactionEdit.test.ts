@@ -1,10 +1,14 @@
 import {
   buildTransactionUpdateInput,
+  canBuildTransactionUpdateInput,
   createTransactionEditDraft,
   formatEditDateLabel,
+  getEditableTransactionEditSplitLines,
+  getTransactionEditDraftTotalMinor,
+  getTransactionEditLinkSavePlan,
   OUTSIDE_ACCOUNT_ID,
 } from '../transactionEdit';
-import type { Account, AppSnapshot, Transaction, TransactionLine } from '../types';
+import type { Account, AppSnapshot, Transaction, TransactionLine, TransactionLink } from '../types';
 
 const accounts: Account[] = [
   account('a1', 'Everyday', 'AUD'),
@@ -60,6 +64,22 @@ function line(overrides: Partial<TransactionLine>): TransactionLine {
     transferPeerAccountId: '',
     note: '',
     createdAt: '',
+    ...overrides,
+  };
+}
+
+function link(overrides: Partial<TransactionLink>): TransactionLink {
+  return {
+    id: 'link-1',
+    sourceTransactionId: 'tx-1',
+    targetTransactionId: 'expense-1',
+    sourceLineId: null,
+    targetLineId: null,
+    linkType: 'reimbursement',
+    amountMinor: 1200,
+    currencyCode: 'AUD',
+    createdAt: '',
+    updatedAt: '',
     ...overrides,
   };
 }
@@ -174,6 +194,7 @@ describe('transaction edit helpers', () => {
     expect(() => buildTransactionUpdateInput({ ...draft, amount: '45.99' }, accounts)).toThrow(
       'Split line amounts must equal the transaction total.',
     );
+    expect(canBuildTransactionUpdateInput({ ...draft, amount: '45.99' }, accounts)).toBe(false);
   });
 
   it('collapses a split expense draft with one remaining line back to a normal expense', () => {
@@ -423,5 +444,83 @@ describe('transaction edit helpers', () => {
 
   it('formats edit dates with month names', () => {
     expect(formatEditDateLabel('2026-05-26')).toBe('May 26, 2026');
+  });
+
+  it('creates editable split lines and totals from a normal transaction draft', () => {
+    const draft = createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1');
+
+    expect(getTransactionEditDraftTotalMinor(draft)).toBe(1200);
+    expect(getEditableTransactionEditSplitLines(draft)).toEqual([
+      expect.objectContaining({
+        id: 'line-1',
+        amount: '12.00',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      }),
+      expect.objectContaining({
+        id: 'tx-1-split-2',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      }),
+    ]);
+  });
+
+  it('plans source transaction link update after editing an income transaction', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [line({ amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' })]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({ ...draft, amount: '45.00' }, accounts);
+
+    expect(getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({ amountMinor: 1200 })],
+    })).toEqual({
+      sourceLinkUpdate: {
+        id: 'link-1',
+        sourceTransactionId: 'tx-1',
+        targetTransactionId: 'expense-1',
+        linkType: 'reimbursement',
+        amountMinor: 4500,
+        currencyCode: 'AUD',
+      },
+      targetLinkDeleteIds: [],
+    });
+  });
+
+  it('plans source link deletion when edited transaction is no longer income', () => {
+    const input = buildTransactionUpdateInput(
+      {
+        ...createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1'),
+        amount: '12.00',
+      },
+      accounts,
+    );
+
+    expect(getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({})],
+    })).toEqual({
+      sourceLinkDeleteId: 'link-1',
+      targetLinkDeleteIds: [],
+    });
+  });
+
+  it('plans target link deletion when edited transaction is no longer an expense', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [line({ amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' })]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(draft, accounts);
+
+    expect(getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({ id: 'target-link', sourceTransactionId: 'income-2', targetTransactionId: 'tx-1' })],
+    })).toEqual({
+      targetLinkDeleteIds: ['target-link'],
+    });
   });
 });

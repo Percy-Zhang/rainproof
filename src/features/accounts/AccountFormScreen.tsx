@@ -1,10 +1,16 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CurrencyDropdown } from '../../components/CurrencyDropdown';
 import { AccountIconPicker } from '../../components/AccountDisplay';
 import { ActionButton, Chip, FormError } from '../../components/ui';
+import {
+  FormChipRow,
+  FormDangerZone,
+  FormScreenShell,
+  FormSection,
+  KeyboardAwareFormScroll,
+} from '../../components/FormLayout';
 import {
   getAccountTypeLabel,
   formatOptionalMoneyInput,
@@ -170,27 +176,14 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
   }
 
   return (
-    <View style={styles.shell}>
-      <View style={styles.topBar}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onCancel}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="chevron-back" size={24} color={colors.primaryDark} />
-        </Pressable>
-        <Text style={styles.title}>{mode === 'add' ? 'Add account' : 'Edit account'}</Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={submit}
-          style={({ pressed }) => [styles.confirmButton, pressed && styles.pressed]}
-          testID={mode === 'add' ? 'add-account' : 'save-account'}
-        >
-          <Text style={styles.confirmText}>Confirm</Text>
-        </Pressable>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <FormScreenShell
+      title={mode === 'add' ? 'Add account' : 'Edit account'}
+      onBack={onCancel}
+      onSave={submit}
+      saveLabel="Confirm"
+      saveTestID={mode === 'add' ? 'add-account' : 'save-account'}
+    >
+      <KeyboardAwareFormScroll>
         <AccountField label="Name" value={name} onChangeText={setName} placeholder="Everyday account" />
         <AccountField
           label="Nickname"
@@ -201,26 +194,27 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
 
         {mode === 'add' ? (
           <>
-            <Text style={styles.label}>Account type</Text>
-            <View style={styles.wrap}>
-              {manualAccountTypes.map((accountType) => (
-                <Chip
-                  key={accountType}
-                  selected={type === accountType}
-                  onPress={() => {
-                    setIconName((currentIcon) =>
-                      currentIcon === getDefaultAccountIcon(type) ? getDefaultAccountIcon(accountType) : currentIcon,
-                    );
-                    setType(accountType);
-                    if (accountType !== 'credit_card') {
-                      setCreditLimit('');
-                    }
-                  }}
-                >
-                  {getAccountTypeLabel(accountType)}
-                </Chip>
-              ))}
-            </View>
+            <FormSection label="Account type">
+              <FormChipRow>
+                {manualAccountTypes.map((accountType) => (
+                  <Chip
+                    key={accountType}
+                    selected={type === accountType}
+                    onPress={() => {
+                      setIconName((currentIcon) =>
+                        currentIcon === getDefaultAccountIcon(type) ? getDefaultAccountIcon(accountType) : currentIcon,
+                      );
+                      setType(accountType);
+                      if (accountType !== 'credit_card') {
+                        setCreditLimit('');
+                      }
+                    }}
+                  >
+                    {getAccountTypeLabel(accountType)}
+                  </Chip>
+                ))}
+              </FormChipRow>
+            </FormSection>
 
             <CurrencyDropdown
               label="Currency"
@@ -280,8 +274,7 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
           multiline
         />
 
-        <View style={styles.iconToggleGroup}>
-          <Text style={styles.label}>Account flags</Text>
+        <FormSection label="Account flags">
           <View style={styles.iconToggleRow}>
             <IconToggle
               accessibilityLabel="Toggle rainy day fund"
@@ -290,19 +283,24 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
               onPress={() => setIncludeInRainyDay((value) => !value)}
             />
           </View>
-        </View>
+        </FormSection>
 
         <AccountColorPicker value={themeColor} onChange={setThemeColor} />
-        <View style={styles.iconPicker}>
-          <Text style={styles.label}>Account icon</Text>
+        <FormSection label="Account icon">
           <AccountIconPicker selectedColor={themeColor} selectedIcon={iconName} onSelectIcon={setIconName} />
-        </View>
+        </FormSection>
 
         <FormError message={error} />
 
         {mode === 'edit' ? (
-          <View style={styles.dangerZone}>
-            <Text style={styles.label}>Account status</Text>
+          <FormDangerZone
+            label="Account status"
+            warning={
+              confirmDelete
+                ? 'Delete only works for accounts with no transaction history. Otherwise, close the account.'
+                : undefined
+            }
+          >
             <View style={styles.actionRow}>
               {props.account.isArchived ? (
                 <ActionButton variant="secondary" onPress={reopenAccount}>
@@ -317,69 +315,14 @@ export function AccountFormScreen(props: AccountFormScreenProps) {
                 {confirmDelete ? 'Confirm delete' : 'Delete'}
               </ActionButton>
             </View>
-            {confirmDelete ? (
-              <Text style={styles.warningText}>
-                Delete only works for accounts with no transaction history. Otherwise, close the account.
-              </Text>
-            ) : null}
-          </View>
+          </FormDangerZone>
         ) : null}
-      </ScrollView>
-    </View>
+      </KeyboardAwareFormScroll>
+    </FormScreenShell>
   );
 }
 
 const styles = StyleSheet.create({
-  shell: {
-    flex: 1,
-  },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 46,
-  },
-  iconButton: {
-    alignItems: 'center',
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
-  },
-  confirmButton: {
-    alignItems: 'center',
-    minHeight: 42,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.sm,
-  },
-  confirmText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
-  title: {
-    color: colors.ink,
-    fontSize: typography.h3,
-    fontWeight: '900',
-  },
-  content: {
-    flexGrow: 1,
-    gap: spacing.md,
-    paddingBottom: spacing.xl,
-  },
-  label: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  wrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  iconToggleGroup: {
-    gap: spacing.xs,
-  },
   iconToggleRow: {
     flexDirection: 'row',
     gap: spacing.sm,
@@ -415,25 +358,10 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '700',
   },
-  iconPicker: {
-    gap: spacing.xs,
-  },
-  dangerZone: {
-    borderTopColor: colors.faint,
-    borderTopWidth: 1,
-    gap: spacing.sm,
-    marginTop: 'auto',
-    paddingTop: spacing.md,
-  },
   actionRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
-  },
-  warningText: {
-    color: colors.danger,
-    fontSize: typography.small,
-    lineHeight: 18,
   },
   pressed: {
     opacity: 0.78,

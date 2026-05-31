@@ -1,8 +1,5 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
 import {
-  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,36 +11,10 @@ import {
 
 import { FormError } from '../../components/ui';
 import {
-  defaultCategories,
-  getCategory,
-  getDefaultCategoryForKind,
-  getDefaultSubcategoryId,
-  getSubcategoryColor,
-  getSubcategoryIcon,
-  getSubcategoryName,
-} from '../../domain/categories';
-import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
-import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
-import { parseMoneyInput } from '../../domain/money';
-import {
-  createSplitTransactionFormLine,
-  formatMinorInput,
-  getSplitTransactionFormSummary,
-} from '../../domain/splitTransactionForm';
-import {
-  buildTransactionUpdateInput,
-  createTransactionEditDraft,
   formatEditDateLabel,
-  getTransferAmountCurrencyCode,
-  isOutsideAccountId,
-  OUTSIDE_MY_ACCOUNTS_LABEL,
-  type TransactionEditDraft,
-  type TransactionEditSplitLineDraft,
 } from '../../domain/transactionEdit';
-import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type {
   AppSnapshot,
-  TransactionKind,
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
 } from '../../domain/types';
@@ -53,23 +24,17 @@ import type {
 } from '../categorySelection/categorySelectionModel';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
-  accountLabel,
   AutocompleteField,
-  DateTimePickerFields,
-  getNativePickerDisplay,
   getNativePickerValue,
   InlineField,
-  SelectorRow,
   TransactionPickerScreen,
   TransactionTypeTabs,
-  useAutocompleteOptions,
-  type NativePickerMode,
-  type TransactionPickerMode,
 } from './TransactionFormComponents';
 import { DeleteTransactionPanel, TransactionLinkEntryRow } from './TransactionEditActions';
+import { TransactionAccountCategorySelectors } from './TransactionAccountCategorySelectors';
+import { TransactionMetadataFields } from './TransactionDetailsSection';
 import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from './SplitTransactionEditor';
-
-type EditPage = 'form' | 'split';
+import { useEditTransactionController } from './useEditTransactionController';
 
 type EditTransactionScreenProps = {
   snapshot: AppSnapshot;
@@ -99,100 +64,57 @@ export function EditTransactionScreen({
   onCancel,
   onDone,
 }: EditTransactionScreenProps) {
-  const [draft, setDraft] = useState<TransactionEditDraft | null>(null);
-  const [page, setPage] = useState<EditPage>('form');
-  const [error, setError] = useState('');
-  const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
-  const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
-  const categories = snapshot.categories ?? defaultCategories;
-  const transactionExists = snapshot.transactions.some((transaction) => transaction.id === transactionId);
-  const itemHistory = useMemo(
-    () => getTransactionItemNameSuggestionValues({
-      transactions: snapshot.transactions,
-      transactionLines: snapshot.transactionLines,
-      transactionTemplates: snapshot.transactionTemplates,
-      recurringItems: snapshot.recurringItems,
-      excludeTransactionId: transactionId,
-    }),
-    [
-      snapshot.recurringItems,
-      snapshot.transactionLines,
-      snapshot.transactionTemplates,
-      snapshot.transactions,
-      transactionId,
-    ],
-  );
-  const groupHistory = useMemo(
-    () => snapshot.transactions.map((transaction) => transaction.groupId).filter(Boolean),
-    [snapshot.transactions],
-  );
-  const labelHistory = useMemo(
-    () => snapshot.transactions
-      .filter((transaction) => transaction.id !== transactionId)
-      .flatMap((transaction) => transaction.labels),
-    [snapshot.transactions, transactionId],
-  );
-  const itemSuggestions = useAutocompleteOptions(itemHistory, draft?.title ?? '');
-  const groupSuggestions = useAutocompleteOptions(groupHistory, draft?.groupId ?? '');
-  const labelSuggestions = useMemo(
-    () => getLabelAutocompleteOptions(labelHistory, draft?.labels ?? ''),
-    [draft?.labels, labelHistory],
-  );
-  const fromAccount = draft && !isOutsideAccountId(draft.accountId)
-    ? snapshot.accounts.find((account) => account.id === draft.accountId)
-    : undefined;
-  const toAccount = draft && !isOutsideAccountId(draft.targetAccountId)
-    ? snapshot.accounts.find((account) => account.id === draft.targetAccountId)
-    : undefined;
-  const amountCurrencyCode = draft
-    ? draft.kind === 'transfer'
-      ? getTransferAmountCurrencyCode({
-          accounts: snapshot.accounts,
-          sourceAccountId: draft.accountId,
-          targetAccountId: draft.targetAccountId,
-        })
-      : fromAccount?.currencyCode ?? ''
-    : '';
-  const selectedCategory = draft?.categoryId ? getCategory(draft.categoryId, categories) : getDefaultCategoryForKind(draft?.kind ?? 'expense', categories);
-  const canSave = draft ? canSaveDraft(draft) : false;
-
-  useEffect(() => {
-    setConfirmDelete(false);
-    setPage('form');
-    try {
-      setDraft(createTransactionEditDraft(snapshot, transactionId));
-      setError('');
-    } catch (caught) {
-      setDraft(null);
-      setError(caught instanceof Error ? caught.message : 'Could not load transaction.');
-    }
-  }, [snapshot, transactionId]);
-
-  useEffect(() => {
-    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (nativePickerMode) {
-        setNativePickerMode(null);
-        return true;
-      }
-
-      if (pickerMode) {
-        setPickerMode(null);
-        return true;
-      }
-
-      if (page === 'split') {
-        setPage('form');
-        return true;
-      }
-
-      onCancel();
-      return true;
-    });
-
-    return () => subscription.remove();
-  }, [nativePickerMode, onCancel, page, pickerMode]);
+  const controller = useEditTransactionController({
+    snapshot,
+    transactionId,
+    onUpdateTransaction,
+    onDeleteTransaction,
+    onUpdateTransactionLink,
+    onDeleteTransactionLink,
+    onOpenCategorySelect,
+    onCancel,
+    onDone,
+  });
+  const {
+    addSplitLine,
+    amountCurrencyCode,
+    applyLabelAutocompleteSuggestion,
+    canSave,
+    categories,
+    changeKind,
+    closePicker,
+    confirmDelete,
+    deleteCurrentTransaction,
+    draft,
+    error,
+    fromAccount,
+    getEditableSplitLines,
+    getSplitTotalMinor,
+    groupSuggestions,
+    handleNativePickerChange,
+    itemHistory,
+    itemSuggestions,
+    labelSuggestions,
+    nativePickerMode,
+    openMainCategorySelect,
+    openSplitEditor,
+    openSplitLineCategorySelect,
+    page,
+    pickerMode,
+    removeSplitLine,
+    save,
+    selectedCategory,
+    selectPickerAccount,
+    setConfirmDelete,
+    setNativePickerMode,
+    setPage,
+    setPickerMode,
+    showCurrencyCodes,
+    toAccount,
+    transactionExists,
+    updateDraft,
+    updateSplitLine,
+  } = controller;
 
   if (draft && pickerMode) {
     return (
@@ -208,270 +130,12 @@ export function EditTransactionScreen({
         transactionLines={snapshot.transactionLines}
         showCurrencyCodes={showCurrencyCodes}
         sourceAccountId={draft.accountId}
-        onClose={() => {
-          setPickerMode(null);
-        }}
-        onSelectAccount={(accountId) => {
-          updateDraft(pickerMode === 'targetAccount' ? { targetAccountId: accountId } : { accountId });
-          setPickerMode(null);
-        }}
+        onClose={closePicker}
+        onSelectAccount={selectPickerAccount}
         onSelectCategory={() => undefined}
         onExit={onCancel}
         cancelTestID="cancel-edit-transaction-picker"
       />
-    );
-  }
-
-  function updateDraft(patch: Partial<TransactionEditDraft>) {
-    setDraft((current) => (current ? { ...current, ...patch } : current));
-  }
-
-  function openSplitEditor() {
-    if (!draft || draft.kind === 'transfer') {
-      return;
-    }
-
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            splitLines: getEditableSplitLines(current),
-          }
-        : current,
-    );
-    setError('');
-    setPage('split');
-  }
-
-  function getEditableSplitLines(current: TransactionEditDraft): TransactionEditSplitLineDraft[] {
-    if (current.splitLines?.length) {
-      return current.splitLines;
-    }
-
-    return [
-      createSplitTransactionFormLine({
-        id: current.lineId ?? `${current.id}-split-1`,
-        amount: current.amount,
-        categoryId: current.categoryId,
-        subcategoryId: current.subcategoryId,
-      }),
-      createSplitTransactionFormLine({
-        id: `${current.id}-split-2`,
-        categoryId: current.categoryId,
-        subcategoryId: current.subcategoryId,
-      }),
-    ];
-  }
-
-  function addSplitLine() {
-    setDraft((current) => {
-      if (!current) {
-        return current;
-      }
-
-      const splitLines = getEditableSplitLines(current);
-      const totalMinor = getDraftExpenseTotalMinor(current);
-      const remainingMinor = getSplitTransactionFormSummary(totalMinor, splitLines).remainingMinor;
-
-      return {
-        ...current,
-        splitLines: [
-          ...splitLines,
-          createSplitTransactionFormLine({
-            id: `${current.id}-split-${splitLines.length + 1}-${Date.now()}`,
-            amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
-            categoryId: current.categoryId,
-            subcategoryId: current.subcategoryId,
-          }),
-        ],
-      };
-    });
-  }
-
-  function updateSplitLine(lineId: string, patch: Partial<TransactionEditSplitLineDraft>) {
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            splitLines: getEditableSplitLines(current).map((line) => (line.id === lineId ? { ...line, ...patch } : line)),
-          }
-        : current,
-    );
-  }
-
-  function removeSplitLine(lineId: string) {
-    setDraft((current) => {
-      if (!current) {
-        return current;
-      }
-
-      const splitLines = getEditableSplitLines(current).filter((line) => line.id !== lineId);
-      const remainingLine = splitLines.length === 1 ? splitLines[0] : undefined;
-
-      return {
-        ...current,
-        categoryId: remainingLine?.categoryId ?? current.categoryId,
-        subcategoryId: remainingLine?.subcategoryId ?? current.subcategoryId,
-        splitLines: splitLines.length ? splitLines : undefined,
-      };
-    });
-  }
-
-  function changeKind(kind: TransactionKind) {
-    const defaultCategory = getDefaultCategoryForKind(kind, categories);
-    if (kind === 'transfer' || kind !== draft?.kind) {
-      setPage('form');
-    }
-    setDraft((current) =>
-      current
-        ? {
-            ...current,
-            kind,
-            accountId:
-              kind !== 'transfer' && isOutsideAccountId(current.accountId)
-                ? snapshot.accounts[0]?.id ?? ''
-                : current.accountId,
-            categoryId: kind === 'transfer' ? '' : defaultCategory.id,
-            subcategoryId: kind === 'transfer' ? '' : getDefaultSubcategoryId(defaultCategory),
-            splitLines: kind !== 'transfer' && kind === current.kind ? current.splitLines : undefined,
-          }
-        : current,
-    );
-  }
-
-  function handleNativePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
-    if (event.type === 'dismissed') {
-      setNativePickerMode(null);
-      return;
-    }
-
-    if (!draft || !selectedDate || !nativePickerMode) {
-      return;
-    }
-
-    if (nativePickerMode === 'date') {
-      updateDraft({ date: toDateInputValue(selectedDate) });
-    } else {
-      updateDraft({ time: toTimeInputValue(selectedDate) });
-    }
-
-    if (Platform.OS === 'android') {
-      setNativePickerMode(null);
-    }
-  }
-
-  async function save() {
-    if (!draft) {
-      return;
-    }
-
-    if (!canSaveDraft(draft)) {
-      setError('Complete the transaction before saving.');
-      return;
-    }
-
-    try {
-      const existingSourceLink = snapshot.transactionLinks.find((link) => link.sourceTransactionId === transactionId);
-      const existingTargetLinks = snapshot.transactionLinks.filter((link) => link.targetTransactionId === transactionId);
-      const input = buildTransactionUpdateInput(draft, snapshot.accounts);
-
-      await onUpdateTransaction(input);
-
-      if (existingSourceLink && input.kind === 'income') {
-        const positiveLines = input.lines.filter((line) => line.amountMinor > 0);
-        const currencyCode = positiveLines[0]?.currencyCode;
-        const amountMinor = positiveLines
-          .filter((line) => line.currencyCode === currencyCode)
-          .reduce((sum, line) => sum + line.amountMinor, 0);
-        if (currencyCode && amountMinor > 0) {
-          await onUpdateTransactionLink({
-            id: existingSourceLink.id,
-            sourceTransactionId: existingSourceLink.sourceTransactionId,
-            targetTransactionId: existingSourceLink.targetTransactionId,
-            linkType: existingSourceLink.linkType,
-            amountMinor,
-            currencyCode,
-          });
-        }
-      } else if (existingSourceLink) {
-        await onDeleteTransactionLink(existingSourceLink.id);
-      }
-
-      if (input.kind !== 'expense') {
-        for (const targetLink of existingTargetLinks) {
-          await onDeleteTransactionLink(targetLink.id);
-        }
-      }
-
-      onDone();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save transaction.');
-    }
-  }
-
-  async function deleteCurrentTransaction() {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      setError('');
-      return;
-    }
-
-    try {
-      await onDeleteTransaction(transactionId);
-      setError('');
-      onDone();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not delete transaction.');
-    }
-  }
-
-  function canSaveDraft(nextDraft: TransactionEditDraft): boolean {
-    try {
-      buildTransactionUpdateInput(nextDraft, snapshot.accounts);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  function openMainCategorySelect(nextDraft: TransactionEditDraft) {
-    if (nextDraft.kind === 'transfer') {
-      return;
-    }
-
-    onOpenCategorySelect(
-      {
-        kind: nextDraft.kind,
-        selectedCategoryId: nextDraft.categoryId,
-        selectedSubcategoryId: nextDraft.subcategoryId,
-        selectionMode: 'subcategory',
-        showSuggestions: true,
-        title: 'Category',
-      },
-      ({ categoryId, subcategoryId }) => {
-        updateDraft({ categoryId, subcategoryId: subcategoryId ?? '' });
-      },
-    );
-  }
-
-  function openSplitLineCategorySelect(lineId: string, nextDraft: TransactionEditDraft) {
-    if (nextDraft.kind === 'transfer') {
-      return;
-    }
-
-    const line = getEditableSplitLines(nextDraft).find((candidate) => candidate.id === lineId);
-    onOpenCategorySelect(
-      {
-        kind: nextDraft.kind,
-        selectedCategoryId: line?.categoryId ?? nextDraft.categoryId,
-        selectedSubcategoryId: line?.subcategoryId ?? nextDraft.subcategoryId,
-        selectionMode: 'subcategory',
-        showSuggestions: true,
-        title: 'Split line category',
-      },
-      ({ categoryId, subcategoryId }) => {
-        updateSplitLine(lineId, { categoryId, subcategoryId: subcategoryId ?? '' });
-      },
     );
   }
 
@@ -526,10 +190,10 @@ export function EditTransactionScreen({
             lines={getEditableSplitLines(draft)}
             itemNameSuggestions={itemHistory}
             showCurrencyCodes={showCurrencyCodes}
-            totalMinor={getDraftExpenseTotalMinor(draft)}
+            totalMinor={getSplitTotalMinor(draft)}
             onAddLine={addSplitLine}
             onPickCategory={(lineId) => {
-              openSplitLineCategorySelect(lineId, draft);
+              openSplitLineCategorySelect(lineId);
             }}
             onRemoveLine={removeSplitLine}
             onUpdateLine={updateSplitLine}
@@ -549,132 +213,70 @@ export function EditTransactionScreen({
             <>
               <TransactionTypeTabs kind={draft.kind} onChange={changeKind} />
 
-                <AutocompleteField
-                  label="Item"
-                  value={draft.title}
-                  onChange={(title) => updateDraft({ title })}
-                  placeholder="Groceries, Salary, Transfer"
-                  suggestions={itemSuggestions}
-                />
-
-            <InlineField
-              label="Amount"
-              value={draft.amount}
-              onChange={(amount) => updateDraft({ amount })}
-              placeholder="0.00"
-              keyboardType="decimal-pad"
-              rightLabel={showCurrencyCodes ? amountCurrencyCode : undefined}
-              selectAllOnFocus
-            />
-
-            <View style={styles.quickRows}>
-              <SelectorRow
-                label={draft.kind === 'transfer' ? 'From' : 'Account'}
-                value={
-                  fromAccount
-                    ? accountLabel(fromAccount, showCurrencyCodes)
-                    : draft.kind === 'transfer'
-                      ? OUTSIDE_MY_ACCOUNTS_LABEL
-                      : 'Choose account'
-                }
-                onPress={() => setPickerMode('sourceAccount')}
-                color={fromAccount?.themeColor ?? colors.primary}
-                icon={fromAccount?.iconName ?? (draft.kind === 'transfer' ? 'globe-outline' : undefined)}
-                iconColor={fromAccount?.themeColor ?? colors.primary}
-                iconKind="account"
-                empty={!fromAccount && draft.kind !== 'transfer'}
+              <AutocompleteField
+                label="Item"
+                value={draft.title}
+                onChange={(title) => updateDraft({ title })}
+                placeholder="Groceries, Salary, Transfer"
+                suggestions={itemSuggestions}
               />
-              {draft.kind === 'transfer' ? (
-                <SelectorRow
-                  label="To"
-                  value={toAccount ? accountLabel(toAccount, showCurrencyCodes) : OUTSIDE_MY_ACCOUNTS_LABEL}
-                  onPress={() => setPickerMode('targetAccount')}
-                  color={toAccount?.themeColor ?? colors.primary}
-                  icon={toAccount?.iconName ?? 'globe-outline'}
-                  iconColor={toAccount?.themeColor ?? colors.primary}
-                  iconKind="account"
-                />
-              ) : (
-                <SelectorRow
-                  label="Category"
-                  value={`${selectedCategory.name} / ${getSubcategoryName(selectedCategory.id, draft.subcategoryId, categories)}`}
-                  onPress={() => openMainCategorySelect(draft)}
-                  color={getSubcategoryColor(selectedCategory.id, draft.subcategoryId, categories)}
-                  icon={getSubcategoryIcon(selectedCategory.id, draft.subcategoryId, categories)}
-                  iconColor={getSubcategoryColor(selectedCategory.id, draft.subcategoryId, categories)}
-                  empty={!draft.subcategoryId}
-                />
-              )}
-            </View>
 
-            <DateTimePickerFields
-              dateValue={formatEditDateLabel(draft.date)}
-              timeValue={draft.time}
-              onPressDate={() => setNativePickerMode('date')}
-              onPressTime={() => setNativePickerMode('time')}
-            />
-            {nativePickerMode ? (
-              Platform.OS === 'android' ? (
-                <DateTimePicker
-                  value={getNativePickerValue(draft.date, draft.time)}
-                  mode={nativePickerMode}
-                  display={getNativePickerDisplay(nativePickerMode)}
-                  is24Hour
-                  onChange={handleNativePickerChange}
-                />
-              ) : (
-                <View style={styles.nativePickerPanel}>
-                  <DateTimePicker
-                    value={getNativePickerValue(draft.date, draft.time)}
-                    mode={nativePickerMode}
-                    display={getNativePickerDisplay(nativePickerMode)}
-                    is24Hour
-                    onChange={handleNativePickerChange}
-                  />
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => setNativePickerMode(null)}
-                    style={({ pressed }) => [styles.nativePickerDone, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.nativePickerDoneText}>Done</Text>
-                  </Pressable>
-                </View>
-              )
-            ) : null}
-
-            <InlineField
-              label="Notes"
-              value={draft.notes}
-              onChange={(notes) => updateDraft({ notes })}
-              placeholder="Optional"
-            />
-            <AutocompleteField
-              label="Group"
-              value={draft.groupId}
-              onChange={(groupId) => updateDraft({ groupId })}
-              placeholder="Trip, project, shared"
-              suggestions={groupSuggestions}
-            />
-            <AutocompleteField
-              label="Labels"
-              value={draft.labels}
-              onChange={(labels) => updateDraft({ labels })}
-              onSelectSuggestion={(suggestion) => updateDraft({ labels: applyLabelSuggestion(draft.labels, suggestion) })}
-              placeholder="holiday, shared, tax"
-              suggestions={labelSuggestions}
-            />
-            {draft.kind !== 'transfer' ? (
-              <TransactionLinkEntryRow
-                snapshot={snapshot}
-                transactionId={transactionId}
-                onPress={onOpenTransactionLink}
+              <InlineField
+                label="Amount"
+                value={draft.amount}
+                onChange={(amount) => updateDraft({ amount })}
+                placeholder="0.00"
+                keyboardType="decimal-pad"
+                rightLabel={showCurrencyCodes ? amountCurrencyCode : undefined}
+                selectAllOnFocus
               />
-            ) : null}
-            <DeleteTransactionPanel
-              confirmDelete={confirmDelete}
-              onCancel={() => setConfirmDelete(false)}
-              onDelete={deleteCurrentTransaction}
-            />
+
+              <TransactionAccountCategorySelectors
+                categories={categories}
+                emptySourceAccountLabel="Choose account"
+                fromAccount={fromAccount}
+                kind={draft.kind}
+                selectedCategory={selectedCategory}
+                showCurrencyCodes={showCurrencyCodes}
+                subcategoryId={draft.subcategoryId}
+                toAccount={toAccount}
+                onPressCategory={openMainCategorySelect}
+                onPressSourceAccount={() => setPickerMode('sourceAccount')}
+                onPressTargetAccount={() => setPickerMode('targetAccount')}
+              />
+
+              <TransactionMetadataFields
+                dateLabel={formatEditDateLabel(draft.date)}
+                group={draft.groupId}
+                groupSuggestions={groupSuggestions}
+                labels={draft.labels}
+                labelSuggestions={labelSuggestions}
+                nativePickerMode={nativePickerMode}
+                nativePickerValue={getNativePickerValue(draft.date, draft.time)}
+                notes={draft.notes}
+                time={draft.time}
+                onChangeGroup={(groupId) => updateDraft({ groupId })}
+                onChangeLabels={(labels) => updateDraft({ labels })}
+                onChangeNotes={(notes) => updateDraft({ notes })}
+                onCloseNativePicker={() => setNativePickerMode(null)}
+                onNativePickerChange={handleNativePickerChange}
+                onPressDate={() => setNativePickerMode('date')}
+                onPressTime={() => setNativePickerMode('time')}
+                onSelectLabelSuggestion={applyLabelAutocompleteSuggestion}
+              />
+
+              {draft.kind !== 'transfer' ? (
+                <TransactionLinkEntryRow
+                  snapshot={snapshot}
+                  transactionId={transactionId}
+                  onPress={onOpenTransactionLink}
+                />
+              ) : null}
+              <DeleteTransactionPanel
+                confirmDelete={confirmDelete}
+                onCancel={() => setConfirmDelete(false)}
+                onDelete={deleteCurrentTransaction}
+              />
             </>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -693,14 +295,6 @@ export function EditTransactionScreen({
       </View>
     </View>
   );
-}
-
-function getDraftExpenseTotalMinor(draft: TransactionEditDraft): number {
-  try {
-    return Math.abs(parseMoneyInput(draft.amount));
-  } catch {
-    return 0;
-  }
 }
 
 const styles = StyleSheet.create({
@@ -772,27 +366,6 @@ const styles = StyleSheet.create({
   deleteOnlyPane: {
     flex: 1,
     justifyContent: 'flex-end',
-  },
-  quickRows: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  nativePickerPanel: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: 0,
-  },
-  nativePickerDone: {
-    alignItems: 'center',
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  nativePickerDoneText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
   },
   footer: {
     gap: spacing.sm,

@@ -2,9 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ReactNode } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { KeyboardAwareFormScroll } from '../components/FormLayout';
 import { FormError } from '../components/ui';
 import {
   CategoryEditPage,
@@ -139,13 +140,9 @@ function CategoryRouteShell({
   return (
     <SafeAreaView style={styles.routeShell}>
       <CategoryTopBar dirty={dirty} title={title} onBack={onBack} onSave={onSave} />
-      <ScrollView
-        contentContainerStyle={styles.routeContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <KeyboardAwareFormScroll contentContainerStyle={styles.routeContent}>
         {children}
-      </ScrollView>
+      </KeyboardAwareFormScroll>
     </SafeAreaView>
   );
 }

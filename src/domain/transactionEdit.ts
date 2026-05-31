@@ -7,6 +7,7 @@ import {
 import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
+import { createSplitTransactionFormLine } from './splitTransactionForm';
 import {
   buildSplitTransactionLines,
   isSplitTransaction,
@@ -20,7 +21,9 @@ import type {
   NewTransactionInput,
   TransactionKind,
   TransactionLine,
+  TransactionLink,
   UpdateTransactionInput,
+  UpdateTransactionLinkInput,
 } from './types';
 
 export const OUTSIDE_ACCOUNT_ID = 'outside';
@@ -53,6 +56,12 @@ export type TransactionEditSplitLineDraft = {
   categoryId: string;
   subcategoryId: string;
   note: string;
+};
+
+export type TransactionEditLinkSavePlan = {
+  sourceLinkUpdate?: UpdateTransactionLinkInput;
+  sourceLinkDeleteId?: string;
+  targetLinkDeleteIds: string[];
 };
 
 export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId: string): TransactionEditDraft {
@@ -240,6 +249,84 @@ export function buildTransactionUpdateInput(
       },
     ],
   };
+}
+
+export function canBuildTransactionUpdateInput(draft: TransactionEditDraft, accounts: Account[]): boolean {
+  try {
+    buildTransactionUpdateInput(draft, accounts);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function getEditableTransactionEditSplitLines(
+  current: TransactionEditDraft,
+): TransactionEditSplitLineDraft[] {
+  if (current.splitLines?.length) {
+    return current.splitLines;
+  }
+
+  return [
+    createSplitTransactionFormLine({
+      id: current.lineId ?? `${current.id}-split-1`,
+      amount: current.amount,
+      categoryId: current.categoryId,
+      subcategoryId: current.subcategoryId,
+    }),
+    createSplitTransactionFormLine({
+      id: `${current.id}-split-2`,
+      categoryId: current.categoryId,
+      subcategoryId: current.subcategoryId,
+    }),
+  ];
+}
+
+export function getTransactionEditDraftTotalMinor(draft: Pick<TransactionEditDraft, 'amount'>): number {
+  try {
+    return Math.abs(parseMoneyInput(draft.amount));
+  } catch {
+    return 0;
+  }
+}
+
+export function getTransactionEditLinkSavePlan({
+  input,
+  transactionId,
+  transactionLinks,
+}: {
+  input: UpdateTransactionInput;
+  transactionId: string;
+  transactionLinks: TransactionLink[];
+}): TransactionEditLinkSavePlan {
+  const existingSourceLink = transactionLinks.find((link) => link.sourceTransactionId === transactionId);
+  const existingTargetLinks = transactionLinks.filter((link) => link.targetTransactionId === transactionId);
+  const plan: TransactionEditLinkSavePlan = {
+    targetLinkDeleteIds: input.kind !== 'expense' ? existingTargetLinks.map((link) => link.id) : [],
+  };
+
+  if (existingSourceLink && input.kind === 'income') {
+    const positiveLines = input.lines.filter((line) => line.amountMinor > 0);
+    const currencyCode = positiveLines[0]?.currencyCode;
+    const amountMinor = positiveLines
+      .filter((line) => line.currencyCode === currencyCode)
+      .reduce((sum, line) => sum + line.amountMinor, 0);
+
+    if (currencyCode && amountMinor > 0) {
+      plan.sourceLinkUpdate = {
+        id: existingSourceLink.id,
+        sourceTransactionId: existingSourceLink.sourceTransactionId,
+        targetTransactionId: existingSourceLink.targetTransactionId,
+        linkType: existingSourceLink.linkType,
+        amountMinor,
+        currencyCode,
+      };
+    }
+  } else if (existingSourceLink) {
+    plan.sourceLinkDeleteId = existingSourceLink.id;
+  }
+
+  return plan;
 }
 
 export function formatEditDateLabel(dateValue: string): string {

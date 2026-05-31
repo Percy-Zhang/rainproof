@@ -1,10 +1,16 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { CurrencyDropdown } from '../../components/CurrencyDropdown';
 import { ActionButton, Chip, FormError, TextField } from '../../components/ui';
+import {
+  FormChipRow,
+  FormDangerZone,
+  FormHelperText,
+  FormPreviewRow,
+  FormScreenShell,
+  FormSection,
+  KeyboardAwareFormScroll,
+} from '../../components/FormLayout';
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
 import {
   defaultCategories,
@@ -29,7 +35,7 @@ import type {
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
-import { colors, spacing, typography } from '../../theme/tokens';
+import { colors } from '../../theme/tokens';
 
 type BudgetFormScreenProps =
   | {
@@ -169,31 +175,13 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   }
 
   return (
-    <View style={styles.shell}>
-      <View style={styles.topBar}>
-        <Pressable
-          accessibilityRole="button"
-          onPress={onCancel}
-          style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
-        >
-          <Ionicons name="chevron-back" size={24} color={colors.primaryDark} />
-        </Pressable>
-        <Text style={styles.title}>{mode === 'add' ? 'Add budget' : 'Edit budget'}</Text>
-        <Pressable
-          accessibilityRole="button"
-          onPress={submit}
-          style={({ pressed }) => [styles.confirmButton, pressed && styles.pressed]}
-          testID={mode === 'add' ? 'save-new-budget' : 'save-budget'}
-        >
-          <Text style={styles.confirmText}>Save</Text>
-        </Pressable>
-      </View>
-
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+    <FormScreenShell
+      title={mode === 'add' ? 'Add budget' : 'Edit budget'}
+      onBack={onCancel}
+      onSave={submit}
+      saveTestID={mode === 'add' ? 'save-new-budget' : 'save-budget'}
+    >
+      <KeyboardAwareFormScroll>
         <TextField
           label="Name"
           value={name}
@@ -215,9 +203,8 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
           testID="budget-currency-dropdown"
         />
 
-        <View style={styles.fieldGroup}>
-          <Text style={styles.label}>Scope</Text>
-          <View style={styles.wrap}>
+        <FormSection label="Scope">
+          <FormChipRow>
             {scopeOptions.map((option) => (
               <Chip
                 key={option.value}
@@ -228,13 +215,12 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
                 {option.label}
               </Chip>
             ))}
-          </View>
-          <Text style={styles.hint}>Budgets are monthly calendar limits in v1.</Text>
-        </View>
+          </FormChipRow>
+          <FormHelperText>Budgets are monthly calendar limits in v1.</FormHelperText>
+        </FormSection>
 
         {scopeType !== 'overall' ? (
-          <View style={styles.fieldGroup}>
-            <Text style={styles.label}>Category</Text>
+          <FormSection label="Category">
             <CategorySelectionField
               label={scopeType === 'subcategory' ? 'Subcategory' : 'Category'}
               value={getBudgetCategorySelectionLabel(scopeType, selectedCategory, subcategoryId, categories)}
@@ -243,32 +229,30 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
               icon={getSubcategoryIcon(selectedCategory.id, subcategoryId, categories)}
               iconColor={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
             />
-          </View>
+          </FormSection>
         ) : (
-          <View style={styles.overallPreview}>
-            <CategoryIconBadge color={colors.primary} icon="wallet-outline" size="md" />
-            <View style={styles.previewText}>
-              <Text style={styles.previewTitle}>Overall monthly spending</Text>
-              <Text style={styles.hint}>Counts all expense categories in {currencyCode}.</Text>
-            </View>
-          </View>
+          <FormPreviewRow
+            color={colors.primary}
+            icon="wallet-outline"
+            title="Overall monthly spending"
+            detail={`Counts all expense categories in ${currencyCode}.`}
+          />
         )}
 
         <FormError message={error} />
 
         {mode === 'edit' ? (
-          <View style={styles.dangerZone}>
-            <Text style={styles.label}>Budget status</Text>
+          <FormDangerZone
+            label="Budget status"
+            warning={confirmArchive ? 'Archived budgets disappear from the active budget list.' : undefined}
+          >
             <ActionButton variant="danger" onPress={archiveBudget} testID="archive-budget">
               {confirmArchive ? 'Confirm archive' : 'Archive budget'}
             </ActionButton>
-            {confirmArchive ? (
-              <Text style={styles.warningText}>Archived budgets disappear from the active budget list.</Text>
-            ) : null}
-          </View>
+          </FormDangerZone>
         ) : null}
-      </ScrollView>
-    </View>
+      </KeyboardAwareFormScroll>
+    </FormScreenShell>
   );
 }
 
@@ -302,99 +286,3 @@ function getFallbackBudgetName(
 
   return `${category.name} budget`;
 }
-
-const styles = StyleSheet.create({
-  shell: {
-    flex: 1,
-  },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    minHeight: 46,
-  },
-  iconButton: {
-    alignItems: 'center',
-    height: 42,
-    justifyContent: 'center',
-    width: 42,
-  },
-  confirmButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: spacing.sm,
-  },
-  confirmText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
-  title: {
-    color: colors.ink,
-    fontSize: typography.h3,
-    fontWeight: '900',
-  },
-  content: {
-    flexGrow: 1,
-    gap: spacing.md,
-    paddingBottom: spacing.xl,
-  },
-  label: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  fieldGroup: {
-    gap: spacing.sm,
-  },
-  wrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  hint: {
-    color: colors.muted,
-    fontSize: typography.small,
-    lineHeight: 18,
-  },
-  categoryList: {
-    gap: spacing.sm,
-  },
-  overallPreview: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    padding: spacing.md,
-  },
-  previewText: {
-    flex: 1,
-    gap: spacing.xs,
-    minWidth: 0,
-  },
-  previewTitle: {
-    color: colors.ink,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
-  dangerZone: {
-    borderTopColor: colors.faint,
-    borderTopWidth: 1,
-    gap: spacing.sm,
-    marginTop: 'auto',
-    paddingTop: spacing.md,
-  },
-  warningText: {
-    color: colors.danger,
-    fontSize: typography.small,
-    lineHeight: 18,
-  },
-  pressed: {
-    opacity: 0.78,
-  },
-});

@@ -9,6 +9,7 @@ import {
   SubcategoryRow,
 } from '../../components/CategoryDisplay';
 import { Card, FormError } from '../../components/ui';
+import { FormSection } from '../../components/FormLayout';
 import {
   categoryPresetColors,
   categoryPresetIcons,
@@ -114,20 +115,22 @@ export function CategoryEditPage({
       <FormError message={error} />
       <Card testID="category-edit-card">
         <EditorHeader title="Category" color={category.color} icon={category.icon} />
-        <LabeledInput label="Name" value={category.name} onChangeText={(name) => onUpdateCategory({ name })} />
-        <Text style={styles.label}>Color</Text>
-        <ColorPresetPicker
-          colors={categoryPresetColors}
-          selectedColor={category.color}
-          onSelectColor={(color) => onUpdateCategory({ color })}
-        />
-        <Text style={styles.label}>Icon</Text>
-        <IconPresetPicker
-          icons={categoryPresetIcons}
-          selectedColor={category.color}
-          selectedIcon={category.icon}
-          onSelectIcon={(icon) => onUpdateCategory({ icon })}
-        />
+        <NameField label="Name" value={category.name} onChangeText={(name) => onUpdateCategory({ name })} />
+        <FormSection label="Color">
+          <ColorPresetPicker
+            colors={categoryPresetColors}
+            selectedColor={category.color}
+            onSelectColor={(color) => onUpdateCategory({ color })}
+          />
+        </FormSection>
+        <FormSection label="Icon">
+          <IconPresetPicker
+            icons={categoryPresetIcons}
+            selectedColor={category.color}
+            selectedIcon={category.icon}
+            onSelectIcon={(icon) => onUpdateCategory({ icon })}
+          />
+        </FormSection>
       </Card>
       <Card>
         <Text style={styles.cardTitle}>Subcategories</Text>
@@ -175,24 +178,26 @@ export function SubcategoryEditPage({
       <Card testID="subcategory-edit-card">
         <EditorHeader title={category.name} color={category.color} icon={category.icon} />
         <EditorHeader title="Subcategory" color={subcategory.color} icon={subcategory.icon} />
-        <LabeledInput
+        <NameField
           label="Name"
           value={subcategory.name}
           onChangeText={(name) => onUpdateSubcategory({ name })}
         />
-        <Text style={styles.label}>Color</Text>
-        <ColorPresetPicker
-          colors={categoryPresetColors}
-          selectedColor={subcategory.color}
-          onSelectColor={(color) => onUpdateSubcategory({ color })}
-        />
-        <Text style={styles.label}>Icon</Text>
-        <IconPresetPicker
-          icons={categoryPresetIcons}
-          selectedColor={subcategory.color}
-          selectedIcon={subcategory.icon}
-          onSelectIcon={(icon) => onUpdateSubcategory({ icon })}
-        />
+        <FormSection label="Color">
+          <ColorPresetPicker
+            colors={categoryPresetColors}
+            selectedColor={subcategory.color}
+            onSelectColor={(color) => onUpdateSubcategory({ color })}
+          />
+        </FormSection>
+        <FormSection label="Icon">
+          <IconPresetPicker
+            icons={categoryPresetIcons}
+            selectedColor={subcategory.color}
+            selectedIcon={subcategory.icon}
+            onSelectIcon={(icon) => onUpdateSubcategory({ icon })}
+          />
+        </FormSection>
       </Card>
     </View>
   );
@@ -207,7 +212,7 @@ function EditorHeader({ title, color, icon }: { title: string; color: string; ic
   );
 }
 
-function LabeledInput({
+function NameField({
   label,
   value,
   onChangeText,
@@ -217,8 +222,7 @@ function LabeledInput({
   onChangeText: (value: string) => void;
 }) {
   return (
-    <View style={styles.fieldBlock}>
-      <Text style={styles.label}>{label}</Text>
+    <FormSection label={label}>
       <TextInput
         onChangeText={onChangeText}
         placeholder={label}
@@ -226,7 +230,7 @@ function LabeledInput({
         style={styles.input}
         value={value}
       />
-    </View>
+    </FormSection>
   );
 }
 
@@ -293,15 +297,6 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: typography.body,
     fontWeight: '800',
-  },
-  fieldBlock: {
-    gap: spacing.xs,
-  },
-  label: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
   },
   input: {
     backgroundColor: colors.surface,
