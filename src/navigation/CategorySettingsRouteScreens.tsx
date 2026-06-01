@@ -1,9 +1,5 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { KeyboardAwareFormScroll } from '../components/FormLayout';
 import { FormError } from '../components/ui';
@@ -14,12 +10,11 @@ import {
 } from '../features/settings/CategorySettingsPages';
 import { useCategorySettingsDraft } from '../features/settings/CategorySettingsDraftContext';
 import { colors, spacing, typography } from '../theme/tokens';
-import type { RootStackParamList } from './routes';
-
-type RootStackNavigation = NativeStackNavigationProp<RootStackParamList>;
+import { RouteSafeArea, RouteTopBar, routeScaffoldStyles } from './RouteScaffold';
+import { useRootStackNavigation, useRootStackRoute } from './routeHooks';
 
 export function CategoryManagementRouteScreen() {
-  const navigation = useNavigation<RootStackNavigation>();
+  const navigation = useRootStackNavigation();
   const { categories, dirty, error, saveCategories } = useCategorySettingsDraft();
 
   return (
@@ -43,8 +38,8 @@ export function CategoryManagementRouteScreen() {
 }
 
 export function CategoryEditRouteScreen() {
-  const navigation = useNavigation<RootStackNavigation>();
-  const route = useRoute<RouteProp<RootStackParamList, 'CategoryEdit'>>();
+  const navigation = useRootStackNavigation();
+  const route = useRootStackRoute<'CategoryEdit'>();
   const { dirty, error, getCategory, saveCategories, updateCategory } = useCategorySettingsDraft();
   const category = getCategory(route.params.categoryId);
 
@@ -79,8 +74,8 @@ export function CategoryEditRouteScreen() {
 }
 
 export function SubcategoryEditRouteScreen() {
-  const navigation = useNavigation<RootStackNavigation>();
-  const route = useRoute<RouteProp<RootStackParamList, 'SubcategoryEdit'>>();
+  const navigation = useRootStackNavigation();
+  const route = useRootStackRoute<'SubcategoryEdit'>();
   const { dirty, error, getCategory, getSubcategory, saveCategories, updateSubcategory } =
     useCategorySettingsDraft();
   const category = getCategory(route.params.categoryId);
@@ -117,7 +112,11 @@ function CategoryHeaderSaveButton({ dirty, onSave }: { dirty: boolean; onSave: (
       accessibilityRole="button"
       disabled={!dirty}
       onPress={onSave}
-      style={({ pressed }) => [styles.saveButton, !dirty && styles.saveButtonDisabled, pressed && styles.pressed]}
+      style={({ pressed }) => [
+        styles.saveButton,
+        !dirty && styles.saveButtonDisabled,
+        pressed && routeScaffoldStyles.pressed,
+      ]}
     >
       <Text style={[styles.saveButtonText, !dirty && styles.saveButtonTextDisabled]}>Save</Text>
     </Pressable>
@@ -138,96 +137,44 @@ function CategoryRouteShell({
   onSave: () => void;
 }) {
   return (
-    <SafeAreaView style={styles.routeShell}>
-      <CategoryTopBar dirty={dirty} title={title} onBack={onBack} onSave={onSave} />
+    <RouteSafeArea>
+      <RouteTopBar
+        title={title}
+        onBack={onBack}
+        right={<CategoryHeaderSaveButton dirty={dirty} onSave={onSave} />}
+      />
       <KeyboardAwareFormScroll contentContainerStyle={styles.routeContent}>
         {children}
       </KeyboardAwareFormScroll>
-    </SafeAreaView>
+    </RouteSafeArea>
   );
 }
 
 function CategoryRouteMessage({ message, onBack, title }: { message: string; onBack: () => void; title: string }) {
   return (
-    <SafeAreaView style={styles.messageShell}>
-      <CategoryTopBar dirty={false} title={title} onBack={onBack} onSave={() => undefined} />
+    <RouteSafeArea>
+      <RouteTopBar
+        title={title}
+        onBack={onBack}
+        right={<CategoryHeaderSaveButton dirty={false} onSave={() => undefined} />}
+      />
       <View style={styles.messageBody}>
         <FormError message={message} />
       </View>
-    </SafeAreaView>
-  );
-}
-
-function CategoryTopBar({
-  dirty,
-  title,
-  onBack,
-  onSave,
-}: {
-  dirty: boolean;
-  title: string;
-  onBack: () => void;
-  onSave: () => void;
-}) {
-  return (
-    <View style={styles.topBar}>
-      <Pressable
-        accessibilityRole="button"
-        onPress={onBack}
-        style={({ pressed }) => [styles.backButton, pressed && styles.pressed]}
-      >
-        <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
-        <Text style={styles.backButtonText}>Back</Text>
-      </Pressable>
-      <Text numberOfLines={1} style={styles.routeTitle}>{title}</Text>
-      <View style={styles.saveSlot}>
-        <CategoryHeaderSaveButton dirty={dirty} onSave={onSave} />
-      </View>
-    </View>
+    </RouteSafeArea>
   );
 }
 
 const styles = StyleSheet.create({
-  backButton: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.xs,
-    minHeight: 40,
-    paddingRight: spacing.sm,
-    width: 88,
-  },
-  backButtonText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '800',
-  },
-  messageShell: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
   messageBody: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
-  },
-  pressed: {
-    opacity: 0.78,
   },
   routeContent: {
     gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
-  },
-  routeShell: {
-    backgroundColor: colors.background,
-    flex: 1,
-  },
-  routeTitle: {
-    color: colors.ink,
-    flex: 1,
-    fontSize: typography.h3,
-    fontWeight: '900',
-    textAlign: 'center',
   },
   saveButton: {
     alignItems: 'flex-end',
@@ -245,18 +192,5 @@ const styles = StyleSheet.create({
   },
   saveButtonTextDisabled: {
     color: colors.muted,
-  },
-  saveSlot: {
-    alignItems: 'flex-end',
-    width: 88,
-  },
-  topBar: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'space-between',
-    minHeight: 44,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
   },
 });

@@ -1,6 +1,3 @@
-import { useNavigation } from '@react-navigation/native';
-import type { DrawerNavigationProp } from '@react-navigation/drawer';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { useLayoutEffect, useMemo, useState } from 'react';
 import {
@@ -28,7 +25,7 @@ import {
   type TransactionPeriodState,
 } from '../features/transactions/TransactionsScreen';
 import { colors, spacing, typography } from '../theme/tokens';
-import type { MainDrawerParamList, RootStackParamList } from './routes';
+import { type RootStackNavigation, useMainDrawerNavigation } from './routeHooks';
 
 type RootScreenKey =
   | 'dashboard'
@@ -77,8 +74,8 @@ export function SettingsDrawerScreen() {
 }
 
 function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
-  const navigation = useNavigation<DrawerNavigationProp<MainDrawerParamList>>();
-  const rootNavigation = navigation.getParent<NativeStackNavigationProp<RootStackParamList>>();
+  const navigation = useMainDrawerNavigation();
+  const rootNavigation = navigation.getParent<RootStackNavigation>();
   const [transactionPeriodState, setTransactionPeriodState] = useState<TransactionPeriodState>(
     createDefaultTransactionPeriodState,
   );
