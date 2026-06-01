@@ -1,5 +1,6 @@
 import {
   getRecentStatsReportRollupRows,
+  sortStatsReportRows,
   type StatsReport,
   type StatsReportLineRow,
   type StatsReportRollup,
@@ -13,6 +14,7 @@ export type StatsDonutViewModel = {
   selectedCategoryRollup?: StatsReportRollup;
   selectedRollup?: StatsReportRollup;
   recentRows: StatsReportLineRow[];
+  totalNetAmountMinor: number;
   canShowDetailedView: boolean;
   emptyLabel: string;
 };
@@ -26,8 +28,8 @@ export function getStatsDonutViewModel({
 }: {
   report: StatsReport;
   mode: StatsDonutMode;
-  selectedCategoryRollupId?: string;
-  selectedSubcategoryRollupId?: string;
+  selectedCategoryRollupId?: string | null;
+  selectedSubcategoryRollupId?: string | null;
   recentLimit?: number;
 }): StatsDonutViewModel {
   const selectedCategoryRollup = getSelectedCategoryRollup(report, selectedCategoryRollupId);
@@ -37,7 +39,9 @@ export function getStatsDonutViewModel({
       ? getSubcategoryRollupsForCategory(report, selectedCategoryRollup)
       : [];
     const selectedRollup =
-      subcategoryRollups.find((rollup) => rollup.id === selectedSubcategoryRollupId) ?? subcategoryRollups[0];
+      selectedSubcategoryRollupId === null
+        ? undefined
+        : subcategoryRollups.find((rollup) => rollup.id === selectedSubcategoryRollupId) ?? subcategoryRollups[0];
 
     return {
       mode,
@@ -51,7 +55,14 @@ export function getStatsDonutViewModel({
             rollupId: selectedRollup.id,
             limit: recentLimit,
           })
-        : [],
+        : selectedCategoryRollup && subcategoryRollups.length
+          ? getRecentStatsReportRows({
+              report,
+              categoryId: selectedCategoryRollup.categoryId,
+              limit: recentLimit,
+            })
+          : [],
+      totalNetAmountMinor: getRollupTotalNetAmountMinor(subcategoryRollups),
       canShowDetailedView: false,
       emptyLabel: selectedCategoryRollup
         ? `No subcategory spending for ${selectedCategoryRollup.label}.`
@@ -71,12 +82,23 @@ export function getStatsDonutViewModel({
           rollupId: selectedCategoryRollup.id,
           limit: recentLimit,
         })
-      : [],
+      : getRecentStatsReportRows({
+          report,
+          limit: recentLimit,
+        }),
+    totalNetAmountMinor: report.totalNetAmountMinor,
     canShowDetailedView: selectedCategoryRollup
       ? getSubcategoryRollupsForCategory(report, selectedCategoryRollup).length > 0
       : false,
     emptyLabel: 'No spending in this period.',
   };
+}
+
+export function getNextStatsDonutSelectionId(
+  selectedRollupId: string | undefined,
+  pressedRollupId: string,
+): string | null {
+  return selectedRollupId === pressedRollupId ? null : pressedRollupId;
 }
 
 export function getSubcategoryRollupsForCategory(
@@ -101,9 +123,33 @@ export function getStatsMatchRowDetailText(row: StatsReportLineRow): string {
 
 function getSelectedCategoryRollup(
   report: StatsReport,
-  selectedCategoryRollupId?: string,
+  selectedCategoryRollupId?: string | null,
 ): StatsReportRollup | undefined {
+  if (selectedCategoryRollupId === null) {
+    return undefined;
+  }
+
   return report.categoryRollups.find((rollup) => rollup.id === selectedCategoryRollupId) ?? report.categoryRollups[0];
+}
+
+function getRecentStatsReportRows({
+  report,
+  categoryId,
+  limit,
+}: {
+  report: StatsReport;
+  categoryId?: string;
+  limit: number;
+}): StatsReportLineRow[] {
+  const rows = categoryId
+    ? report.rows.filter((row) => row.categoryId === categoryId)
+    : report.rows;
+
+  return sortStatsReportRows(rows, 'date_newest').slice(0, limit);
+}
+
+function getRollupTotalNetAmountMinor(rollups: StatsReportRollup[]): number {
+  return rollups.reduce((sum, rollup) => sum + rollup.netAmountMinor, 0);
 }
 
 function compareRollups(left: StatsReportRollup, right: StatsReportRollup): number {

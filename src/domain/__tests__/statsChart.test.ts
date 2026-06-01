@@ -1,4 +1,5 @@
 import {
+  getNextStatsDonutSelectionId,
   getStatsMatchRowDetailText,
   getStatsDonutViewModel,
   getSubcategoryRollupsForCategory,
@@ -157,6 +158,23 @@ describe('stats chart helpers', () => {
     expect(view.recentRows.map((item) => item.lineId)).toEqual(['rent-line']);
   });
 
+  it('supports an explicit no-selection state with total recent spending rows', () => {
+    const view = getStatsDonutViewModel({
+      report: report(),
+      mode: 'category',
+      selectedCategoryRollupId: null,
+    });
+
+    expect(view.selectedRollup).toBeUndefined();
+    expect(view.canShowDetailedView).toBe(false);
+    expect(view.totalNetAmountMinor).toBe(10000);
+    expect(view.recentRows.map((item) => item.lineId)).toEqual([
+      'groceries-line',
+      'rent-line',
+      'restaurants-line',
+    ]);
+  });
+
   it('converts a selected category to subcategory slices with relative percentages', () => {
     const sourceReport = report();
     const categoryRollup = sourceReport.categoryRollups[0];
@@ -182,6 +200,19 @@ describe('stats chart helpers', () => {
     expect(view.selectedCategoryRollup?.id).toBe('category:food');
     expect(view.selectedRollup?.id).toBe('subcategory:food:restaurants');
     expect(view.recentRows.map((item) => item.lineId)).toEqual(['restaurants-line']);
+  });
+
+  it('uses selected category rows when subcategory detail has no selected slice', () => {
+    const view = getStatsDonutViewModel({
+      report: report(),
+      mode: 'subcategory',
+      selectedCategoryRollupId: 'category:food',
+      selectedSubcategoryRollupId: null,
+    });
+
+    expect(view.selectedRollup).toBeUndefined();
+    expect(view.totalNetAmountMinor).toBe(7000);
+    expect(view.recentRows.map((item) => item.lineId)).toEqual(['groceries-line', 'restaurants-line']);
   });
 
   it('returns category slices again when mode returns to category', () => {
@@ -234,5 +265,11 @@ describe('stats chart helpers', () => {
         }),
       ),
     ).toBe('Restaurants');
+  });
+
+  it('toggles the current donut selection off when the selected slice is pressed again', () => {
+    expect(getNextStatsDonutSelectionId('category:food', 'category:food')).toBeNull();
+    expect(getNextStatsDonutSelectionId('category:food', 'category:housing')).toBe('category:housing');
+    expect(getNextStatsDonutSelectionId(undefined, 'category:food')).toBe('category:food');
   });
 });

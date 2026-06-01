@@ -27,6 +27,11 @@ export function StatsSpendingCard({
   spendingDonutMode: StatsDonutMode;
 }) {
   const selectedSpendingRollup = spendingDonut.selectedRollup;
+  const hasSpending = spendingDonut.rollups.some((rollup) => rollup.netAmountMinor > 0);
+  const recentMatchesTitle = selectedSpendingRollup ? 'Recent matches' : 'Recent spending';
+  const recentMatchesDetail = selectedSpendingRollup
+    ? `${selectedSpendingRollup.label} - ${formatMoney(selectedSpendingRollup.netAmountMinor, currencyCode)}`
+    : `All spending - ${formatMoney(spendingDonut.totalNetAmountMinor, currencyCode)}`;
 
   return (
     <Card testID="spending-chart-card">
@@ -62,16 +67,14 @@ export function StatsSpendingCard({
         onSelectRollup={onSelectRollup}
       />
 
-      {selectedSpendingRollup ? (
+      {hasSpending ? (
         <View style={styles.matchSection}>
           <View style={styles.matchHeaderRow}>
             <View style={styles.matchHeaderText}>
-              <Text style={styles.matchTitle}>Recent matches</Text>
-              <Text style={styles.matchDetail}>
-                {selectedSpendingRollup.label} - {formatMoney(selectedSpendingRollup.netAmountMinor, currencyCode)}
-              </Text>
+              <Text style={styles.matchTitle}>{recentMatchesTitle}</Text>
+              <Text style={styles.matchDetail}>{recentMatchesDetail}</Text>
             </View>
-            {onOpenDrilldown ? (
+            {selectedSpendingRollup && onOpenDrilldown ? (
               <ActionButton variant="ghost" onPress={onOpenDrilldown}>
                 See all
               </ActionButton>

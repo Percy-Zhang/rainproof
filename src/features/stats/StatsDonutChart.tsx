@@ -35,7 +35,10 @@ export function StatsDonutChart({
   emptyLabel,
 }: StatsDonutChartProps) {
   const positiveRollups = rollups.filter((rollup) => rollup.netAmountMinor > 0);
-  const selectedRollup = positiveRollups.find((rollup) => rollup.id === selectedRollupId) ?? positiveRollups[0];
+  const selectedRollup = selectedRollupId
+    ? positiveRollups.find((rollup) => rollup.id === selectedRollupId)
+    : undefined;
+  const totalNetAmountMinor = positiveRollups.reduce((sum, rollup) => sum + rollup.netAmountMinor, 0);
   const slices = getDonutSlices(positiveRollups);
 
   function handlePress(event: GestureResponderEvent) {
@@ -50,7 +53,7 @@ export function StatsDonutChart({
     }
   }
 
-  if (!positiveRollups.length || !selectedRollup) {
+  if (!positiveRollups.length) {
     return (
       <View style={styles.emptyChart}>
         <Text style={styles.emptyText}>{emptyLabel}</Text>
@@ -70,7 +73,7 @@ export function StatsDonutChart({
         <Svg pointerEvents="none" width={chartSize} height={chartSize} viewBox="-120 -120 240 240">
           <G>
             {slices.map((slice) => {
-              const isSelected = slice.rollup.id === selectedRollup.id;
+              const isSelected = slice.rollup.id === selectedRollup?.id;
               const path = getArcPath(slice, isSelected);
 
               return path ? (
@@ -78,7 +81,7 @@ export function StatsDonutChart({
                   key={slice.rollup.id}
                   d={path}
                   fill={slice.rollup.color}
-                  opacity={isSelected ? 1 : 0.74}
+                  opacity={!selectedRollup || isSelected ? 1 : 0.74}
                   stroke={colors.surface}
                   strokeWidth={isSelected ? 3 : 2}
                 />
@@ -90,12 +93,14 @@ export function StatsDonutChart({
       </Pressable>
       <View pointerEvents="none" style={styles.centerLabel}>
         <Text numberOfLines={1} style={styles.centerKicker}>
-          {selectedRollup.label}
+          {selectedRollup?.label ?? 'Total spending'}
         </Text>
         <Text numberOfLines={1} adjustsFontSizeToFit style={styles.centerAmount}>
-          {formatMoney(selectedRollup.netAmountMinor, currencyCode)}
+          {formatMoney(selectedRollup?.netAmountMinor ?? totalNetAmountMinor, currencyCode)}
         </Text>
-        <Text style={styles.centerPercent}>{formatPercentage(selectedRollup.percentage)}</Text>
+        <Text style={styles.centerPercent}>
+          {selectedRollup ? formatPercentage(selectedRollup.percentage) : '100%'}
+        </Text>
       </View>
     </View>
   );

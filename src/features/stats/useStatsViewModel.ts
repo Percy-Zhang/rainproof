@@ -13,7 +13,11 @@ import {
   getStatsSelectedCurrencyCodes,
   resolveStatsCurrencyScope,
 } from '../../domain/statsAccountSelection';
-import { getStatsDonutViewModel, type StatsDonutMode } from '../../domain/statsChart';
+import {
+  getNextStatsDonutSelectionId,
+  getStatsDonutViewModel,
+  type StatsDonutMode,
+} from '../../domain/statsChart';
 import { getStatsReport } from '../../domain/statsReports';
 import {
   getStatsMonthlyTrendSummary,
@@ -62,8 +66,8 @@ export function useStatsViewModel({
   const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
   const [requestedCurrencyCode, setRequestedCurrencyCode] = useState(effectiveDisplayCurrency);
   const [spendingDonutMode, setSpendingDonutMode] = useState<StatsDonutMode>('category');
-  const [selectedSpendingCategoryRollupId, setSelectedSpendingCategoryRollupId] = useState('');
-  const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState('');
+  const [selectedSpendingCategoryRollupId, setSelectedSpendingCategoryRollupId] = useState<string | null>('');
+  const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState<string | null>('');
   const categories = snapshot.categories ?? defaultCategories;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
 
@@ -171,12 +175,23 @@ export function useStatsViewModel({
     spendingReport,
   ]);
   const selectedSpendingRollup = spendingDonut.selectedRollup;
-  const selectedSpendingTrend = useMemo(() => getStatsRollupMonthlyTrend({
-    report: spendingReport,
-    rollupKind: spendingDonutMode,
-    rollupId: selectedSpendingRollup?.id,
-    range,
-  }), [range, selectedSpendingRollup?.id, spendingDonutMode, spendingReport]);
+  const selectedSpendingTrend = useMemo(() => {
+    if (!selectedSpendingRollup) {
+      return {
+        buckets: [],
+        totalGrossAmountMinor: 0,
+        totalNetAmountMinor: 0,
+        averageNetAmountMinor: 0,
+      };
+    }
+
+    return getStatsRollupMonthlyTrend({
+      report: spendingReport,
+      rollupKind: spendingDonutMode,
+      rollupId: selectedSpendingRollup.id,
+      range,
+    });
+  }, [range, selectedSpendingRollup, spendingDonutMode, spendingReport]);
   const cashFlow = useMemo(() => {
     if (!accountIds.length) {
       return {
@@ -216,11 +231,15 @@ export function useStatsViewModel({
 
   function selectSpendingRollup(rollupId: string) {
     if (spendingDonutMode === 'subcategory') {
-      setSelectedSpendingSubcategoryRollupId(rollupId);
+      setSelectedSpendingSubcategoryRollupId(
+        getNextStatsDonutSelectionId(spendingDonut.selectedRollup?.id, rollupId),
+      );
       return;
     }
 
-    setSelectedSpendingCategoryRollupId(rollupId);
+    setSelectedSpendingCategoryRollupId(
+      getNextStatsDonutSelectionId(spendingDonut.selectedRollup?.id, rollupId),
+    );
   }
 
   function openSpendingDetailedView() {
