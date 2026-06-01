@@ -153,9 +153,24 @@ async function getSettingRows(db: NodeSQLiteRepositoryDatabase): Promise<{ key: 
   return db.getAllAsync<{ key: string; value: string }>('SELECT key, value FROM settings ORDER BY key ASC');
 }
 
+async function getTableNames(db: NodeSQLiteRepositoryDatabase): Promise<string[]> {
+  const rows = await db.getAllAsync<{ name: string }>(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name ASC",
+  );
+  return rows.map((row) => row.name);
+}
+
 async function getColumnNames(db: NodeSQLiteRepositoryDatabase, tableName: string): Promise<string[]> {
   const rows = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${tableName})`);
   return rows.map((row) => row.name);
+}
+
+async function getIndexNames(db: NodeSQLiteRepositoryDatabase, tableName: string): Promise<string[]> {
+  const rows = await db.getAllAsync<{ name: string }>(`PRAGMA index_list(${tableName})`);
+  return rows
+    .map((row) => row.name)
+    .filter((name) => !name.startsWith('sqlite_autoindex_'))
+    .sort();
 }
 
 async function addAccount(
@@ -269,6 +284,173 @@ function getBalanceByAccountId(snapshot: AppSnapshot): Record<string, number> {
   );
 }
 
+const expectedCurrentTableColumns: Record<string, string[]> = {
+  accounts: [
+    'id',
+    'name',
+    'nickname',
+    'type',
+    'currency_code',
+    'opening_balance_minor',
+    'credit_limit_minor',
+    'notes',
+    'institution_name',
+    'include_in_rainy_day',
+    'theme_color',
+    'icon_name',
+    'show_on_dashboard',
+    'sort_order',
+    'is_archived',
+    'created_at',
+    'updated_at',
+  ],
+  budgets: [
+    'id',
+    'name',
+    'amount_minor',
+    'currency_code',
+    'period',
+    'scope_type',
+    'category_id',
+    'subcategory_id',
+    'is_active',
+    'created_at',
+    'updated_at',
+  ],
+  exchange_rates: [
+    'id',
+    'base_currency_code',
+    'quote_currency_code',
+    'rate_decimal',
+    'source',
+    'effective_at',
+    'created_at',
+  ],
+  rainy_day_fund_accounts: [
+    'fund_id',
+    'account_id',
+  ],
+  rainy_day_funds: [
+    'id',
+    'name',
+    'currency_code',
+    'goal_minor',
+    'created_at',
+    'updated_at',
+  ],
+  recurring_items: [
+    'id',
+    'name',
+    'kind',
+    'amount_minor',
+    'currency_code',
+    'account_id',
+    'category_id',
+    'subcategory_id',
+    'note',
+    'frequency',
+    'next_due_date',
+    'is_active',
+    'created_at',
+    'updated_at',
+  ],
+  settings: [
+    'key',
+    'value',
+  ],
+  transaction_lines: [
+    'id',
+    'transaction_id',
+    'account_id',
+    'amount_minor',
+    'currency_code',
+    'category_id',
+    'subcategory_id',
+    'external_party',
+    'transfer_peer_account_id',
+    'note',
+    'created_at',
+  ],
+  transaction_links: [
+    'id',
+    'source_transaction_id',
+    'target_transaction_id',
+    'source_line_id',
+    'target_line_id',
+    'link_type',
+    'amount_minor',
+    'currency_code',
+    'created_at',
+    'updated_at',
+  ],
+  transaction_templates: [
+    'id',
+    'name',
+    'kind',
+    'title',
+    'account_id',
+    'amount_minor',
+    'currency_code',
+    'category_id',
+    'subcategory_id',
+    'notes',
+    'is_active',
+    'created_at',
+    'updated_at',
+  ],
+  transactions: [
+    'id',
+    'kind',
+    'title',
+    'datetime',
+    'notes',
+    'labels_json',
+    'group_id',
+    'created_at',
+    'updated_at',
+  ],
+};
+
+const expectedCurrentIndexes: Record<string, string[]> = {
+  budgets: ['idx_budgets_active_scope'],
+  recurring_items: ['idx_recurring_items_active_due'],
+  transaction_lines: ['idx_transaction_lines_account_id', 'idx_transaction_lines_transaction_id'],
+  transaction_links: [
+    'idx_transaction_links_link_type',
+    'idx_transaction_links_source_line_id',
+    'idx_transaction_links_source_transaction_id',
+    'idx_transaction_links_target_line_id',
+    'idx_transaction_links_target_transaction_id',
+  ],
+  transaction_templates: ['idx_transaction_templates_active_name'],
+};
+
+async function expectFreshCurrentSchema(db: NodeSQLiteRepositoryDatabase): Promise<void> {
+  expect(await getTableNames(db)).toEqual(Object.keys(expectedCurrentTableColumns).sort());
+
+  for (const [tableName, columnNames] of Object.entries(expectedCurrentTableColumns)) {
+    expect(await getColumnNames(db, tableName)).toEqual(columnNames);
+  }
+
+  await expectCurrentIndexes(db);
+}
+
+async function expectCompatibleCurrentSchema(db: NodeSQLiteRepositoryDatabase): Promise<void> {
+  expect(await getTableNames(db)).toEqual(Object.keys(expectedCurrentTableColumns).sort());
+
+  for (const [tableName, columnNames] of Object.entries(expectedCurrentTableColumns)) {
+    expect((await getColumnNames(db, tableName)).sort()).toEqual([...columnNames].sort());
+  }
+
+  await expectCurrentIndexes(db);
+}
+
+async function expectCurrentIndexes(db: NodeSQLiteRepositoryDatabase): Promise<void> {
+  for (const [tableName, indexNames] of Object.entries(expectedCurrentIndexes)) {
+    expect(await getIndexNames(db, tableName)).toEqual(expect.arrayContaining(indexNames));
+  }
+}
+
 describe('SQLite finance repository integration', () => {
   it('initializes an empty database with required defaults and no demo ledger data', async () => {
     await withInitializedRepository(async ({ db, repository }) => {
@@ -276,6 +458,7 @@ describe('SQLite finance repository integration', () => {
       const settings = await getSettingRows(db);
 
       expect(await getUserVersion(db)).toBe(SCHEMA_VERSION);
+      await expectFreshCurrentSchema(db);
       expect(settings.map((setting) => setting.key)).toEqual(
         expect.arrayContaining([
           'category_catalog_json',
@@ -297,39 +480,6 @@ describe('SQLite finance repository integration', () => {
       expect(snapshot.transactionLines).toEqual([]);
       expect(snapshot.transactionLinks).toEqual([]);
       expect(snapshot.budgets).toEqual([]);
-      expect(await getColumnNames(db, 'budgets')).toEqual(
-        expect.arrayContaining([
-          'name',
-          'amount_minor',
-          'period',
-          'scope_type',
-          'subcategory_id',
-          'is_active',
-        ]),
-      );
-      expect(await getColumnNames(db, 'recurring_items')).toEqual(
-        expect.arrayContaining([
-          'kind',
-          'subcategory_id',
-          'note',
-          'frequency',
-          'next_due_date',
-        ]),
-      );
-      expect(await getColumnNames(db, 'transaction_templates')).toEqual(
-        expect.arrayContaining([
-          'name',
-          'kind',
-          'title',
-          'account_id',
-          'amount_minor',
-          'currency_code',
-          'category_id',
-          'subcategory_id',
-          'notes',
-          'is_active',
-        ]),
-      );
       expect(snapshot.recurringItems).toEqual([]);
       expect(snapshot.recurringBills).toEqual([]);
       expect(snapshot.transactionTemplates).toEqual([]);
@@ -358,6 +508,30 @@ describe('SQLite finance repository integration', () => {
         { id: 'recentTransactions', visible: true },
         { id: 'accounts', visible: false },
       ]);
+    });
+  });
+
+  it('persists dashboard selected account ids without changing account visibility', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await addAccount(repository, { name: 'Everyday' });
+      const savings = await addAccount(repository, { name: 'Savings' });
+
+      await repository.updateDashboardSelectedAccountIds([savings.id]);
+      let snapshot = await repository.getSnapshot();
+
+      expect(snapshot.settings.dashboardSelectedAccountIds).toEqual([savings.id]);
+
+      await repository.updateAccountDashboardVisibility(savings.id, false);
+      snapshot = await repository.getSnapshot();
+
+      expect(getAccountByName(snapshot, 'Savings').showOnDashboard).toBe(false);
+      expect(snapshot.settings.dashboardSelectedAccountIds).toEqual([savings.id]);
+
+      const wallet = await addAccount(repository, { name: 'Wallet' });
+      snapshot = await repository.getSnapshot();
+
+      expect(snapshot.settings.dashboardSelectedAccountIds).toEqual([savings.id, wallet.id]);
+      expect(getAccountByName(snapshot, 'Everyday').showOnDashboard).toBe(true);
     });
   });
 
@@ -1974,6 +2148,7 @@ describe('SQLite finance repository integration', () => {
 
       const snapshot = await fixture.repository.getSnapshot();
       expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      await expectCompatibleCurrentSchema(fixture.db);
       expect(getAccountByName(snapshot, 'Legacy account')).toEqual(
         expect.objectContaining({
           id: 'legacy_acct',
@@ -1989,6 +2164,114 @@ describe('SQLite finance repository integration', () => {
       expect(await getColumnNames(fixture.db, 'transaction_links')).toEqual(
         expect.arrayContaining(['source_transaction_id', 'target_transaction_id', 'source_line_id', 'target_line_id', 'link_type']),
       );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('upgrades recent feature storage without losing settings or recurring items', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.db.execAsync(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL
+        );
+
+        INSERT INTO settings (key, value) VALUES
+          ('dashboard_selected_account_ids', '["acct_hidden"]'),
+          ('dashboard_card_settings', '[{"id":"accounts","visible":true},{"id":"recentTransactions","visible":false}]'),
+          ('add_transaction_defaults_json', '{"lastManualAccountId":"acct_hidden","lastCategoryByKind":{"expense":{"categoryId":"food-dining","subcategoryId":"groceries"}}}');
+
+        CREATE TABLE accounts (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          nickname TEXT NOT NULL DEFAULT '',
+          type TEXT NOT NULL,
+          currency_code TEXT NOT NULL,
+          opening_balance_minor INTEGER NOT NULL,
+          credit_limit_minor INTEGER,
+          notes TEXT NOT NULL DEFAULT '',
+          institution_name TEXT NOT NULL DEFAULT '',
+          include_in_rainy_day INTEGER NOT NULL DEFAULT 0,
+          theme_color TEXT NOT NULL DEFAULT '#1876A8',
+          icon_name TEXT NOT NULL DEFAULT '',
+          show_on_dashboard INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO accounts (
+          id, name, nickname, type, currency_code, opening_balance_minor, credit_limit_minor, notes,
+          institution_name, include_in_rainy_day, theme_color, icon_name, show_on_dashboard,
+          sort_order, is_archived, created_at, updated_at
+        ) VALUES
+          ('acct_visible', 'Visible', '', 'checking', 'AUD', 1000, NULL, '', '', 0, '#1876A8', '', 1, 0, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'),
+          ('acct_hidden', 'Hidden', '', 'checking', 'AUD', 2000, NULL, '', '', 0, '#1876A8', '', 0, 1, 0, '2026-05-02T00:00:00.000Z', '2026-05-02T00:00:00.000Z');
+
+        CREATE TABLE recurring_items (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency_code TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          category_id TEXT NOT NULL DEFAULT '',
+          subcategory_id TEXT,
+          note TEXT NOT NULL DEFAULT '',
+          frequency TEXT NOT NULL DEFAULT 'monthly',
+          next_due_date TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO recurring_items (
+          id, name, kind, amount_minor, currency_code, account_id, category_id,
+          subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
+        ) VALUES (
+          'recurring_salary', 'Salary', 'income', 320000, 'AUD', 'acct_hidden', 'income',
+          'salary', 'Base pay', 'fortnightly', '2026-06-05', 1,
+          '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
+        );
+
+        PRAGMA user_version = 8;
+      `);
+
+      await fixture.repository.initialize('AUD');
+
+      const snapshot = await fixture.repository.getSnapshot();
+      expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      await expectCompatibleCurrentSchema(fixture.db);
+      expect(snapshot.settings.dashboardSelectedAccountIds).toEqual(['acct_hidden']);
+      expect(snapshot.settings.dashboardCardSettings?.slice(0, 2)).toEqual([
+        { id: 'accounts', visible: true },
+        { id: 'recentTransactions', visible: false },
+      ]);
+      expect(snapshot.settings.addTransactionDefaults).toEqual({
+        lastManualAccountId: 'acct_hidden',
+        lastCategoryByKind: {
+          expense: { categoryId: 'food-dining', subcategoryId: 'groceries' },
+        },
+      });
+      expect(getAccountByName(snapshot, 'Hidden').showOnDashboard).toBe(false);
+      expect(snapshot.recurringItems).toEqual([
+        expect.objectContaining({
+          id: 'recurring_salary',
+          name: 'Salary',
+          kind: 'income',
+          amountMinor: 320000,
+          accountId: 'acct_hidden',
+          categoryId: 'income',
+          subcategoryId: 'salary',
+          frequency: 'fortnightly',
+          nextDueDate: '2026-06-05',
+          isActive: true,
+        }),
+      ]);
+      expect(snapshot.transactionTemplates).toEqual([]);
     } finally {
       fixture.cleanup();
     }
