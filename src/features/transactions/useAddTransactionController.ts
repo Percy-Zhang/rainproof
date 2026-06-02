@@ -105,7 +105,7 @@ export function useAddTransactionController({
   const [notes, setNotes] = useState(initialDraft.notes);
   const [labels, setLabels] = useState(initialDraft.labels);
   const [groupId, setGroupId] = useState(initialDraft.groupId);
-  const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>([]);
+  const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>(initialDraft.splitLines);
   const [error, setError] = useState('');
   const transactionDraft: AddTransactionDraft = {
     amountExpression,

@@ -5,6 +5,8 @@ import {
   mapTransaction,
   mapTransactionLine,
   mapTransactionLink,
+  mapTransactionTemplate,
+  mapTransactionTemplateLine,
   safeParseCurrencyCodes,
   safeParseLabels,
   safeParseNullableStringArray,
@@ -152,6 +154,51 @@ describe('storage mappers', () => {
         frequency: 'monthly',
         nextDueDate: '2026-05-14',
         isActive: true,
+      }),
+    );
+  });
+
+  it('maps transaction templates with split lines', () => {
+    const line = mapTransactionTemplateLine({
+      id: 'template-line-1',
+      template_id: 'template-1',
+      amount_minor: 1250,
+      category_id: 'food',
+      subcategory_id: 'groceries',
+      note: 'Fruit',
+      sort_order: 0,
+      created_at: '2026-05-17T10:00:00.000Z',
+    });
+
+    expect(
+      mapTransactionTemplate(
+        {
+          id: 'template-1',
+          name: 'Split groceries',
+          kind: 'expense',
+          title: 'Groceries',
+          account_id: 'acct-1',
+          amount_minor: 3000,
+          currency_code: 'aud',
+          category_id: 'food',
+          subcategory_id: 'groceries',
+          notes: '',
+          is_active: 1,
+          created_at: '2026-05-17T10:00:00.000Z',
+          updated_at: '2026-05-17T10:00:00.000Z',
+        },
+        [line],
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        currencyCode: 'AUD',
+        splitLines: [
+          expect.objectContaining({
+            amountMinor: 1250,
+            templateId: 'template-1',
+            note: 'Fruit',
+          }),
+        ],
       }),
     );
   });

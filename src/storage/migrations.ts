@@ -132,9 +132,29 @@ CREATE INDEX IF NOT EXISTS idx_transaction_templates_active_name
 ON transaction_templates(is_active, name);
 `;
 
+const TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS transaction_template_lines (
+  id TEXT PRIMARY KEY NOT NULL,
+  template_id TEXT NOT NULL REFERENCES transaction_templates(id) ON DELETE CASCADE,
+  amount_minor INTEGER NOT NULL,
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  CHECK (amount_minor > 0),
+  CHECK (category_id <> ''),
+  CHECK (subcategory_id <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_template_lines_template_sort
+ON transaction_template_lines(template_id, sort_order, created_at, id);
+`;
+
 const PLANNING_AND_RAINY_DAY_SCHEMA_SQL = `
 ${RECURRING_ITEMS_SCHEMA_SQL}
 ${TRANSACTION_TEMPLATES_SCHEMA_SQL}
+${TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL}
 
 CREATE TABLE IF NOT EXISTS rainy_day_funds (
   id TEXT PRIMARY KEY NOT NULL,
@@ -218,6 +238,12 @@ const migrations: Migration[] = [
       await ensureTransactionTemplatesSchema(db);
     },
   },
+  {
+    version: 10,
+    migrate: async (db) => {
+      await ensureTransactionTemplateLinesSchema(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -251,6 +277,7 @@ async function ensureCurrentSchemaCompatibility(db: MigrationDatabase): Promise<
   await ensureBudgetSchema(db);
   await ensureRecurringItemsSchema(db);
   await ensureTransactionTemplatesSchema(db);
+  await ensureTransactionTemplateLinesSchema(db);
   await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
 }
 
@@ -414,6 +441,10 @@ async function ensureRecurringItemsSchema(db: MigrationDatabase): Promise<void> 
 
 async function ensureTransactionTemplatesSchema(db: MigrationDatabase): Promise<void> {
   await db.execAsync(TRANSACTION_TEMPLATES_SCHEMA_SQL);
+}
+
+async function ensureTransactionTemplateLinesSchema(db: MigrationDatabase): Promise<void> {
+  await db.execAsync(TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL);
 }
 
 async function ensureLineLevelTransactionLinkSchema(db: MigrationDatabase): Promise<void> {

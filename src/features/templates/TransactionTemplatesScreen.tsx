@@ -134,7 +134,7 @@ function TemplateCard({
           <View style={styles.cardTitleWrap}>
             <Text numberOfLines={1} style={styles.cardTitle}>{template.name}</Text>
             <Text numberOfLines={1} style={styles.cardSubtitle}>
-              {template.title || template.name} / {capitalize(template.kind)}
+              {template.title || template.name} / {getTemplateKindLabel(template)}
             </Text>
           </View>
           <Text style={[styles.amount, { color: template.amountMinor ? amountTone : colors.muted }]}>
@@ -145,6 +145,9 @@ function TemplateCard({
           <Meta label="Account" value={account?.name ?? 'Account needs attention'} />
           <Meta label="Category" value={getTemplateCategoryLabel(template, categories)} />
         </View>
+        {template.splitLines.length ? (
+          <Text numberOfLines={1} style={styles.note}>{template.splitLines.length} split lines</Text>
+        ) : null}
         {template.notes ? <Text numberOfLines={2} style={styles.note}>{template.notes}</Text> : null}
       </Pressable>
 
@@ -180,6 +183,11 @@ function getTemplateCategoryLabel(template: TransactionTemplate, categories: Cat
 
 function capitalize(value: string): string {
   return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+}
+
+function getTemplateKindLabel(template: TransactionTemplate): string {
+  const kindLabel = capitalize(template.kind);
+  return template.splitLines.length ? `Split ${kindLabel}` : kindLabel;
 }
 
 const styles = StyleSheet.create({

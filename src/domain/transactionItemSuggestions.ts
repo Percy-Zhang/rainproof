@@ -64,6 +64,9 @@ export function getTransactionItemNameSuggestionValues({
     const timestamp = getSortableTime(template.updatedAt || template.createdAt);
     addSuggestion(scores, template.title, timestamp);
     addSuggestion(scores, template.name, timestamp);
+    for (const line of template.splitLines) {
+      addSuggestion(scores, line.note, timestamp);
+    }
   }
 
   for (const item of recurringItems) {

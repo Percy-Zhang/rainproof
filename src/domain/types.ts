@@ -154,9 +154,21 @@ export type TransactionTemplate = {
   categoryId: string | null;
   subcategoryId: string | null;
   notes: string;
+  splitLines: TransactionTemplateLine[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type TransactionTemplateLine = {
+  id: string;
+  templateId: string;
+  amountMinor: number;
+  categoryId: string;
+  subcategoryId: string;
+  note: string;
+  sortOrder: number;
+  createdAt: string;
 };
 
 export type RainyDayFund = {
@@ -380,7 +392,15 @@ export type NewTransactionTemplateInput = {
   categoryId?: string | null;
   subcategoryId?: string | null;
   notes?: string;
+  splitLines?: NewTransactionTemplateLineInput[];
   isActive?: boolean;
+};
+
+export type NewTransactionTemplateLineInput = {
+  amountMinor: number;
+  categoryId: string;
+  subcategoryId: string;
+  note?: string;
 };
 
 export type UpdateTransactionTemplateInput = NewTransactionTemplateInput & {

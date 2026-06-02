@@ -30,16 +30,32 @@ describe('transaction item-name suggestions', () => {
     expect(suggestions).toEqual(['Bakery', 'Fruit and veg', 'Split shopping']);
   });
 
-  it('includes active template item/name values and excludes archived templates', () => {
+  it('includes active template item/name values and split line notes, and excludes archived templates', () => {
     const suggestions = getTransactionItemNameSuggestionValues({
       transactions: [],
       transactionTemplates: [
-        template({ id: 'template-1', name: 'Coffee quick add', title: 'Coffee' }),
+        template({
+          id: 'template-1',
+          name: 'Coffee quick add',
+          title: 'Coffee',
+          splitLines: [
+            {
+              id: 'template-line-1',
+              templateId: 'template-1',
+              amountMinor: 1000,
+              categoryId: 'food',
+              subcategoryId: 'groceries',
+              note: 'Bakery',
+              sortOrder: 0,
+              createdAt: '2026-05-01T00:00:00.000Z',
+            },
+          ],
+        }),
         template({ id: 'template-2', name: 'Archived lunch', title: 'Lunch', isActive: false }),
       ],
     });
 
-    expect(suggestions).toEqual(['Coffee', 'Coffee quick add']);
+    expect(suggestions).toEqual(['Bakery', 'Coffee', 'Coffee quick add']);
   });
 
   it('includes active recurring item names and excludes inactive recurring items', () => {
@@ -138,6 +154,7 @@ function template(overrides: Partial<TransactionTemplate>): TransactionTemplate 
     categoryId: 'food-dining',
     subcategoryId: 'groceries',
     notes: '',
+    splitLines: [],
     isActive: true,
     createdAt: '2026-05-01T00:00:00.000Z',
     updatedAt: '2026-05-01T00:00:00.000Z',

@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 10;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -151,6 +151,23 @@ CREATE TABLE IF NOT EXISTS transaction_templates (
 
 CREATE INDEX IF NOT EXISTS idx_transaction_templates_active_name
 ON transaction_templates(is_active, name);
+
+CREATE TABLE IF NOT EXISTS transaction_template_lines (
+  id TEXT PRIMARY KEY NOT NULL,
+  template_id TEXT NOT NULL REFERENCES transaction_templates(id) ON DELETE CASCADE,
+  amount_minor INTEGER NOT NULL,
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  CHECK (amount_minor > 0),
+  CHECK (category_id <> ''),
+  CHECK (subcategory_id <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_transaction_template_lines_template_sort
+ON transaction_template_lines(template_id, sort_order, created_at, id);
 
 CREATE TABLE IF NOT EXISTS rainy_day_funds (
   id TEXT PRIMARY KEY NOT NULL,

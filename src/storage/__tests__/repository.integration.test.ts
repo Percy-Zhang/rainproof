@@ -398,6 +398,16 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
     'created_at',
     'updated_at',
   ],
+  transaction_template_lines: [
+    'id',
+    'template_id',
+    'amount_minor',
+    'category_id',
+    'subcategory_id',
+    'note',
+    'sort_order',
+    'created_at',
+  ],
   transactions: [
     'id',
     'kind',
@@ -422,6 +432,7 @@ const expectedCurrentIndexes: Record<string, string[]> = {
     'idx_transaction_links_target_line_id',
     'idx_transaction_links_target_transaction_id',
   ],
+  transaction_template_lines: ['idx_transaction_template_lines_template_sort'],
   transaction_templates: ['idx_transaction_templates_active_name'],
 };
 
@@ -800,6 +811,92 @@ describe('SQLite finance repository integration', () => {
 
       await repository.deleteTransactionTemplate(template.id);
       expect((await repository.getSnapshot()).transactionTemplates).toEqual([]);
+    });
+  });
+
+  it('persists split transaction templates without creating ledger activity', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+
+      await repository.addTransactionTemplate({
+        name: 'Split groceries',
+        kind: 'expense',
+        title: 'Groceries',
+        accountId: everyday.id,
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+        categoryId: null,
+        subcategoryId: null,
+        notes: '',
+        splitLines: [
+          { amountMinor: 1000, categoryId: 'food-dining', subcategoryId: 'groceries', note: '' },
+          { amountMinor: 2000, categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+        ],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const template = snapshot.transactionTemplates[0];
+      expect(template).toEqual(
+        expect.objectContaining({
+          name: 'Split groceries',
+          kind: 'expense',
+          amountMinor: 3000,
+          categoryId: 'food-dining',
+          subcategoryId: 'groceries',
+          splitLines: [
+            expect.objectContaining({
+              amountMinor: 1000,
+              categoryId: 'food-dining',
+              subcategoryId: 'groceries',
+              note: '',
+              sortOrder: 0,
+            }),
+            expect.objectContaining({
+              amountMinor: 2000,
+              categoryId: 'housing',
+              subcategoryId: 'rent',
+              note: 'Rent',
+              sortOrder: 1,
+            }),
+          ],
+        }),
+      );
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
+
+      await repository.updateTransactionTemplate({
+        id: template.id,
+        name: 'Split pay',
+        kind: 'income',
+        title: 'Pay',
+        accountId: everyday.id,
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        notes: '',
+        splitLines: [
+          { amountMinor: 2000, categoryId: 'income', subcategoryId: 'salary', note: '' },
+          { amountMinor: 1000, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' },
+        ],
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactionTemplates.find((candidate) => candidate.id === template.id)).toEqual(
+        expect.objectContaining({
+          name: 'Split pay',
+          kind: 'income',
+          amountMinor: 3000,
+          splitLines: [
+            expect.objectContaining({ amountMinor: 2000, categoryId: 'income', subcategoryId: 'salary', note: '' }),
+            expect.objectContaining({ amountMinor: 1000, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' }),
+          ],
+        }),
+      );
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
     });
   });
 

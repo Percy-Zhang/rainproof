@@ -96,6 +96,17 @@ const currentTransactionTemplateColumns = [
   'updated_at',
 ];
 
+const currentTransactionTemplateLineColumns = [
+  'id',
+  'template_id',
+  'amount_minor',
+  'category_id',
+  'subcategory_id',
+  'note',
+  'sort_order',
+  'created_at',
+];
+
 class FakeMigrationDatabase {
   readonly execStatements: string[] = [];
   readonly runStatements: string[] = [];
@@ -176,7 +187,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
@@ -193,6 +204,7 @@ describe('SQLite migrations', () => {
       budgets: currentBudgetColumns,
       recurring_items: currentRecurringItemColumns,
       transaction_templates: currentTransactionTemplateColumns,
+      transaction_template_lines: currentTransactionTemplateLineColumns,
     });
 
     await runMigrations(db.asMigrationDatabase());

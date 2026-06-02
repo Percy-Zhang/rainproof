@@ -95,8 +95,66 @@ describe('transaction template helpers', () => {
         amountMinor: null,
         categoryId: null,
         subcategoryId: null,
+        splitLines: [],
       }),
     );
+  });
+
+  it('validates split expense template lines and defaults parent category from the first split line', () => {
+    const validated = validateTransactionTemplateInput(
+      {
+        name: 'Split groceries',
+        kind: 'expense',
+        title: 'Groceries',
+        accountId: 'everyday',
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+        categoryId: null,
+        subcategoryId: null,
+        splitLines: [
+          { amountMinor: 1000, categoryId: 'food', subcategoryId: 'groceries', note: '' },
+          { amountMinor: 2000, categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+        ],
+      },
+      accounts,
+    );
+
+    expect(validated).toEqual(
+      expect.objectContaining({
+        amountMinor: 3000,
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        splitLines: [
+          { amountMinor: 1000, categoryId: 'food', subcategoryId: 'groceries', note: '' },
+          { amountMinor: 2000, categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+        ],
+      }),
+    );
+  });
+
+  it('validates split income template lines', () => {
+    const validated = validateTransactionTemplateInput(
+      {
+        name: 'Split pay',
+        kind: 'income',
+        title: 'Pay',
+        accountId: 'everyday',
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        splitLines: [
+          { amountMinor: 2000, categoryId: 'income', subcategoryId: 'salary', note: '' },
+          { amountMinor: 1000, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' },
+        ],
+      },
+      accounts,
+    );
+
+    expect(validated.splitLines).toEqual([
+      { amountMinor: 2000, categoryId: 'income', subcategoryId: 'salary', note: '' },
+      { amountMinor: 1000, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' },
+    ]);
   });
 
   it('builds Add Transaction prefill state with current date and time, not template creation date', () => {
@@ -126,7 +184,53 @@ describe('transaction template helpers', () => {
       categoryId: 'income',
       subcategoryId: 'salary',
       notes: 'Monthly pay',
+      splitLines: [],
     });
+  });
+
+  it('builds Add Transaction prefill state for split templates', () => {
+    const prefill = buildAddTransactionPrefillFromTemplate({
+      accounts,
+      template: template({
+        title: 'Groceries',
+        amountMinor: 3000,
+        categoryId: null,
+        subcategoryId: null,
+        splitLines: [
+          {
+            id: 'line-food',
+            templateId: 'template-1',
+            amountMinor: 1000,
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: '',
+            sortOrder: 0,
+            createdAt: nowIso,
+          },
+          {
+            id: 'line-home',
+            templateId: 'template-1',
+            amountMinor: 2000,
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+            note: 'Rent',
+            sortOrder: 1,
+            createdAt: nowIso,
+          },
+        ],
+      }),
+      now: new Date(2026, 4, 21, 9, 15, 0, 0),
+    });
+
+    expect(prefill).toEqual(expect.objectContaining({
+      amountExpression: '30.00',
+      categoryId: 'food',
+      subcategoryId: 'groceries',
+      splitLines: [
+        { id: 'line-food', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
+        { id: 'line-home', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+      ],
+    }));
   });
 
   it('keeps active templates sorted and excludes archived templates', () => {
@@ -168,6 +272,58 @@ describe('transaction template helpers', () => {
       ),
     ).toThrow('Template amount must be greater than zero when set.');
   });
+
+  it('blocks invalid split template input', () => {
+    expect(() =>
+      validateTransactionTemplateInput(
+        {
+          name: 'Split transfer',
+          kind: 'transfer' as never,
+          title: 'Transfer',
+          accountId: 'everyday',
+          amountMinor: 1000,
+          currencyCode: 'AUD',
+        },
+        accounts,
+      ),
+    ).toThrow('Templates support income and expense transactions.');
+
+    expect(() =>
+      validateTransactionTemplateInput(
+        {
+          name: 'Split groceries',
+          kind: 'expense',
+          title: 'Groceries',
+          accountId: 'everyday',
+          amountMinor: null,
+          currencyCode: 'AUD',
+          splitLines: [
+            { amountMinor: 1000, categoryId: 'food', subcategoryId: 'groceries' },
+            { amountMinor: 2000, categoryId: 'housing', subcategoryId: 'rent' },
+          ],
+        },
+        accounts,
+      ),
+    ).toThrow('Split templates need an amount.');
+
+    expect(() =>
+      validateTransactionTemplateInput(
+        {
+          name: 'Split groceries',
+          kind: 'expense',
+          title: 'Groceries',
+          accountId: 'everyday',
+          amountMinor: 3000,
+          currencyCode: 'AUD',
+          splitLines: [
+            { amountMinor: 1000, categoryId: 'food', subcategoryId: 'groceries' },
+            { amountMinor: 2500, categoryId: 'housing', subcategoryId: 'rent' },
+          ],
+        },
+        accounts,
+      ),
+    ).toThrow('Split line amounts must equal the template amount.');
+  });
 });
 
 function template(overrides: Partial<TransactionTemplate>): TransactionTemplate {
@@ -182,6 +338,7 @@ function template(overrides: Partial<TransactionTemplate>): TransactionTemplate 
     categoryId: 'food-dining',
     subcategoryId: 'restaurants',
     notes: '',
+    splitLines: [],
     isActive: true,
     createdAt: nowIso,
     updatedAt: nowIso,

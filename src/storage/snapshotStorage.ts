@@ -16,6 +16,7 @@ import {
   mapRainyDayFund,
   mapRecurringItem,
   mapTransactionTemplate,
+  mapTransactionTemplateLine,
   mapTransaction,
   mapTransactionLine,
   mapTransactionLink,
@@ -28,6 +29,7 @@ import {
   type TransactionLineRow,
   type TransactionLinkRow,
   type TransactionRow,
+  type TransactionTemplateLineRow,
   type TransactionTemplateRow,
 } from './mappers';
 
@@ -64,6 +66,9 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   );
   const transactionTemplateRows = await db.getAllAsync<TransactionTemplateRow>(
     'SELECT * FROM transaction_templates ORDER BY is_active DESC, name ASC, created_at ASC, id ASC',
+  );
+  const transactionTemplateLineRows = await db.getAllAsync<TransactionTemplateLineRow>(
+    'SELECT * FROM transaction_template_lines ORDER BY template_id ASC, sort_order ASC, created_at ASC, id ASC',
   );
   const storedEnabledCurrencyCodes = safeParseCurrencyCodes(
     (await db.getFirstAsync<SettingRow>(
@@ -137,6 +142,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   ]);
 
   const recurringItems = recurringItemRows.map(mapRecurringItem);
+  const transactionTemplateLinesByTemplateId = groupTransactionTemplateLinesByTemplateId(transactionTemplateLineRows);
 
   return {
     defaultCurrencyCode,
@@ -157,7 +163,23 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     budgets: budgetRows.map(mapBudget),
     recurringItems,
     recurringBills: recurringItems,
-    transactionTemplates: transactionTemplateRows.map(mapTransactionTemplate),
+    transactionTemplates: transactionTemplateRows.map((row) =>
+      mapTransactionTemplate(row, transactionTemplateLinesByTemplateId.get(row.id) ?? [])),
     rainyDayFund,
   };
+}
+
+function groupTransactionTemplateLinesByTemplateId(
+  rows: TransactionTemplateLineRow[],
+): Map<string, ReturnType<typeof mapTransactionTemplateLine>[]> {
+  const result = new Map<string, ReturnType<typeof mapTransactionTemplateLine>[]>();
+
+  for (const row of rows) {
+    const line = mapTransactionTemplateLine(row);
+    const existing = result.get(line.templateId) ?? [];
+    existing.push(line);
+    result.set(line.templateId, existing);
+  }
+
+  return result;
 }

@@ -28,13 +28,12 @@ export type AddTransactionInitialDraft = {
   labels: string;
   notes: string;
   subcategoryId: string;
+  splitLines: SplitTransactionFormLine[];
   time: string;
   toAccountId: string;
 };
 
-export type AddTransactionDraft = AddTransactionInitialDraft & {
-  splitLines: SplitTransactionFormLine[];
-};
+export type AddTransactionDraft = AddTransactionInitialDraft;
 
 export function createAddTransactionInitialDraft({
   dashboardAccountIds,
@@ -75,6 +74,7 @@ export function createAddTransactionInitialDraft({
     labels: '',
     notes: initialTemplate?.notes ?? '',
     subcategoryId: categorySelection.subcategoryId ?? '',
+    splitLines: initialTemplate?.splitLines ?? [],
     time: initialTemplate?.time ?? toTimeInputValue(now),
     toAccountId: snapshot.accounts[1]?.id ?? OUTSIDE_ACCOUNT_ID,
   };

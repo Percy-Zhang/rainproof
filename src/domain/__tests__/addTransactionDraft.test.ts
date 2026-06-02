@@ -82,6 +82,7 @@ describe('Add Transaction initial draft', () => {
         categoryId: 'income',
         subcategoryId: 'salary',
         notes: 'Monthly pay',
+        splitLines: [],
       },
       now: new Date(2026, 4, 30, 10, 0, 0, 0),
       snapshot: snapshot(),
@@ -115,6 +116,70 @@ describe('Add Transaction initial draft', () => {
       subcategoryId: 'public-transport',
       time: '10:00',
     }));
+  });
+
+  it('uses template split lines in the initial Add Transaction draft', () => {
+    const draft = createAddTransactionInitialDraft({
+      initialTemplate: {
+        kind: 'expense',
+        title: 'Groceries',
+        amountExpression: '30.00',
+        date: '2026-05-31',
+        time: '08:30',
+        accountId: 'template',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        notes: '',
+        splitLines: [
+          { id: 'food-line', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
+          { id: 'home-line', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+        ],
+      },
+      now: new Date(2026, 4, 30, 10, 0, 0, 0),
+      snapshot: snapshot(),
+    });
+
+    expect(draft.splitLines).toEqual([
+      { id: 'food-line', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
+      { id: 'home-line', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+    ]);
+  });
+
+  it('saves template-prefilled split lines with blank item names falling back to the parent item', () => {
+    const initialDraft = createAddTransactionInitialDraft({
+      initialTemplate: {
+        kind: 'expense',
+        title: 'Groceries',
+        amountExpression: '30.00',
+        date: '2026-05-31',
+        time: '08:30',
+        accountId: 'template',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        notes: '',
+        splitLines: [
+          { id: 'food-line', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
+          { id: 'home-line', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
+        ],
+      },
+      now: new Date(2026, 4, 30, 10, 0, 0, 0),
+      snapshot: snapshot(),
+    });
+    const input = buildAddTransactionInput({
+      accounts: [account('template')],
+      draft: {
+        ...initialDraft,
+        groupId: '',
+        labels: '',
+        notes: '',
+        toAccountId: 'outside',
+      },
+    });
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({ amountMinor: -1000, note: 'Groceries' }),
+      expect.objectContaining({ amountMinor: -2000, note: 'Rent' }),
+    ]);
   });
 
   it('falls back to remembered account when dashboard context is unavailable', () => {

@@ -1,18 +1,23 @@
-import { useMemo, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useMemo, useState } from 'react';
+import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AccountIconBadge } from '../../components/AccountDisplay';
 import { ActionButton, Chip, FormError, TextField } from '../../components/ui';
 import {
-  AccountOptionList,
   FormChipRow,
   FormDangerZone,
+  FormHelperText,
   FormInlineAction,
   FormPreviewRow,
   FormScreenShell,
   FormSection,
   KeyboardAwareFormScroll,
-  ReadonlyField,
 } from '../../components/FormLayout';
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
+import { getAccountBalances } from '../../domain/aggregates';
+import { getAccountDisplayName } from '../../domain/accountThemes';
 import {
   defaultCategories,
   getCategory,
@@ -22,7 +27,13 @@ import {
   getSubcategoryIcon,
   getSubcategoryName,
 } from '../../domain/categories';
-import { parseMoneyInput } from '../../domain/money';
+import { formatMoney, parseMoneyInput } from '../../domain/money';
+import {
+  createSplitTransactionFormLine,
+  formatMinorInput,
+  getSplitTransactionFormSummary,
+  type SplitTransactionFormLine,
+} from '../../domain/splitTransactionForm';
 import {
   getTemplateCurrencyCodeForAccount,
   validateTransactionTemplateInput,
@@ -42,7 +53,9 @@ import type {
 } from '../categorySelection/categorySelectionModel';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
 import { AutocompleteField, useAutocompleteOptions } from '../transactions/TransactionFormComponents';
-import { colors } from '../../theme/tokens';
+import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from '../transactions/SplitTransactionEditor';
+import { TransactionPickerScreen } from '../transactions/TransactionPickerScreen';
+import { colors, spacing, typography } from '../../theme/tokens';
 
 type TransactionTemplateFormScreenProps =
   | {
@@ -76,6 +89,15 @@ const kindOptions: { value: TransactionTemplateKind; label: string }[] = [
   { value: 'income', label: 'Income' },
 ];
 
+type TemplateFormPage = 'form' | 'account' | 'split';
+
+let templateSplitLineCounter = 0;
+
+function createTemplateSplitLineId(): string {
+  templateSplitLineCounter += 1;
+  return `template-split-line-${templateSplitLineCounter}`;
+}
+
 export function TransactionTemplateFormScreen(props: TransactionTemplateFormScreenProps) {
   const { mode, snapshot, onCancel, onDone } = props;
   const editingTemplate = mode === 'edit' ? props.template : null;
@@ -90,11 +112,26 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   const [categoryId, setCategoryId] = useState<string | null>(editingTemplate?.categoryId ?? null);
   const [subcategoryId, setSubcategoryId] = useState<string | null>(editingTemplate?.subcategoryId ?? null);
   const [notes, setNotes] = useState(editingTemplate?.notes ?? '');
+  const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>(() =>
+    (editingTemplate?.splitLines ?? []).map((line) =>
+      createSplitTransactionFormLine({
+        id: line.id,
+        amount: formatMinorInput(line.amountMinor),
+        categoryId: line.categoryId,
+        subcategoryId: line.subcategoryId,
+        note: line.note,
+      })),
+  );
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState('');
+  const [page, setPage] = useState<TemplateFormPage>('form');
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const currencyCode = getTemplateCurrencyCodeForAccount(accounts, accountId);
+  const selectedAccountBalance = useMemo(
+    () => getAccountBalances(snapshot.accounts, snapshot.transactionLines).find(({ account }) => account.id === accountId),
+    [accountId, snapshot.accounts, snapshot.transactionLines],
+  );
   const itemNameSuggestionValues = useMemo(
     () => getTransactionItemNameSuggestionValues({
       transactions: snapshot.transactions,
@@ -113,11 +150,29 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   );
   const nameSuggestions = useAutocompleteOptions(itemNameSuggestionValues, name);
   const titleSuggestions = useAutocompleteOptions(itemNameSuggestionValues, title);
+  const splitTotalMinor = getTemplateAmountMinor(amount);
+  const splitSummary = getSplitTransactionFormSummary(splitTotalMinor, splitLines);
+
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (page === 'account' || page === 'split') {
+          setPage('form');
+          return true;
+        }
+
+        return false;
+      });
+
+      return () => subscription.remove();
+    }, [page]),
+  );
 
   function changeKind(nextKind: TransactionTemplateKind) {
     setKind(nextKind);
     setCategoryId(null);
     setSubcategoryId(null);
+    setSplitLines([]);
     setConfirmArchive(false);
     setConfirmDelete(false);
     setError('');
@@ -196,12 +251,19 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
       categoryId,
       subcategoryId,
       notes,
+      splitLines: splitLines.map((line) => ({
+        amountMinor: Math.abs(parseMoneyInput(line.amount)),
+        categoryId: line.categoryId,
+        subcategoryId: line.subcategoryId,
+        note: line.note,
+      })),
       isActive: true,
     };
   }
 
   function selectAccount(nextAccountId: string) {
     setAccountId(nextAccountId);
+    setPage('form');
     setConfirmArchive(false);
     setConfirmDelete(false);
     setError('');
@@ -231,6 +293,156 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   function clearCategory() {
     setCategoryId(null);
     setSubcategoryId(null);
+  }
+
+  function getSplitBaseCategorySelection() {
+    const category = categoryId ? getCategory(categoryId, categories) : getDefaultCategoryForKind(kind, categories);
+    return {
+      categoryId: category.id,
+      subcategoryId: subcategoryId ?? getDefaultSubcategoryId(category),
+    };
+  }
+
+  function startSplitTemplate() {
+    const selection = getSplitBaseCategorySelection();
+    const totalMinor = getTemplateAmountMinor(amount);
+    setCategoryId(selection.categoryId);
+    setSubcategoryId(selection.subcategoryId);
+    setSplitLines([
+      createSplitTransactionFormLine({
+        id: createTemplateSplitLineId(),
+        amount: totalMinor > 0 ? formatMinorInput(totalMinor) : '',
+        categoryId: selection.categoryId,
+        subcategoryId: selection.subcategoryId,
+      }),
+      createSplitTransactionFormLine({
+        id: createTemplateSplitLineId(),
+        categoryId: selection.categoryId,
+        subcategoryId: selection.subcategoryId,
+      }),
+    ]);
+    setError('');
+  }
+
+  function openSplitTemplateEditor() {
+    if (splitLines.length < 2) {
+      startSplitTemplate();
+    }
+
+    setPage('split');
+  }
+
+  function stopSplitTemplate() {
+    if (splitLines.length === 1) {
+      setCategoryId(splitLines[0].categoryId);
+      setSubcategoryId(splitLines[0].subcategoryId);
+    }
+    setSplitLines([]);
+    setError('');
+  }
+
+  function addSplitLine() {
+    const selection = getSplitBaseCategorySelection();
+    const remainingMinor = getSplitTransactionFormSummary(getTemplateAmountMinor(amount), splitLines).remainingMinor;
+    setSplitLines((current) => [
+      ...current,
+      createSplitTransactionFormLine({
+        id: createTemplateSplitLineId(),
+        amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
+        categoryId: selection.categoryId,
+        subcategoryId: selection.subcategoryId,
+      }),
+    ]);
+  }
+
+  function updateSplitLine(lineId: string, patch: Partial<SplitTransactionFormLine>) {
+    setSplitLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
+  }
+
+  function removeSplitLine(lineId: string) {
+    const nextLines = splitLines.filter((line) => line.id !== lineId);
+    if (nextLines.length === 1) {
+      setCategoryId(nextLines[0].categoryId);
+      setSubcategoryId(nextLines[0].subcategoryId);
+      setSplitLines([]);
+      setPage('form');
+      return;
+    }
+
+    setSplitLines(nextLines);
+  }
+
+  function openSplitLineCategorySelect(lineId: string) {
+    const selection = getSplitBaseCategorySelection();
+    const line = splitLines.find((candidate) => candidate.id === lineId);
+    props.onOpenCategorySelect(
+      {
+        kind,
+        selectedCategoryId: line?.categoryId ?? selection.categoryId,
+        selectedSubcategoryId: line?.subcategoryId ?? selection.subcategoryId,
+        selectionMode: 'subcategory',
+        showSuggestions: false,
+        title: 'Split line category',
+      },
+      ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
+        const nextCategory = getCategory(nextCategoryId, categories);
+        updateSplitLine(lineId, {
+          categoryId: nextCategory.id,
+          subcategoryId: nextSubcategoryId ?? getDefaultSubcategoryId(nextCategory),
+        });
+      },
+    );
+  }
+
+  if (page === 'account') {
+    return (
+      <TransactionPickerScreen
+        mode="sourceAccount"
+        accounts={accounts}
+        selectedAccountId={accountId}
+        selectedCategoryId={categoryId ?? ''}
+        selectedSubcategoryId={subcategoryId ?? ''}
+        kind={kind}
+        categories={categories}
+        transactions={snapshot.transactions}
+        transactionLines={snapshot.transactionLines}
+        showCurrencyCodes
+        sourceAccountId={accountId}
+        onClose={() => setPage('form')}
+        onExit={onCancel}
+        onSelectAccount={selectAccount}
+        onSelectCategory={() => undefined}
+        cancelTestID="cancel-transaction-template-account-picker"
+      />
+    );
+  }
+
+  if (page === 'split') {
+    return (
+      <FormScreenShell
+        title={`Split ${kind} template`}
+        onBack={() => setPage('form')}
+        onSave={() => setPage('form')}
+        saveLabel="Done"
+        saveTestID="done-transaction-template-split"
+      >
+        <SplitTransactionEditorScrollContainer testID="transaction-template-split-page">
+          <SplitTransactionEditor
+            categories={categories}
+            currencyCode={currencyCode}
+            itemNameSuggestions={itemNameSuggestionValues}
+            lines={splitLines}
+            showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
+            totalMinor={splitTotalMinor}
+            onAddLine={addSplitLine}
+            onPickCategory={openSplitLineCategorySelect}
+            onRemoveLine={removeSplitLine}
+            onUpdateLine={updateSplitLine}
+          />
+          <FormInlineAction label="Use as normal template" onPress={stopSplitTemplate} />
+        </SplitTransactionEditorScrollContainer>
+      </FormScreenShell>
+    );
   }
 
   return (
@@ -274,24 +486,18 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
           label="Amount"
           value={amount}
           onChangeText={setAmount}
-          placeholder="Optional"
+          placeholder={splitLines.length >= 2 ? 'Required for split templates' : 'Optional'}
           keyboardType="decimal-pad"
         />
 
         <FormSection label="Account">
-          <AccountOptionList
-            accounts={accounts}
-            emptyMessage="Add an account before creating templates."
-            selectedAccountId={accountId}
-            onSelectAccount={selectAccount}
+          <TemplateAccountRow
+            account={selectedAccount}
+            balanceMinor={selectedAccountBalance?.balanceMinor}
+            showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
+            onPress={() => setPage('account')}
           />
         </FormSection>
-
-        <ReadonlyField
-          label="Currency"
-          value={selectedAccount ? currencyCode : 'Select an account'}
-          detail={selectedAccount ? 'From selected account' : 'Choose an account before saving.'}
-        />
 
         <FormSection label="Category">
           <CategorySelectionField
@@ -308,6 +514,21 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
           ) : null}
         </FormSection>
 
+        <FormSection label="Split lines">
+          <SplitTemplateSummaryRow
+            kind={kind}
+            lineCount={splitLines.length}
+            splitSummary={splitSummary}
+            totalMinor={splitTotalMinor}
+            currencyCode={currencyCode}
+            showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
+            onPress={openSplitTemplateEditor}
+          />
+          {splitLines.length >= 2 ? (
+            <FormInlineAction label="Use as normal template" onPress={stopSplitTemplate} />
+          ) : null}
+        </FormSection>
+
         <TextField
           label="Notes"
           value={notes}
@@ -316,16 +537,20 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
           multiline
         />
 
-        <TemplatePreview
-          amount={amount}
-          categoryId={categoryId}
-          categories={categories}
-          currencyCode={currencyCode}
-          kind={kind}
-          name={name}
-          subcategoryId={subcategoryId}
-          title={title}
-        />
+        <FormSection label="Template preview">
+          <TemplatePreview
+            amount={amount}
+            categoryId={categoryId}
+            categories={categories}
+            currencyCode={currencyCode}
+            kind={kind}
+            name={name}
+            splitLineCount={splitLines.length}
+            subcategoryId={subcategoryId}
+            title={title}
+          />
+          <FormHelperText>Preview only. This is what will be prefilled.</FormHelperText>
+        </FormSection>
 
         <FormError message={error} />
 
@@ -358,6 +583,7 @@ function TemplatePreview({
   currencyCode,
   kind,
   name,
+  splitLineCount,
   subcategoryId,
   title,
 }: {
@@ -367,6 +593,7 @@ function TemplatePreview({
   currencyCode: string;
   kind: TransactionTemplateKind;
   name: string;
+  splitLineCount: number;
   subcategoryId: string | null;
   title: string;
 }) {
@@ -380,8 +607,97 @@ function TemplatePreview({
       color={color}
       icon={icon}
       title={label}
-      detail={`${capitalize(kind)} / ${amountLabel}`}
+      detail={`${splitLineCount >= 2 ? `Split ${capitalize(kind)}` : capitalize(kind)} / ${amountLabel}`}
     />
+  );
+}
+
+function TemplateAccountRow({
+  account,
+  balanceMinor,
+  onPress,
+  showCurrencyCodes,
+}: {
+  account?: AppSnapshot['accounts'][number];
+  balanceMinor?: number;
+  onPress: () => void;
+  showCurrencyCodes: boolean;
+}) {
+  const detail = account
+    ? [
+        account.type.replace('_', ' '),
+        account.currencyCode,
+        balanceMinor !== undefined
+          ? formatMoney(balanceMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes })
+          : null,
+      ].filter(Boolean).join(' / ')
+    : 'Add an account before creating templates.';
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.selectorRow, pressed && styles.pressed]}
+      testID="transaction-template-account-row"
+    >
+      {account ? (
+        <AccountIconBadge account={account} size="md" />
+      ) : (
+        <View style={styles.emptyIcon}>
+          <Ionicons name="wallet-outline" size={18} color={colors.primaryDark} />
+        </View>
+      )}
+      <View style={styles.selectorText}>
+        <Text numberOfLines={1} style={styles.selectorTitle}>
+          {account ? getAccountDisplayName(account) : 'No account selected'}
+        </Text>
+        <Text numberOfLines={1} style={styles.selectorDetail}>{detail}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
+  );
+}
+
+function SplitTemplateSummaryRow({
+  currencyCode,
+  kind,
+  lineCount,
+  onPress,
+  showCurrencyCodes,
+  splitSummary,
+  totalMinor,
+}: {
+  currencyCode: string;
+  kind: TransactionTemplateKind;
+  lineCount: number;
+  onPress: () => void;
+  showCurrencyCodes: boolean;
+  splitSummary: ReturnType<typeof getSplitTransactionFormSummary>;
+  totalMinor: number;
+}) {
+  const hasSplitLines = lineCount >= 2;
+  const detail = hasSplitLines
+    ? `${lineCount} lines / ${splitSummary.isBalanced ? 'Ready' : 'Needs total'} / ${formatMoney(totalMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })}`
+    : `Create a split ${kind} template`;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.selectorRow, pressed && styles.pressed]}
+      testID="transaction-template-split-row"
+    >
+      <View style={styles.emptyIcon}>
+        <Ionicons name="git-branch-outline" size={18} color={colors.primaryDark} />
+      </View>
+      <View style={styles.selectorText}>
+        <Text numberOfLines={1} style={styles.selectorTitle}>
+          {hasSplitLines ? `Split ${kind} template` : 'Normal template'}
+        </Text>
+        <Text numberOfLines={1} style={styles.selectorDetail}>{detail}</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
+    </Pressable>
   );
 }
 
@@ -391,6 +707,14 @@ function parseOptionalTemplateAmount(value: string): number | null {
   }
 
   return parseMoneyInput(value);
+}
+
+function getTemplateAmountMinor(value: string): number {
+  try {
+    return Math.abs(parseMoneyInput(value));
+  } catch {
+    return 0;
+  }
 }
 
 function getCategorySelectionLabel(
@@ -435,3 +759,44 @@ function getCategorySelectionIcon(
 function capitalize(value: string): string {
   return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
+
+const styles = StyleSheet.create({
+  emptyIcon: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  pressed: {
+    opacity: 0.78,
+  },
+  selectorDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
+  },
+  selectorRow: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 58,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  selectorText: {
+    flex: 1,
+    gap: spacing.xs,
+    minWidth: 0,
+  },
+  selectorTitle: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+});

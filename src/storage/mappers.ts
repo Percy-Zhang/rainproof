@@ -14,6 +14,7 @@ import type {
   Transaction,
   TransactionTemplate,
   TransactionTemplateKind,
+  TransactionTemplateLine,
   TransactionKind,
   TransactionLine,
   TransactionLink,
@@ -127,6 +128,17 @@ export type TransactionTemplateRow = {
   is_active: number;
   created_at: string;
   updated_at: string;
+};
+
+export type TransactionTemplateLineRow = {
+  id: string;
+  template_id: string;
+  amount_minor: number;
+  category_id: string;
+  subcategory_id: string;
+  note: string;
+  sort_order: number;
+  created_at: string;
 };
 
 export type RainyDayFundRow = {
@@ -248,7 +260,10 @@ export function mapRecurringItem(row: RecurringItemRow): RecurringItem {
   };
 }
 
-export function mapTransactionTemplate(row: TransactionTemplateRow): TransactionTemplate {
+export function mapTransactionTemplate(
+  row: TransactionTemplateRow,
+  splitLines: TransactionTemplateLine[] = [],
+): TransactionTemplate {
   return {
     id: row.id,
     name: row.name,
@@ -260,9 +275,23 @@ export function mapTransactionTemplate(row: TransactionTemplateRow): Transaction
     categoryId: row.category_id || null,
     subcategoryId: row.subcategory_id || null,
     notes: row.notes,
+    splitLines,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function mapTransactionTemplateLine(row: TransactionTemplateLineRow): TransactionTemplateLine {
+  return {
+    id: row.id,
+    templateId: row.template_id,
+    amountMinor: row.amount_minor,
+    categoryId: row.category_id,
+    subcategoryId: row.subcategory_id,
+    note: row.note,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
   };
 }
 
