@@ -2,7 +2,6 @@ import { StatusBar } from 'expo-status-bar';
 import { useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -12,33 +11,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { FormError } from '../components/ui';
 import { getDashboardDefaultSelectedAccountIds } from '../domain/dashboard';
-import { AccountsScreen } from '../features/accounts/AccountsScreen';
-import { BudgetsScreen } from '../features/budgets/BudgetsScreen';
-import { DashboardScreen } from '../features/dashboard/DashboardScreen';
-import { RecurringItemsScreen } from '../features/recurring/RecurringItemsScreen';
-import { SettingsScreen } from '../features/settings/SettingsScreen';
-import { StatsScreen } from '../features/stats/StatsScreen';
-import { TransactionTemplatesScreen } from '../features/templates/TransactionTemplatesScreen';
 import {
   createDefaultTransactionPeriodState,
-  TransactionsScreen,
   type TransactionPeriodState,
 } from '../features/transactions/TransactionsScreen';
 import { colors, spacing, typography } from '../theme/tokens';
+import { DrawerRouteAdapter, type DrawerRootScreenKey } from './DrawerRouteAdapters';
 import { type RootStackNavigation, useMainDrawerNavigation } from './routeHooks';
 
-type RootScreenKey =
-  | 'dashboard'
-  | 'accounts'
-  | 'transactions'
-  | 'stats'
-  | 'budgets'
-  | 'recurring'
-  | 'templates'
-  | 'settings';
-
 type LegacyDrawerScreenProps = {
-  rootScreen: RootScreenKey;
+  rootScreen: DrawerRootScreenKey;
 };
 
 export function HomeDrawerScreen() {
@@ -114,91 +96,18 @@ function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
     <View style={styles.shell}>
       <StatusBar style="dark" />
       {error ? <View style={styles.errorWrap}><FormError message={error} /></View> : null}
-
-      {rootScreen === 'accounts' ? (
-        <View style={styles.paddedContent}>
-          <AccountsScreen
-            snapshot={snapshot}
-            accountBalances={derived.accountBalances}
-            showHeader={false}
-            onAddAccount={() => rootNavigation?.navigate('AddAccount')}
-            onEditAccount={(accountId) => rootNavigation?.navigate('EditAccount', { accountId })}
-            onUpdateAccountDashboardVisibility={actions.updateAccountDashboardVisibility}
-            onUpdateAccountOrder={actions.updateAccountOrder}
-          />
-        </View>
-      ) : rootScreen === 'dashboard' ? (
-        <DashboardScreen
-          snapshot={snapshot}
-          accountBalances={derived.accountBalances}
-          rainyDayProgress={derived.rainyDayProgress}
-          onAddAccount={() => rootNavigation?.navigate('AddAccount')}
-          onAddTransaction={(params) => rootNavigation?.navigate('AddTransaction', params)}
-          onOpenRainyDayFund={() => rootNavigation?.navigate('RainyDayFund')}
-          onOpenTransactions={() => navigation.navigate('Transactions')}
-          onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
-          onOpenAccount={() => navigation.navigate('Accounts')}
-          onOpenBudgets={() => navigation.navigate('Budgets')}
-          onOpenDashboardEdit={() => rootNavigation?.navigate('DashboardEdit')}
-          onOpenRecurring={() => navigation.navigate('Recurring')}
-          onOpenTemplates={() => navigation.navigate('Templates')}
-          onUpdateSelectedAccountIds={actions.updateDashboardSelectedAccountIds}
-        />
-      ) : rootScreen === 'stats' ? (
-        <StatsScreen
-          accountBalances={derived.accountBalances}
-          snapshot={snapshot}
-          defaultSelectedAccountIds={defaultDashboardSelectedAccountIds}
-          onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
-          onOpenStatsDrilldown={(params) => rootNavigation?.navigate('StatsDrilldown', params)}
-          showHeader={false}
-        />
-      ) : rootScreen === 'transactions' ? (
-        <TransactionsScreen
-          accountBalances={derived.accountBalances}
-          snapshot={snapshot}
-          defaultSelectedAccountIds={defaultDashboardSelectedAccountIds}
-          periodState={transactionPeriodState}
-          onPeriodStateChange={setTransactionPeriodState}
-          onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
-          showHeader={false}
-        />
-      ) : rootScreen === 'budgets' ? (
-        <BudgetsScreen
-          snapshot={snapshot}
-          onAddBudget={() => rootNavigation?.navigate('AddBudget')}
-          onEditBudget={(budgetId) => rootNavigation?.navigate('EditBudget', { budgetId })}
-        />
-      ) : rootScreen === 'recurring' ? (
-        <RecurringItemsScreen
-          snapshot={snapshot}
-          onAddRecurringItem={() => rootNavigation?.navigate('AddRecurringItem')}
-          onCreateTransaction={(recurringItemId) =>
-            rootNavigation?.navigate('CreateRecurringTransaction', { recurringItemId })}
-          onEditRecurringItem={(recurringItemId) => rootNavigation?.navigate('EditRecurringItem', { recurringItemId })}
-        />
-      ) : rootScreen === 'templates' ? (
-        <TransactionTemplatesScreen
-          snapshot={snapshot}
-          onAddTemplate={() => rootNavigation?.navigate('AddTransactionTemplate')}
-          onEditTemplate={(templateId) => rootNavigation?.navigate('EditTransactionTemplate', { templateId })}
-          onUseTemplate={(templateId) => rootNavigation?.navigate('AddTransaction', { templateId })}
-        />
-      ) : (
-        <ScrollView
-          contentContainerStyle={styles.paddedScrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <SettingsScreen
-            snapshot={snapshot}
-            onOpenCategoryManagement={() => rootNavigation?.navigate('CategoryManagement')}
-            onUpdateSettings={actions.updateSettings}
-            showHeader={false}
-          />
-        </ScrollView>
-      )}
-
+      <DrawerRouteAdapter
+        accountBalances={derived.accountBalances}
+        actions={actions}
+        defaultSelectedAccountIds={defaultDashboardSelectedAccountIds}
+        drawerNavigation={navigation}
+        rainyDayProgress={derived.rainyDayProgress}
+        rootNavigation={rootNavigation}
+        rootScreen={rootScreen}
+        snapshot={snapshot}
+        transactionPeriodState={transactionPeriodState}
+        onPeriodStateChange={setTransactionPeriodState}
+      />
     </View>
   );
 }
@@ -224,14 +133,5 @@ const styles = StyleSheet.create({
   errorWrap: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
-  },
-  paddedContent: {
-    flex: 1,
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-  },
-  paddedScrollContent: {
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
   },
 });
