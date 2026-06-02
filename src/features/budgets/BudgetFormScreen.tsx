@@ -21,7 +21,7 @@ import {
   getSubcategoryIcon,
   getSubcategoryName,
 } from '../../domain/categories';
-import { getCurrencyOptions } from '../../domain/currencyCatalog';
+import { getBudgetCurrencyOptions } from '../../domain/budgets';
 import { parseMoneyInput } from '../../domain/money';
 import type {
   AppSnapshot,
@@ -63,7 +63,6 @@ type BudgetFormScreenProps =
       onDone: () => void;
     };
 
-const currencyOptions = getCurrencyOptions();
 const scopeOptions: { value: BudgetScopeType; label: string }[] = [
   { value: 'overall', label: 'Overall' },
   { value: 'category', label: 'Category' },
@@ -81,9 +80,16 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   const initialCategoryId = editingBudget?.categoryId ?? firstCategory?.id ?? 'food';
   const initialCategory = getCategory(initialCategoryId, categories);
   const initialSubcategoryId = editingBudget?.subcategoryId ?? getDefaultSubcategoryId(initialCategory);
+  const currencyOptions = useMemo(
+    () => getBudgetCurrencyOptions({
+      accounts: snapshot.accounts,
+      currentBudgetCurrencyCode: editingBudget?.currencyCode,
+    }),
+    [editingBudget?.currencyCode, snapshot.accounts],
+  );
   const [name, setName] = useState(editingBudget?.name ?? '');
   const [amount, setAmount] = useState(formatOptionalMoneyInput(editingBudget?.amountMinor));
-  const [currencyCode, setCurrencyCode] = useState(editingBudget?.currencyCode ?? snapshot.defaultCurrencyCode);
+  const [currencyCode, setCurrencyCode] = useState(editingBudget?.currencyCode ?? currencyOptions[0]?.code ?? '');
   const [scopeType, setScopeType] = useState<BudgetScopeType>(editingBudget?.scopeType ?? 'overall');
   const [categoryId, setCategoryId] = useState(initialCategory.id);
   const [subcategoryId, setSubcategoryId] = useState(initialSubcategoryId);
@@ -235,7 +241,7 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
             color={colors.primary}
             icon="wallet-outline"
             title="Overall monthly spending"
-            detail={`Counts all expense categories in ${currencyCode}.`}
+            detail={`Counts all expense categories in ${currencyCode || 'selected currency'}.`}
           />
         )}
 

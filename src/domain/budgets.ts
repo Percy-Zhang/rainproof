@@ -1,6 +1,8 @@
-import { normalizeCurrencyCode } from './money';
+import { getCurrencyName, type CurrencyOption } from './currencyCatalog';
+import { getCurrencySymbol, normalizeCurrencyCode } from './money';
 import { getCategory, getSubcategory } from './categories';
 import type {
+  Account,
   Budget,
   BudgetPeriod,
   BudgetScopeType,
@@ -44,6 +46,11 @@ export type BudgetUsageDisplayRow = {
   remainingMinor: number;
   percentageUsed: number;
   status: BudgetUsageStatus;
+};
+
+export type BudgetCurrencyOptionsInput = {
+  accounts: Account[];
+  currentBudgetCurrencyCode?: CurrencyCode | null;
 };
 
 type BudgetScopeInput = Pick<Budget, 'currencyCode' | 'period' | 'scopeType' | 'categoryId' | 'subcategoryId'>;
@@ -113,6 +120,31 @@ export function validateBudgetInput(input: NewBudgetInput | UpdateBudgetInput): 
     subcategoryId: scopeType === 'subcategory' ? subcategoryId : null,
     isActive: input.isActive !== false,
   };
+}
+
+export function getBudgetCurrencyOptions({
+  accounts,
+  currentBudgetCurrencyCode,
+}: BudgetCurrencyOptionsInput): CurrencyOption[] {
+  const codes: CurrencyCode[] = [];
+
+  for (const account of accounts) {
+    const code = normalizeCurrencyCode(account.currencyCode, '');
+    if (!account.isArchived && code && !codes.includes(code)) {
+      codes.push(code);
+    }
+  }
+
+  const currentCode = normalizeCurrencyCode(currentBudgetCurrencyCode, '');
+  if (currentCode && !codes.includes(currentCode)) {
+    codes.push(currentCode);
+  }
+
+  return codes.map((code) => ({
+    code,
+    label: getCurrencyName(code),
+    symbol: getCurrencySymbol(code),
+  }));
 }
 
 export function getBudgetUsageFromStatsReport({

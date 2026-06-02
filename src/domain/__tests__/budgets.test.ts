@@ -1,6 +1,7 @@
 import {
   calculateBudgetPercentUsed,
   calculateBudgetRemaining,
+  getBudgetCurrencyOptions,
   getBudgetMonthlyRange,
   getBudgetScopeDetail,
   getBudgetScopeLabel,
@@ -245,6 +246,31 @@ describe('budget helpers', () => {
       { id: 'c', spentMinor: 12000, percentageUsed: 120 },
       { id: 'a', spentMinor: 2000, percentageUsed: 20 },
     ]);
+  });
+
+  it('builds budget currency options from active account currencies', () => {
+    const options = getBudgetCurrencyOptions({
+      accounts: [
+        makeAccount('aud_one', 'AUD one', 'checking', 'AUD', 0),
+        makeAccount('usd', 'USD account', 'cash', 'USD', 0),
+        makeAccount('aud_two', 'AUD two', 'savings', 'AUD', 0),
+        { ...makeAccount('archived_jpy', 'Archived JPY', 'cash', 'JPY', 0), isArchived: true },
+      ],
+    });
+
+    expect(options.map((option) => option.code)).toEqual(['AUD', 'USD']);
+  });
+
+  it('keeps an existing budget currency available when no active account uses it', () => {
+    const options = getBudgetCurrencyOptions({
+      accounts: [
+        makeAccount('aud', 'AUD account', 'checking', 'AUD', 0),
+        { ...makeAccount('archived_jpy', 'Archived JPY', 'cash', 'JPY', 0), isArchived: true },
+      ],
+      currentBudgetCurrencyCode: 'JPY',
+    });
+
+    expect(options.map((option) => option.code)).toEqual(['AUD', 'JPY']);
   });
 });
 
