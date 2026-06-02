@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import {
   Keyboard,
   KeyboardAvoidingView,
+  Dimensions,
   Platform,
   Pressable,
   ScrollView,
@@ -58,6 +59,11 @@ type SplitEditorScrollContextValue = {
 
 const SplitEditorScrollContext = createContext<SplitEditorScrollContextValue | null>(null);
 
+type KeyboardViewport = {
+  height: number;
+  topY: number | null;
+};
+
 export function SplitTransactionEditorScrollContainer({
   children,
   testID,
@@ -67,7 +73,9 @@ export function SplitTransactionEditorScrollContainer({
   const scrollRef = useRef<ScrollView>(null);
   const scrollYRef = useRef(0);
   const pendingFocusedNodeRef = useRef<View | null>(null);
-  const keyboardHeight = useKeyboardHeight();
+  const keyboardViewport = useKeyboardViewport();
+  const [scrollViewportBottom, setScrollViewportBottom] = useState<number | null>(null);
+  const keyboardScrollPadding = getKeyboardScrollPadding(keyboardViewport, scrollViewportBottom);
 
   const revealNodeNow = useCallback((node: View | null) => {
     if (!node || !scrollViewportRef.current) {
@@ -78,8 +86,10 @@ export function SplitTransactionEditorScrollContainer({
       node.measureInWindow((___: number, fieldWindowY: number, ____: number, fieldHeight: number) => {
         const topGuard = spacing.md;
         const bottomGuard = spacing.xxl + spacing.md;
+        const viewportBottom = scrollWindowY + scrollHeight;
+        const keyboardTop = getKeyboardTopY(keyboardViewport);
         const visibleTop = scrollWindowY + topGuard;
-        const visibleBottom = scrollWindowY + scrollHeight - bottomGuard;
+        const visibleBottom = Math.min(viewportBottom, keyboardTop ?? viewportBottom) - bottomGuard;
         const fieldTop = fieldWindowY;
         const fieldBottom = fieldWindowY + fieldHeight;
 
@@ -99,7 +109,7 @@ export function SplitTransactionEditorScrollContainer({
         }
       });
     });
-  }, []);
+  }, [keyboardViewport]);
 
   const revealNode = useCallback((node: View | null) => {
     pendingFocusedNodeRef.current = node;
@@ -112,7 +122,7 @@ export function SplitTransactionEditorScrollContainer({
   }), [revealNode]);
 
   useEffect(() => {
-    if (keyboardHeight <= 0 || !pendingFocusedNodeRef.current) {
+    if (keyboardViewport.height <= 0 || !pendingFocusedNodeRef.current) {
       return undefined;
     }
 
@@ -123,13 +133,20 @@ export function SplitTransactionEditorScrollContainer({
     }, Platform.OS === 'android' ? 80 : 50);
 
     return () => clearTimeout(timer);
-  }, [keyboardHeight, revealNodeNow]);
+  }, [keyboardViewport.height, revealNodeNow]);
 
   function handleScroll(event: NativeSyntheticEvent<NativeScrollEvent>) {
     scrollYRef.current = event.nativeEvent.contentOffset.y;
   }
 
   function handleLayout() {
+    scrollViewportRef.current?.measureInWindow((_: number, scrollWindowY: number, __: number, scrollHeight: number) => {
+      const nextScrollViewportBottom = scrollWindowY + scrollHeight;
+      setScrollViewportBottom((current) => (
+        current === nextScrollViewportBottom ? current : nextScrollViewportBottom
+      ));
+    });
+
     if (pendingFocusedNodeRef.current) {
       requestAnimationFrame(() => {
         if (pendingFocusedNodeRef.current) {
@@ -151,7 +168,7 @@ export function SplitTransactionEditorScrollContainer({
             ref={scrollRef}
             contentContainerStyle={[
               styles.keyboardScrollContent,
-              { paddingBottom: insets.bottom + spacing.xxl },
+              { paddingBottom: insets.bottom + spacing.xxl + keyboardScrollPadding },
             ]}
             keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'none'}
             keyboardShouldPersistTaps="handled"
@@ -171,17 +188,20 @@ export function SplitTransactionEditorScrollContainer({
   );
 }
 
-function useKeyboardHeight(): number {
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+function useKeyboardViewport(): KeyboardViewport {
+  const [keyboardViewport, setKeyboardViewport] = useState<KeyboardViewport>({ height: 0, topY: null });
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
     const showSubscription = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardHeight(event.endCoordinates.height);
+      setKeyboardViewport({
+        height: event.endCoordinates.height,
+        topY: event.endCoordinates.screenY > 0 ? event.endCoordinates.screenY : null,
+      });
     });
     const hideSubscription = Keyboard.addListener(hideEvent, () => {
-      setKeyboardHeight(0);
+      setKeyboardViewport({ height: 0, topY: null });
     });
 
     return () => {
@@ -190,7 +210,36 @@ function useKeyboardHeight(): number {
     };
   }, []);
 
-  return keyboardHeight;
+  return keyboardViewport;
+}
+
+function getKeyboardTopY(keyboardViewport: KeyboardViewport): number | null {
+  if (keyboardViewport.height <= 0) {
+    return null;
+  }
+
+  if (keyboardViewport.topY !== null) {
+    return keyboardViewport.topY;
+  }
+
+  return Dimensions.get('window').height - keyboardViewport.height;
+}
+
+function getKeyboardScrollPadding(
+  keyboardViewport: KeyboardViewport,
+  scrollViewportBottom: number | null,
+): number {
+  if (Platform.OS !== 'android') {
+    return 0;
+  }
+
+  const keyboardTop = getKeyboardTopY(keyboardViewport);
+  if (keyboardTop === null) {
+    return 0;
+  }
+
+  const viewportBottom = scrollViewportBottom ?? Dimensions.get('window').height;
+  return Math.max(0, viewportBottom - keyboardTop);
 }
 
 export function SplitTransactionEditor({
