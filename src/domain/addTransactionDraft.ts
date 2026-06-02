@@ -160,6 +160,7 @@ export function buildAddTransactionLines({
       kind: draft.kind,
       accountId: account.id,
       currencyCode: account.currencyCode,
+      parentTitle: draft.item,
       totalMinor: minor,
       lines: draft.splitLines,
     });

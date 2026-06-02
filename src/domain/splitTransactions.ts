@@ -117,12 +117,14 @@ export function buildSplitTransactionLines({
   kind,
   accountId,
   currencyCode,
+  parentTitle,
   totalMinor,
   splitLines,
 }: {
   kind: TransactionKind;
   accountId: string;
   currencyCode: CurrencyCode;
+  parentTitle?: string;
   totalMinor: number;
   splitLines: SplitTransactionDraftLine[];
 }): NewTransactionInput['lines'] {
@@ -135,7 +137,7 @@ export function buildSplitTransactionLines({
     currencyCode: normalizedCurrencyCode,
     categoryId: line.categoryId,
     subcategoryId: line.subcategoryId,
-    note: line.note?.trim() ?? '',
+    note: resolveSplitLineNote(line.note, parentTitle),
   }));
 
   validateSplitTransactionLines({
@@ -145,4 +147,13 @@ export function buildSplitTransactionLines({
   });
 
   return lines;
+}
+
+function resolveSplitLineNote(note: string | undefined, parentTitle: string | undefined): string {
+  const trimmedNote = note?.trim() ?? '';
+  if (trimmedNote) {
+    return trimmedNote;
+  }
+
+  return parentTitle?.trim() ?? '';
 }

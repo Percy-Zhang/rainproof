@@ -212,7 +212,7 @@ describe('Add Transaction initial draft', () => {
         labels: '',
         notes: '',
         splitLines: [
-          { id: 'food-line', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: 'Food' },
+          { id: 'food-line', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
           { id: 'home-line', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
         ],
         subcategoryId: 'groceries',
@@ -233,7 +233,7 @@ describe('Add Transaction initial draft', () => {
         labels: '',
         notes: '',
         splitLines: [
-          { id: 'salary-line', amount: '10.00', categoryId: 'income', subcategoryId: 'salary', note: 'Salary' },
+          { id: 'salary-line', amount: '10.00', categoryId: 'income', subcategoryId: 'salary', note: '  ' },
           { id: 'bonus-line', amount: '20.00', categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' },
         ],
         subcategoryId: 'salary',
@@ -243,11 +243,11 @@ describe('Add Transaction initial draft', () => {
     });
 
     expect(expense.lines).toEqual([
-      expect.objectContaining({ amountMinor: -1000, categoryId: 'food', subcategoryId: 'groceries', note: 'Food' }),
+      expect.objectContaining({ amountMinor: -1000, categoryId: 'food', subcategoryId: 'groceries', note: 'Split expense' }),
       expect.objectContaining({ amountMinor: -2000, categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' }),
     ]);
     expect(income.lines).toEqual([
-      expect.objectContaining({ amountMinor: 1000, categoryId: 'income', subcategoryId: 'salary', note: 'Salary' }),
+      expect.objectContaining({ amountMinor: 1000, categoryId: 'income', subcategoryId: 'salary', note: 'Split income' }),
       expect.objectContaining({ amountMinor: 2000, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' }),
     ]);
   });

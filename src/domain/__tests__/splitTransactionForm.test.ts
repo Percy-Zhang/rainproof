@@ -52,6 +52,112 @@ describe('split transaction form helpers', () => {
     ]);
   });
 
+  it('falls back to the parent item for blank split expense line notes', () => {
+    const lines = buildSplitLinesFromForm({
+      kind: 'expense',
+      accountId: 'a1',
+      currencyCode: 'AUD',
+      parentTitle: 'Grocery run',
+      totalMinor: 3000,
+      lines: [
+        createSplitTransactionFormLine({
+          id: 'food-line',
+          amount: '10.00',
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+        }),
+        createSplitTransactionFormLine({
+          id: 'home-line',
+          amount: '20.00',
+          categoryId: 'housing',
+          subcategoryId: 'rent',
+          note: '   ',
+        }),
+      ],
+    });
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        id: 'food-line',
+        amountMinor: -1000,
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        note: 'Grocery run',
+      }),
+      expect.objectContaining({
+        id: 'home-line',
+        amountMinor: -2000,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        note: 'Grocery run',
+      }),
+    ]);
+  });
+
+  it('preserves custom split line notes over the parent item', () => {
+    const lines = buildSplitLinesFromForm({
+      kind: 'expense',
+      accountId: 'a1',
+      currencyCode: 'AUD',
+      parentTitle: 'Grocery run',
+      totalMinor: 3000,
+      lines: [
+        createSplitTransactionFormLine({
+          id: 'food-line',
+          amount: '10.00',
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+          note: 'Fruit',
+        }),
+        createSplitTransactionFormLine({
+          id: 'home-line',
+          amount: '20.00',
+          categoryId: 'housing',
+          subcategoryId: 'rent',
+          note: 'Cleaning',
+        }),
+      ],
+    });
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        note: 'Fruit',
+      }),
+      expect.objectContaining({
+        note: 'Cleaning',
+      }),
+    ]);
+  });
+
+  it('keeps split line notes empty when the parent item is also empty', () => {
+    const lines = buildSplitLinesFromForm({
+      kind: 'expense',
+      accountId: 'a1',
+      currencyCode: 'AUD',
+      parentTitle: '   ',
+      totalMinor: 3000,
+      lines: [
+        createSplitTransactionFormLine({
+          id: 'food-line',
+          amount: '10.00',
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+        }),
+        createSplitTransactionFormLine({
+          id: 'home-line',
+          amount: '20.00',
+          categoryId: 'housing',
+          subcategoryId: 'rent',
+        }),
+      ],
+    });
+
+    expect(lines).toEqual([
+      expect.objectContaining({ note: '' }),
+      expect.objectContaining({ note: '' }),
+    ]);
+  });
+
   it('builds multiple income lines when split totals match', () => {
     const lines = buildSplitLinesFromForm({
       kind: 'income',
@@ -92,6 +198,46 @@ describe('split transaction form helpers', () => {
         currencyCode: 'AUD',
         categoryId: 'income',
         subcategoryId: 'bonus',
+      }),
+    ]);
+  });
+
+  it('falls back to the parent item for blank split income line notes', () => {
+    const lines = buildSplitLinesFromForm({
+      kind: 'income',
+      accountId: 'a1',
+      currencyCode: 'AUD',
+      parentTitle: 'Pay run',
+      totalMinor: 3000,
+      lines: [
+        createSplitTransactionFormLine({
+          id: 'salary-line',
+          amount: '10.00',
+          categoryId: 'income',
+          subcategoryId: 'salary',
+        }),
+        createSplitTransactionFormLine({
+          id: 'bonus-line',
+          amount: '20.00',
+          categoryId: 'income',
+          subcategoryId: 'bonus',
+          note: '  ',
+        }),
+      ],
+    });
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        amountMinor: 1000,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Pay run',
+      }),
+      expect.objectContaining({
+        amountMinor: 2000,
+        categoryId: 'income',
+        subcategoryId: 'bonus',
+        note: 'Pay run',
       }),
     ]);
   });

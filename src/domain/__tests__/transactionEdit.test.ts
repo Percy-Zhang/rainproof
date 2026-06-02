@@ -182,6 +182,34 @@ describe('transaction edit helpers', () => {
     ]);
   });
 
+  it('falls back to the parent title for blank edited split expense line notes', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('expense', [
+        line({ id: 'food-line', amountMinor: -1200, categoryId: 'food', subcategoryId: 'groceries', note: '' }),
+        line({ id: 'home-line', amountMinor: -3400, categoryId: 'housing', subcategoryId: 'rent', note: '   ' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(draft, accounts);
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        id: 'food-line',
+        amountMinor: -1200,
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+        note: 'Original',
+      }),
+      expect.objectContaining({
+        id: 'home-line',
+        amountMinor: -3400,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        note: 'Original',
+      }),
+    ]);
+  });
+
   it('rejects split expense drafts when the edited total no longer matches split lines', () => {
     const draft = createTransactionEditDraft(
       snapshot('expense', [
@@ -274,6 +302,34 @@ describe('transaction edit helpers', () => {
         categoryId: 'income',
         subcategoryId: 'bonus',
         note: 'Bonus',
+      }),
+    ]);
+  });
+
+  it('falls back to the parent title for blank edited split income line notes', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({ id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary', note: '' }),
+        line({ id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus', note: '  ' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(draft, accounts);
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        id: 'salary-line',
+        amountMinor: 1200,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Original',
+      }),
+      expect.objectContaining({
+        id: 'bonus-line',
+        amountMinor: 3400,
+        categoryId: 'income',
+        subcategoryId: 'bonus',
+        note: 'Original',
       }),
     ]);
   });

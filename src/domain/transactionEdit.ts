@@ -215,6 +215,7 @@ export function buildTransactionUpdateInput(
         kind: draft.kind,
         accountId: account.id,
         currencyCode: account.currencyCode,
+        parentTitle: draft.title,
         totalMinor: amountMinor,
         splitLines: (draft.splitLines ?? []).map(toSplitTransactionDraftLine),
       }),

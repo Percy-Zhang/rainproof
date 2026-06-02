@@ -103,12 +103,14 @@ export function buildSplitLinesFromForm({
   kind,
   accountId,
   currencyCode,
+  parentTitle,
   totalMinor,
   lines,
 }: {
   kind: Extract<TransactionKind, 'expense' | 'income'>;
   accountId: string;
   currencyCode: CurrencyCode;
+  parentTitle?: string;
   totalMinor: number;
   lines: SplitTransactionFormLine[];
 }): NewTransactionInput['lines'] {
@@ -116,6 +118,7 @@ export function buildSplitLinesFromForm({
     kind,
     accountId,
     currencyCode,
+    parentTitle,
     totalMinor,
     splitLines: lines.map((line) => ({
       id: line.id,
