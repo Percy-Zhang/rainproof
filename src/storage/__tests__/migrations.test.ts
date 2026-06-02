@@ -58,6 +58,7 @@ const currentBudgetColumns = [
   'scope_type',
   'category_id',
   'subcategory_id',
+  'sort_order',
   'is_active',
   'created_at',
   'updated_at',
@@ -187,13 +188,31 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
     expect(
       db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS transaction_links')),
     ).toBe(true);
+  });
+
+  it('adds budget sort order when migrating from the previous current schema', async () => {
+    const db = new FakeMigrationDatabase(10, {
+      accounts: currentAccountColumns,
+      transactions: currentTransactionColumns,
+      transaction_lines: currentTransactionLineColumns,
+      budgets: currentBudgetColumns.filter((columnName) => columnName !== 'sort_order'),
+      recurring_items: currentRecurringItemColumns,
+      transaction_templates: currentTransactionTemplateColumns,
+      transaction_template_lines: currentTransactionTemplateLineColumns,
+    });
+
+    await runMigrations(db.asMigrationDatabase());
+
+    expect(db.userVersion).toBe(SCHEMA_VERSION);
+    expect(db.versionWrites).toEqual([11]);
+    expect(db.getColumnNames('budgets')).toEqual(expect.arrayContaining(['sort_order']));
   });
 
   it('keeps a current database version stable when the current columns exist', async () => {

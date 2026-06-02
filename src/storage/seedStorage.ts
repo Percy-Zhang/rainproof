@@ -74,8 +74,8 @@ export async function seedDemoFirstRunStorage(
     await db.runAsync(
       `INSERT INTO budgets (
         id, name, amount_minor, currency_code, period, scope_type, category_id,
-        subcategory_id, is_active, created_at, updated_at
-      ) VALUES (?, 'Food & Dining budget', 70000, ?, 'monthly', 'category', 'food', NULL, 1, ?, ?)`,
+        subcategory_id, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, 'Food & Dining budget', 70000, ?, 'monthly', 'category', 'food', NULL, 0, 1, ?, ?)`,
       createLocalId('budget'),
       currencyCode,
       now,
@@ -283,16 +283,24 @@ async function upsertSeedBudget(
   await db.runAsync(
     `INSERT INTO budgets (
       id, name, amount_minor, currency_code, period, scope_type, category_id,
-      subcategory_id, is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, 1, ?, ?)`,
+      subcategory_id, sort_order, is_active, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, ?, 1, ?, ?)`,
     createLocalId('budget'),
     `${categoryId.replace(/[_-]+/g, ' ')} budget`,
     monthlyLimitMinor,
     currencyCode,
     categoryId,
+    await getNextSeedBudgetSortOrder(db),
     now,
     now,
   );
+}
+
+async function getNextSeedBudgetSortOrder(db: RepositoryDatabase): Promise<number> {
+  const row = await db.getFirstAsync<{ next_sort_order: number | null }>(
+    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM budgets',
+  );
+  return row?.next_sort_order ?? 0;
 }
 
 async function insertSeedRecurringItem(

@@ -44,6 +44,7 @@ import {
   deleteRecurringItemStorage,
   listBudgetsStorage,
   listRecurringItemsStorage,
+  updateBudgetOrderStorage,
   updateBudgetStorage,
   updateRecurringItemStorage,
 } from './planningStorage';
@@ -106,6 +107,7 @@ export type FinanceRepository = {
   listBudgets(): Promise<Budget[]>;
   addBudget(input: NewBudgetInput): Promise<void>;
   updateBudget(input: UpdateBudgetInput): Promise<void>;
+  updateBudgetOrder(budgetIds: string[]): Promise<void>;
   archiveBudget(budgetId: string): Promise<void>;
   listRecurringItems(): Promise<RecurringItem[]>;
   addRecurringItem(input: NewRecurringItemInput): Promise<void>;
@@ -228,6 +230,10 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async updateBudget(input: UpdateBudgetInput): Promise<void> {
     return updateBudgetStorage(this.db, input);
+  }
+
+  async updateBudgetOrder(budgetIds: string[]): Promise<void> {
+    return updateBudgetOrderStorage(this.db, budgetIds);
   }
 
   async archiveBudget(budgetId: string): Promise<void> {

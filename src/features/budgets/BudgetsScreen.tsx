@@ -1,6 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import DraggableFlatList, {
+  ScaleDecorator,
+  type RenderItemParams,
+} from 'react-native-draggable-flatlist';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { ActionButton, Card, ProgressBar } from '../../components/ui';
@@ -8,6 +12,7 @@ import {
   getBudgetMonthlyRange,
   getBudgetUsageDisplayRows,
   getBudgetUsageFromStatsReport,
+  sortBudgetUsageDisplayRowsByDisplayOrder,
   type BudgetUsageDisplayRow,
 } from '../../domain/budgets';
 import { formatMoney } from '../../domain/money';
@@ -19,42 +24,49 @@ type BudgetsScreenProps = {
   snapshot: AppSnapshot;
   onAddBudget: () => void;
   onEditBudget: (budgetId: string) => void;
+  onUpdateBudgetOrder: (budgetIds: string[]) => Promise<void>;
 };
 
 export function BudgetsScreen({
   snapshot,
   onAddBudget,
   onEditBudget,
+  onUpdateBudgetOrder,
 }: BudgetsScreenProps) {
   const budgetRows = useMemo(
     () => getBudgetUsageRowsForSnapshot(snapshot),
     [snapshot],
   );
 
+  function renderBudgetRow({ item, drag, isActive }: RenderItemParams<BudgetUsageDisplayRow>) {
+    return (
+      <BudgetUsageCard
+        row={item}
+        dragging={isActive}
+        onDrag={drag}
+        onPress={() => onEditBudget(item.id)}
+      />
+    );
+  }
+
   return (
     <View style={styles.shell}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryText}>
-            <Text style={styles.heading}>Monthly budgets</Text>
-            <Text style={styles.subtle}>Monthly limits using net spending for the current calendar month.</Text>
+      <DraggableFlatList
+        data={budgetRows}
+        keyExtractor={(row) => row.id}
+        renderItem={renderBudgetRow}
+        ListHeaderComponent={(
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryText}>
+              <Text style={styles.heading}>Monthly budgets</Text>
+              <Text style={styles.subtle}>Monthly limits using net spending for the current calendar month.</Text>
+            </View>
+            <ActionButton onPress={onAddBudget} testID="add-budget">
+              Add
+            </ActionButton>
           </View>
-          <ActionButton onPress={onAddBudget} testID="add-budget">
-            Add
-          </ActionButton>
-        </View>
-
-        {budgetRows.length ? (
-          <View style={styles.list}>
-            {budgetRows.map((row) => (
-              <BudgetUsageCard key={row.id} row={row} onPress={() => onEditBudget(row.id)} />
-            ))}
-          </View>
-        ) : (
+        )}
+        ListEmptyComponent={(
           <Card testID="budgets-empty-state">
             <View style={styles.emptyIcon}>
               <Ionicons name="wallet-outline" size={24} color={colors.primaryDark} />
@@ -68,15 +80,26 @@ export function BudgetsScreen({
             </ActionButton>
           </Card>
         )}
-      </ScrollView>
+        onDragEnd={({ data }) => {
+          void onUpdateBudgetOrder(data.map((row) => row.id));
+        }}
+        activationDistance={8}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      />
     </View>
   );
 }
 
 function BudgetUsageCard({
+  dragging,
+  onDrag,
   row,
   onPress,
 }: {
+  dragging: boolean;
+  onDrag: () => void;
   row: BudgetUsageDisplayRow;
   onPress: () => void;
 }) {
@@ -84,30 +107,40 @@ function BudgetUsageCard({
   const progressColor = getBudgetStatusColor(row.status);
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [styles.budgetCard, pressed && styles.pressed]}
-      testID={`budget-row-${row.id}`}
-    >
-      <View style={styles.budgetHeader}>
-        <CategoryIconBadge color={row.color} icon={row.icon} size="md" />
-        <View style={styles.budgetTitleWrap}>
-          <Text numberOfLines={1} style={styles.budgetName}>{row.budget.name}</Text>
-          <Text numberOfLines={1} style={styles.scopeText}>{row.scopeLabel} · {row.scopeDetail}</Text>
+    <ScaleDecorator>
+      <Pressable
+        accessibilityHint="Long press to reorder."
+        accessibilityRole="button"
+        delayLongPress={150}
+        onLongPress={onDrag}
+        onPress={onPress}
+        style={({ pressed }) => [styles.budgetCard, dragging && styles.draggingCard, pressed && styles.pressed]}
+        testID={`budget-row-${row.id}`}
+      >
+        <View style={styles.budgetHeader}>
+          <CategoryIconBadge color={row.color} icon={row.icon} size="md" />
+          <View style={styles.budgetTitleWrap}>
+            <Text numberOfLines={1} style={styles.budgetName}>{row.budget.name}</Text>
+            <Text numberOfLines={1} style={styles.scopeText}>
+              {row.scopeLabel}{' \u00B7 '}{row.scopeDetail}
+            </Text>
+          </View>
+          <View style={styles.statusWrap}>
+            <Text style={[styles.statusPill, { color: progressColor }]}>{status.label}</Text>
+            <Ionicons name="reorder-three-outline" size={20} color={colors.muted} />
+          </View>
         </View>
-        <Text style={[styles.statusPill, { color: progressColor }]}>{status.label}</Text>
-      </View>
 
-      <View style={styles.amountGrid}>
-        <AmountBlock label="Used" value={formatMoney(row.spentMinor, row.budget.currencyCode)} />
-        <AmountBlock label={status.remainingLabel} value={formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode)} tone={row.remainingMinor < 0 ? 'danger' : 'default'} />
-        <AmountBlock label="Limit" value={formatMoney(row.budget.amountMinor, row.budget.currencyCode)} align="right" />
-      </View>
+        <View style={styles.amountGrid}>
+          <AmountBlock label="Used" value={formatMoney(row.spentMinor, row.budget.currencyCode)} />
+          <AmountBlock label={status.remainingLabel} value={formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode)} tone={row.remainingMinor < 0 ? 'danger' : 'default'} />
+          <AmountBlock label="Limit" value={formatMoney(row.budget.amountMinor, row.budget.currencyCode)} align="right" />
+        </View>
 
-      <ProgressBar percentage={row.percentageUsed} color={progressColor} />
-      <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used this month</Text>
-    </Pressable>
+        <ProgressBar percentage={row.percentageUsed} color={progressColor} />
+        <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used this month</Text>
+      </Pressable>
+    </ScaleDecorator>
   );
 }
 
@@ -149,12 +182,7 @@ function getBudgetUsageRowsForSnapshot(snapshot: AppSnapshot): BudgetUsageDispla
     return getBudgetUsageFromStatsReport({ budgets: activeBudgets, report });
   });
 
-  return getBudgetUsageDisplayRows(usages, snapshot.categories).sort((left, right) => (
-    getBudgetStatusRank(right.status) - getBudgetStatusRank(left.status) ||
-    right.percentageUsed - left.percentageUsed ||
-    left.budget.name.localeCompare(right.budget.name) ||
-    left.budget.id.localeCompare(right.budget.id)
-  ));
+  return sortBudgetUsageDisplayRowsByDisplayOrder(getBudgetUsageDisplayRows(usages, snapshot.categories));
 }
 
 function getStatusCopy(row: BudgetUsageDisplayRow): { label: string; remainingLabel: string } {
@@ -167,17 +195,6 @@ function getStatusCopy(row: BudgetUsageDisplayRow): { label: string; remainingLa
   }
 
   return { label: 'Under', remainingLabel: 'Remaining' };
-}
-
-function getBudgetStatusRank(status: BudgetUsageDisplayRow['status']): number {
-  switch (status) {
-    case 'over_budget':
-      return 3;
-    case 'near_limit':
-      return 2;
-    case 'under_budget':
-      return 1;
-  }
 }
 
 function getBudgetStatusColor(status: BudgetUsageDisplayRow['status']): string {
@@ -221,9 +238,6 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     lineHeight: 18,
   },
-  list: {
-    gap: spacing.md,
-  },
   budgetCard: {
     backgroundColor: colors.surface,
     borderColor: colors.faint,
@@ -235,6 +249,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.05,
     shadowRadius: 12,
+  },
+  draggingCard: {
+    elevation: 8,
+    opacity: 0.95,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
   },
   budgetHeader: {
     alignItems: 'center',
@@ -259,6 +281,11 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: '900',
     textAlign: 'right',
+  },
+  statusWrap: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: 2,
   },
   amountGrid: {
     flexDirection: 'row',

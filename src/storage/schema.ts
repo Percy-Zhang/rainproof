@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 10;
+export const SCHEMA_VERSION = 11;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   scope_type TEXT NOT NULL DEFAULT 'category',
   category_id TEXT,
   subcategory_id TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,

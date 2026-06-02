@@ -313,6 +313,7 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
     'scope_type',
     'category_id',
     'subcategory_id',
+    'sort_order',
     'is_active',
     'created_at',
     'updated_at',
@@ -616,6 +617,7 @@ describe('SQLite finance repository integration', () => {
           scopeType: 'overall',
           categoryId: null,
           subcategoryId: null,
+          sortOrder: 0,
           isActive: true,
         }),
       );
@@ -626,6 +628,7 @@ describe('SQLite finance repository integration', () => {
           scopeType: 'subcategory',
           categoryId: 'food',
           subcategoryId: 'groceries',
+          sortOrder: 1,
           isActive: true,
         }),
       );
@@ -667,6 +670,55 @@ describe('SQLite finance repository integration', () => {
         subcategoryId: 'groceries',
       });
       expect((await repository.getSnapshot()).budgets.filter((budget) => budget.isActive)).toHaveLength(2);
+    });
+  });
+
+  it('persists manual budget order and appends new budgets after the current order', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await repository.addBudget({
+        name: 'Overall',
+        amountMinor: 150000,
+        currencyCode: 'AUD',
+        scopeType: 'overall',
+      });
+      await repository.addBudget({
+        name: 'Food',
+        amountMinor: 50000,
+        currencyCode: 'AUD',
+        scopeType: 'category',
+        categoryId: 'food',
+      });
+      await repository.addBudget({
+        name: 'Rent',
+        amountMinor: 90000,
+        currencyCode: 'AUD',
+        scopeType: 'subcategory',
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+      });
+
+      let budgets = (await repository.getSnapshot()).budgets.filter((budget) => budget.isActive);
+      expect(budgets.map((budget) => budget.name)).toEqual(['Overall', 'Food', 'Rent']);
+      expect(budgets.map((budget) => budget.sortOrder)).toEqual([0, 1, 2]);
+
+      const [overall, food, rent] = budgets;
+      await repository.updateBudgetOrder([rent.id, overall.id, food.id]);
+
+      budgets = (await repository.getSnapshot()).budgets.filter((budget) => budget.isActive);
+      expect(budgets.map((budget) => budget.name)).toEqual(['Rent', 'Overall', 'Food']);
+      expect(budgets.map((budget) => budget.sortOrder)).toEqual([0, 1, 2]);
+
+      await repository.archiveBudget(overall.id);
+      await repository.addBudget({
+        name: 'Transport',
+        amountMinor: 30000,
+        currencyCode: 'AUD',
+        scopeType: 'category',
+        categoryId: 'transport',
+      });
+
+      budgets = (await repository.getSnapshot()).budgets.filter((budget) => budget.isActive);
+      expect(budgets.map((budget) => budget.name)).toEqual(['Rent', 'Food', 'Transport']);
     });
   });
 
@@ -2413,13 +2465,14 @@ describe('SQLite finance repository integration', () => {
       const snapshot = await fixture.repository.getSnapshot();
       expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
       expect(await getColumnNames(fixture.db, 'budgets')).toEqual(
-        expect.arrayContaining(['name', 'amount_minor', 'period', 'scope_type', 'is_active']),
+        expect.arrayContaining(['name', 'amount_minor', 'period', 'scope_type', 'sort_order', 'is_active']),
       );
       expect(snapshot.budgets).toEqual([
         expect.objectContaining({
           id: 'legacy_food_budget',
           name: 'Food & Dining budget',
           amountMinor: 90000,
+          sortOrder: 0,
           currencyCode: 'AUD',
           period: 'monthly',
           scopeType: 'category',

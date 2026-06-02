@@ -63,6 +63,7 @@ type RainproofActions = {
   deleteTransactionLink(linkId: string): Promise<void>;
   addBudget(input: NewBudgetInput): Promise<void>;
   updateBudget(input: UpdateBudgetInput): Promise<void>;
+  updateBudgetOrder(budgetIds: string[]): Promise<void>;
   archiveBudget(budgetId: string): Promise<void>;
   addRecurringItem(input: NewRecurringItemInput): Promise<void>;
   updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
@@ -279,6 +280,7 @@ export function useRainproofData(): RainproofDataState {
         runMutation((repository) => repository.deleteTransactionLink(linkId), { rethrow: true }),
       addBudget: (input) => runMutation((repository) => repository.addBudget(input)),
       updateBudget: (input) => runMutation((repository) => repository.updateBudget(input)),
+      updateBudgetOrder: (budgetIds) => runMutation((repository) => repository.updateBudgetOrder(budgetIds)),
       archiveBudget: (budgetId) => runMutation((repository) => repository.archiveBudget(budgetId)),
       addRecurringItem: (input) => runMutation((repository) => repository.addRecurringItem(input)),
       updateRecurringItem: (input) =>

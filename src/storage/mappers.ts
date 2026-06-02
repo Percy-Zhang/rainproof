@@ -92,6 +92,7 @@ export type BudgetRow = {
   scope_type: 'overall' | 'category' | 'subcategory';
   category_id: string | null;
   subcategory_id: string | null;
+  sort_order: number;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -235,6 +236,7 @@ export function mapBudget(row: BudgetRow): Budget {
     scopeType: row.scope_type,
     categoryId: row.category_id || null,
     subcategoryId: row.subcategory_id || null,
+    sortOrder: Number.isInteger(row.sort_order) ? row.sort_order : 0,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

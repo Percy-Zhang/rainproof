@@ -146,12 +146,13 @@ function TransactionsDrawerRoute({
   );
 }
 
-function BudgetsDrawerRoute({ rootNavigation, snapshot }: DrawerRouteAdapterProps) {
+function BudgetsDrawerRoute({ actions, rootNavigation, snapshot }: DrawerRouteAdapterProps) {
   return (
     <BudgetsScreen
       snapshot={snapshot}
       onAddBudget={() => rootNavigation?.navigate('AddBudget')}
       onEditBudget={(budgetId) => rootNavigation?.navigate('EditBudget', { budgetId })}
+      onUpdateBudgetOrder={actions.updateBudgetOrder}
     />
   );
 }

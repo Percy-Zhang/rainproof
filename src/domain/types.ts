@@ -113,6 +113,7 @@ export type Budget = {
   scopeType: BudgetScopeType;
   categoryId: string | null;
   subcategoryId: string | null;
+  sortOrder: number;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;

@@ -59,7 +59,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   );
   const budgetRows = await db.getAllAsync<BudgetRow>(
     `SELECT * FROM budgets
-     ORDER BY is_active DESC, currency_code ASC, scope_type ASC, name ASC, created_at ASC`,
+     ORDER BY is_active DESC, sort_order ASC, created_at ASC, id ASC`,
   );
   const recurringItemRows = await db.getAllAsync<RecurringItemRow>(
     'SELECT * FROM recurring_items ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC',

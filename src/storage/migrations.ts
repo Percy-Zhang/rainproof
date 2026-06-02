@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   scope_type TEXT NOT NULL DEFAULT 'category',
   category_id TEXT,
   subcategory_id TEXT,
+  sort_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -244,6 +245,12 @@ const migrations: Migration[] = [
       await ensureTransactionTemplateLinesSchema(db);
     },
   },
+  {
+    version: 11,
+    migrate: async (db) => {
+      await ensureBudgetSortOrderColumn(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -312,12 +319,16 @@ async function ensureBudgetSchema(db: MigrationDatabase): Promise<void> {
   const columnNames = new Set(columns.map((column) => column.name));
 
   if (columnNames.has('amount_minor') && columnNames.has('scope_type') && columnNames.has('is_active')) {
+    await ensureBudgetSortOrderColumn(db);
     await db.execAsync(BUDGETS_SCHEMA_SQL);
+    await normalizeBudgetSortOrder(db);
     return;
   }
 
   const legacyRows = await db.getAllAsync<LegacyBudgetRow>(
-    'SELECT id, category_id, currency_code, monthly_limit_minor, created_at, updated_at FROM budgets',
+    `SELECT id, category_id, currency_code, monthly_limit_minor, created_at, updated_at
+     FROM budgets
+     ORDER BY created_at ASC, id ASC`,
   );
   const categoryNames = await getBudgetMigrationCategoryNames(db);
 
@@ -326,7 +337,7 @@ DROP TABLE IF EXISTS budgets_v1_next;
 ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_v1_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
 `);
 
-  for (const row of legacyRows) {
+  for (const [sortOrder, row] of legacyRows.entries()) {
     const categoryId = row.category_id?.trim() || 'other';
     const name = `${categoryNames.get(categoryId) ?? formatBudgetMigrationLabel(categoryId)} budget`;
     const amountMinor = Number(row.monthly_limit_minor);
@@ -337,13 +348,14 @@ ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE
     await db.runAsync(
       `INSERT INTO budgets_v1_next (
         id, name, amount_minor, currency_code, period, scope_type, category_id,
-        subcategory_id, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, 1, ?, ?)`,
+        subcategory_id, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, ?, 1, ?, ?)`,
       row.id,
       name,
       amountMinor,
       row.currency_code,
       categoryId,
+      sortOrder,
       row.created_at,
       row.updated_at,
     );
@@ -354,6 +366,7 @@ DROP TABLE budgets;
 ALTER TABLE budgets_v1_next RENAME TO budgets;
 ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
 `);
+  await normalizeBudgetSortOrder(db);
 }
 
 async function getBudgetMigrationCategoryNames(db: MigrationDatabase): Promise<Map<string, string>> {
@@ -445,6 +458,33 @@ async function ensureTransactionTemplatesSchema(db: MigrationDatabase): Promise<
 
 async function ensureTransactionTemplateLinesSchema(db: MigrationDatabase): Promise<void> {
   await db.execAsync(TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL);
+}
+
+async function ensureBudgetSortOrderColumn(db: MigrationDatabase): Promise<void> {
+  await ensureColumn(db, 'budgets', 'sort_order', 'INTEGER NOT NULL DEFAULT 0');
+  await normalizeBudgetSortOrder(db);
+}
+
+type BudgetSortOrderRow = {
+  id: string;
+  sort_order: number | null;
+  created_at: string;
+};
+
+async function normalizeBudgetSortOrder(db: MigrationDatabase): Promise<void> {
+  const rows = await db.getAllAsync<BudgetSortOrderRow>(
+    `SELECT id, sort_order, created_at
+     FROM budgets
+     ORDER BY sort_order ASC, created_at ASC, id ASC`,
+  );
+
+  for (const [index, row] of rows.entries()) {
+    if (row.sort_order === index) {
+      continue;
+    }
+
+    await db.runAsync('UPDATE budgets SET sort_order = ? WHERE id = ?', index, row.id);
+  }
 }
 
 async function ensureLineLevelTransactionLinkSchema(db: MigrationDatabase): Promise<void> {

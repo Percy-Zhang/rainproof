@@ -5,6 +5,7 @@ import {
   getBudgetUsageDisplayRows,
   getBudgetUsageFromStatsReport,
   getDashboardBudgetSummaryData,
+  sortBudgetUsagesByDisplayOrder,
   type BudgetUsageDisplayRow,
 } from '../../domain/budgets';
 import { defaultCategories } from '../../domain/categories';
@@ -214,10 +215,13 @@ function getDashboardBudgetProgressData(
     return getBudgetUsageFromStatsReport({ budgets: activeBudgets, report });
   });
   const summary = getDashboardBudgetSummaryData(usages, 3);
+  const orderedUsages = sortBudgetUsagesByDisplayOrder(
+    usages.filter((usage) => usage.budget.isActive),
+  ).slice(0, 3);
 
   return {
     activeBudgetCount: summary.activeBudgetCount,
-    rows: getBudgetUsageDisplayRows(summary.highestRiskUsages, categories),
+    rows: getBudgetUsageDisplayRows(orderedUsages, categories),
   };
 }
 

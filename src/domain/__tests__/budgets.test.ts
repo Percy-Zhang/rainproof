@@ -8,6 +8,8 @@ import {
   getBudgetUsageDisplayRows,
   getBudgetUsageFromStatsReport,
   getDashboardBudgetSummaryData,
+  sortBudgetUsageDisplayRowsByDisplayOrder,
+  sortBudgetUsagesByDisplayOrder,
 } from '../budgets';
 import { getStatsReport } from '../statsReports';
 import type { Account, Budget, Transaction, TransactionLine, TransactionLink } from '../types';
@@ -223,6 +225,27 @@ describe('budget helpers', () => {
       }),
     ]);
   });
+
+  it('sorts budget usages and display rows by manual budget order without changing calculations', () => {
+    const usageA = makeUsage(makeBudget('a', 'A', 10000, 'overall', null, null, 'AUD', 2), 2000);
+    const usageB = makeUsage(makeBudget('b', 'B', 10000, 'overall', null, null, 'AUD', 0), 9000);
+    const usageC = makeUsage(makeBudget('c', 'C', 10000, 'overall', null, null, 'AUD', 1), 12000);
+
+    expect(sortBudgetUsagesByDisplayOrder([usageA, usageB, usageC]).map((usage) => usage.budget.id)).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+    expect(
+      sortBudgetUsageDisplayRowsByDisplayOrder(getBudgetUsageDisplayRows([usageA, usageB, usageC])).map(
+        (row) => ({ id: row.id, spentMinor: row.spentMinor, percentageUsed: row.percentageUsed }),
+      ),
+    ).toEqual([
+      { id: 'b', spentMinor: 9000, percentageUsed: 90 },
+      { id: 'c', spentMinor: 12000, percentageUsed: 120 },
+      { id: 'a', spentMinor: 2000, percentageUsed: 20 },
+    ]);
+  });
 });
 
 function getExpenseReport({
@@ -255,6 +278,7 @@ function makeBudget(
   categoryId: string | null = null,
   subcategoryId: string | null = null,
   currencyCode = 'AUD',
+  sortOrder = 0,
 ): Budget {
   return {
     id,
@@ -265,6 +289,7 @@ function makeBudget(
     scopeType,
     categoryId,
     subcategoryId,
+    sortOrder,
     isActive: true,
     createdAt: now,
     updatedAt: now,

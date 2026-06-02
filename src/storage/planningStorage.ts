@@ -25,11 +25,12 @@ export async function addBudgetStorage(
 
   await db.withTransactionAsync(async () => {
     await assertNoDuplicateActiveBudgetScope(db, validated);
+    const sortOrder = await getNextBudgetSortOrder(db);
     await db.runAsync(
       `INSERT INTO budgets (
         id, name, amount_minor, currency_code, period, scope_type, category_id,
-        subcategory_id, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        subcategory_id, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       createLocalId('budget'),
       validated.name,
       validated.amountMinor,
@@ -38,6 +39,7 @@ export async function addBudgetStorage(
       validated.scopeType,
       validated.categoryId,
       validated.subcategoryId,
+      sortOrder,
       validated.isActive ? 1 : 0,
       now,
       now,
@@ -90,10 +92,41 @@ export async function archiveBudgetStorage(
   );
 }
 
+export async function updateBudgetOrderStorage(
+  db: RepositoryDatabase,
+  budgetIds: string[],
+): Promise<void> {
+  const uniqueIds = Array.from(new Set(budgetIds.filter((id) => id.trim())));
+  if (!uniqueIds.length) {
+    return;
+  }
+
+  const rows = await db.getAllAsync<BudgetOrderRow>(
+    `SELECT id, sort_order, created_at
+     FROM budgets
+     ORDER BY sort_order ASC, created_at ASC, id ASC`,
+  );
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const reorderedRows = [
+    ...uniqueIds.map((id) => rowById.get(id)).filter((row): row is BudgetOrderRow => !!row),
+    ...rows.filter((row) => !uniqueIds.includes(row.id)),
+  ];
+
+  await db.withTransactionAsync(async () => {
+    for (const [sortOrder, row] of reorderedRows.entries()) {
+      await db.runAsync(
+        'UPDATE budgets SET sort_order = ? WHERE id = ?',
+        sortOrder,
+        row.id,
+      );
+    }
+  });
+}
+
 export async function listBudgetsStorage(db: RepositoryDatabase): Promise<Budget[]> {
   const rows = await db.getAllAsync<BudgetRow>(
     `SELECT * FROM budgets
-     ORDER BY is_active DESC, currency_code ASC, scope_type ASC, name ASC, created_at ASC`,
+     ORDER BY is_active DESC, sort_order ASC, created_at ASC, id ASC`,
   );
   return rows.map(mapBudget);
 }
@@ -204,4 +237,17 @@ async function assertNoDuplicateActiveBudgetScope(
   if (duplicate) {
     throw new Error('An active budget already exists for this scope.');
   }
+}
+
+type BudgetOrderRow = {
+  id: string;
+  sort_order: number;
+  created_at: string;
+};
+
+async function getNextBudgetSortOrder(db: RepositoryDatabase): Promise<number> {
+  const row = await db.getFirstAsync<{ next_sort_order: number | null }>(
+    'SELECT COALESCE(MAX(sort_order), -1) + 1 AS next_sort_order FROM budgets',
+  );
+  return row?.next_sort_order ?? 0;
 }

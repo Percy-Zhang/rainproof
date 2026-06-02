@@ -305,6 +305,7 @@ describe('aggregates', () => {
         categoryId: 'food',
         subcategoryId: null,
         currencyCode: 'AUD',
+        sortOrder: 0,
         isActive: true,
         createdAt: now,
         updatedAt: now,

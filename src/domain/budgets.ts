@@ -182,6 +182,22 @@ export function getDashboardBudgetSummaryData(
   };
 }
 
+export function sortBudgetsByDisplayOrder<T extends Pick<Budget, 'sortOrder' | 'createdAt' | 'id'>>(
+  budgets: T[],
+): T[] {
+  return [...budgets].sort(compareBudgetDisplayOrder);
+}
+
+export function sortBudgetUsagesByDisplayOrder(usages: BudgetUsage[]): BudgetUsage[] {
+  return [...usages].sort((left, right) => compareBudgetDisplayOrder(left.budget, right.budget));
+}
+
+export function sortBudgetUsageDisplayRowsByDisplayOrder(
+  rows: BudgetUsageDisplayRow[],
+): BudgetUsageDisplayRow[] {
+  return [...rows].sort((left, right) => compareBudgetDisplayOrder(left.budget, right.budget));
+}
+
 export function getBudgetScopeLabel(
   budget: Pick<Budget, 'scopeType' | 'categoryId' | 'subcategoryId'>,
   categories?: CategoryDefinition[],
@@ -268,6 +284,17 @@ function sortBudgetUsagesByRisk(usages: BudgetUsage[]): BudgetUsage[] {
     left.budget.name.localeCompare(right.budget.name) ||
     left.budget.id.localeCompare(right.budget.id)
   ));
+}
+
+function compareBudgetDisplayOrder<T extends Pick<Budget, 'sortOrder' | 'createdAt' | 'id'>>(
+  left: T,
+  right: T,
+): number {
+  return (
+    left.sortOrder - right.sortOrder ||
+    left.createdAt.localeCompare(right.createdAt) ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function getBudgetStatusRank(status: BudgetUsageStatus): number {
