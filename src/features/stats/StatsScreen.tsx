@@ -6,10 +6,8 @@ import { Chip, SectionHeader } from '../../components/ui';
 import type { AccountBalance, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
 import { StatsBottomControls } from './StatsBottomControls';
-import { StatsCategoryColorsCard } from './StatsCategoryColorsCard';
 import {
   CashFlowCard,
-  GrossNetSpendingCard,
   MonthlyAveragesCard,
 } from './StatsMetricCards';
 import { statsStyles as styles } from './StatsScreenStyles';
@@ -83,10 +81,6 @@ export function StatsScreen({
           currencyCode={viewModel.currencyCode}
           monthlyTrendSummary={viewModel.monthlyTrendSummary}
         />
-        <GrossNetSpendingCard
-          currencyCode={viewModel.currencyCode}
-          monthlyTrendSummary={viewModel.monthlyTrendSummary}
-        />
         <MonthlyCashFlowTrendCard
           currencyCode={viewModel.currencyCode}
           monthlyTrendSummary={viewModel.monthlyTrendSummary}
@@ -105,7 +99,6 @@ export function StatsScreen({
           currencyCode={viewModel.currencyCode}
           selectedSpendingTrend={viewModel.selectedSpendingTrend}
         />
-        <StatsCategoryColorsCard categories={viewModel.categories} />
       </ScrollView>
 
       <StatsBottomControls

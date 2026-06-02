@@ -1,7 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { createDrawerNavigator } from '@react-navigation/drawer';
+import {
+  createDrawerNavigator,
+  DrawerContentScrollView,
+  DrawerItem,
+  DrawerItemList,
+  type DrawerContentComponentProps,
+} from '@react-navigation/drawer';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StyleSheet, Text } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { CategorySelectionRequestProvider } from '../features/categorySelection/CategorySelectionContext';
@@ -151,6 +157,7 @@ function MainDrawerNavigator() {
 
   return (
     <Drawer.Navigator
+      drawerContent={(props) => <MainDrawerContent {...props} />}
       initialRouteName="Home"
       screenOptions={{
         drawerActiveBackgroundColor: colors.surfaceMuted,
@@ -227,6 +234,7 @@ function MainDrawerNavigator() {
         component={SettingsDrawerScreen}
         options={{
           drawerIcon: ({ color, size }) => <Ionicons name="settings-outline" color={color} size={size} />,
+          drawerItemStyle: styles.hiddenDrawerItem,
           title: 'Settings',
         }}
       />
@@ -234,13 +242,44 @@ function MainDrawerNavigator() {
   );
 }
 
+function MainDrawerContent(props: DrawerContentComponentProps) {
+  const focusedRouteName = props.state.routeNames[props.state.index];
+  const settingsFocused = focusedRouteName === 'Settings';
+
+  return (
+    <DrawerContentScrollView
+      {...props}
+      contentContainerStyle={styles.drawerContent}
+    >
+      <DrawerItemList {...props} />
+      <View style={styles.drawerSpacer} />
+      <DrawerItem
+        activeBackgroundColor={colors.surfaceMuted}
+        activeTintColor={colors.primaryDark}
+        focused={settingsFocused}
+        icon={({ color, size }) => <Ionicons name="settings-outline" color={color} size={size} />}
+        inactiveTintColor={colors.muted}
+        label="Settings"
+        labelStyle={styles.drawerLabel}
+        onPress={() => props.navigation.navigate('Settings')}
+      />
+    </DrawerContentScrollView>
+  );
+}
+
 const styles = StyleSheet.create({
   drawer: {
     backgroundColor: colors.background,
   },
+  drawerContent: {
+    flexGrow: 1,
+  },
   drawerLabel: {
     fontSize: typography.body,
     fontWeight: '800',
+  },
+  drawerSpacer: {
+    flexGrow: 1,
   },
   header: {
     backgroundColor: colors.background,
@@ -252,6 +291,9 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: typography.h3,
     fontWeight: '900',
+  },
+  hiddenDrawerItem: {
+    display: 'none',
   },
   saving: {
     color: colors.primaryDark,
