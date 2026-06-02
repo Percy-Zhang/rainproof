@@ -1,4 +1,5 @@
 import { normalizeCurrencyCode, parseMoneyInput } from './money';
+import { isTransactionLineLinked, isTransactionParentLinked } from './transactionLinks';
 import type {
   CurrencyCode,
   NewTransactionLinkInput,
@@ -26,6 +27,7 @@ export type TransactionLinkSourceScope = {
   amountMinor: number;
   currencyCode: CurrencyCode;
   line?: TransactionLine;
+  isLinked: boolean;
 };
 
 export type TransactionLinkTargetOption = {
@@ -40,6 +42,7 @@ export type TransactionLinkTargetOption = {
   line?: TransactionLine;
   eligible: boolean;
   disabledReason: string;
+  isLinked: boolean;
 };
 
 export type TransactionLinkAllocationChanges = {
@@ -51,6 +54,7 @@ export type TransactionLinkAllocationChanges = {
 export function getTransactionLinkSourceScopes(
   transaction: Transaction,
   lines: TransactionLine[],
+  transactionLinks: TransactionLink[] = [],
 ): TransactionLinkSourceScope[] {
   if (transaction.kind !== 'income') {
     return [];
@@ -70,6 +74,7 @@ export function getTransactionLinkSourceScopes(
       sourceLineId: null,
       amountMinor: wholeAmountMinor,
       currencyCode,
+      isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
     },
   ];
 
@@ -81,6 +86,7 @@ export function getTransactionLinkSourceScopes(
         amountMinor: line.amountMinor,
         currencyCode: normalizeCurrencyCode(line.currencyCode),
         line,
+        isLinked: isTransactionLineLinked(line.id, transactionLinks),
       })),
     );
   }
@@ -92,10 +98,12 @@ export function getTransactionLinkTargetOptions({
   transaction,
   lines,
   currencyCode,
+  transactionLinks = [],
 }: {
   transaction: Transaction;
   lines: TransactionLine[];
   currencyCode: CurrencyCode;
+  transactionLinks?: TransactionLink[];
 }): TransactionLinkTargetOption[] {
   if (transaction.kind !== 'expense') {
     return [];
@@ -126,6 +134,7 @@ export function getTransactionLinkTargetOptions({
       subcategoryId: firstLine.subcategoryId,
       eligible: true,
       disabledReason: '',
+      isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
     },
   ];
 
@@ -143,6 +152,7 @@ export function getTransactionLinkTargetOptions({
         line,
         eligible: true,
         disabledReason: '',
+        isLinked: isTransactionLineLinked(line.id, transactionLinks),
       })),
     );
   }

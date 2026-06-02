@@ -18,6 +18,7 @@ import {
 } from '../../domain/transactionDisplay';
 import type { Account, CategoryDefinition, CurrencyCode, TransactionLine } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { LinkedTransactionIndicator } from './LinkedTransactionIndicator';
 
 type CompactTransactionListItemProps = {
   entry: TransactionDisplayEntry;
@@ -73,7 +74,12 @@ export function CompactTransactionListItem({
             <Text numberOfLines={1} style={styles.compactTitle}>
               {title}
             </Text>
-            <Text style={styles.compactDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+            <View style={styles.compactDateGroup}>
+              {entry.isLinked ? (
+                <LinkedTransactionIndicator compact testID={`linked-transaction-indicator-${entry.transaction.id}`} />
+              ) : null}
+              <Text style={styles.compactDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+            </View>
           </View>
           <TransactionRelationText
             accounts={accounts}
@@ -88,6 +94,7 @@ export function CompactTransactionListItem({
         categories={categories}
         compact
         lines={splitMetadata.splitLines}
+        linkedLineIds={entry.linkedLineIds ?? []}
         parentTitle={title}
         showCurrencyCodes={showCurrencyCodes}
         onPress={onPress}
@@ -168,7 +175,12 @@ export function TransactionListItem({
                 entry={entry}
                 style={styles.fullMeta}
               />
-              <Text style={styles.fullDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+              <View style={styles.fullMetaEnd}>
+                {entry.isLinked ? (
+                  <LinkedTransactionIndicator testID={`linked-transaction-indicator-${entry.transaction.id}`} />
+                ) : null}
+                <Text style={styles.fullDate}>{formatTransactionShortDate(entry.transaction.datetime)}</Text>
+              </View>
             </View>
           </View>
         </View>
@@ -176,6 +188,7 @@ export function TransactionListItem({
       <SplitChildRows
         categories={categories}
         lines={splitMetadata.splitLines}
+        linkedLineIds={entry.linkedLineIds ?? []}
         parentTitle={title}
         showCurrencyCodes={showCurrencyCodes}
         onPress={onPress}
@@ -188,6 +201,7 @@ function SplitChildRows({
   categories,
   compact = false,
   lines,
+  linkedLineIds,
   parentTitle,
   showCurrencyCodes,
   onPress,
@@ -195,6 +209,7 @@ function SplitChildRows({
   categories: CategoryDefinition[];
   compact?: boolean;
   lines: TransactionLine[];
+  linkedLineIds: string[];
   parentTitle: string;
   showCurrencyCodes: boolean;
   onPress: () => void;
@@ -207,6 +222,7 @@ function SplitChildRows({
     <View style={compact ? styles.compactSplitChildren : styles.fullSplitChildren}>
       {lines.map((line) => {
         const displayText = getSplitLineChildDisplayText(line, parentTitle, categories);
+        const linked = linkedLineIds.includes(line.id);
 
         return (
           <Pressable
@@ -241,12 +257,17 @@ function SplitChildRows({
                 </Text>
               ) : null}
             </View>
-            <TransactionAmountText
-              amountMinor={line.amountMinor}
-              currencyCode={line.currencyCode}
-              showCurrencyCodes={showCurrencyCodes}
-              style={compact ? styles.compactSplitChildAmount : styles.fullSplitChildAmount}
-            />
+            <View style={styles.splitChildEnd}>
+              {linked ? (
+                <LinkedTransactionIndicator compact testID={`linked-split-line-indicator-${line.id}`} />
+              ) : null}
+              <TransactionAmountText
+                amountMinor={line.amountMinor}
+                currencyCode={line.currencyCode}
+                showCurrencyCodes={showCurrencyCodes}
+                style={compact ? styles.compactSplitChildAmount : styles.fullSplitChildAmount}
+              />
+            </View>
           </Pressable>
         );
       })}
@@ -359,8 +380,13 @@ const styles = StyleSheet.create({
   },
   compactDate: {
     color: colors.muted,
-    flexShrink: 0,
     fontSize: typography.small,
+  },
+  compactDateGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 4,
   },
   compactMeta: {
     color: colors.muted,
@@ -474,6 +500,12 @@ const styles = StyleSheet.create({
     fontSize: typography.small,
     textAlign: 'right',
   },
+  fullMetaEnd: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 4,
+  },
   fullAmount: {
     color: colors.ink,
     flexShrink: 0,
@@ -523,6 +555,12 @@ const styles = StyleSheet.create({
   splitChildBody: {
     flex: 1,
     minWidth: 0,
+  },
+  splitChildEnd: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 4,
   },
   splitChildNote: {
     color: colors.muted,

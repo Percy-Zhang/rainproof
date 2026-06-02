@@ -36,6 +36,7 @@ import type {
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { InlineField } from './TransactionFormComponents';
+import { LinkedTransactionIndicator } from './LinkedTransactionIndicator';
 import {
   getTransactionLinkTypeShortLabel,
   transactionLinkTypeOptions,
@@ -66,8 +67,8 @@ export function IncomeLinkManager({
   );
   const [saving, setSaving] = useState(false);
   const sourceScopes = useMemo(
-    () => getTransactionLinkSourceScopes(transaction, snapshot.transactionLines),
-    [snapshot.transactionLines, transaction],
+    () => getTransactionLinkSourceScopes(transaction, snapshot.transactionLines, snapshot.transactionLinks),
+    [snapshot.transactionLines, snapshot.transactionLinks, transaction],
   );
   const selectedSourceScope =
     sourceScopes.find((scope) => scope.id === selectedSourceScopeId) ?? sourceScopes[0];
@@ -82,12 +83,14 @@ export function IncomeLinkManager({
         sourceCurrencyCode: selectedSourceScope?.currencyCode ?? null,
         transactions: snapshot.transactions,
         lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
         query,
       }).slice(0, 12),
     [
       query,
       selectedSourceScope?.currencyCode,
       snapshot.transactionLines,
+      snapshot.transactionLinks,
       snapshot.transactions,
       transaction.id,
     ],
@@ -323,7 +326,12 @@ function SourceScopeRow({
         <Text numberOfLines={1} style={styles.scopeTitle}>{label}</Text>
         <Text numberOfLines={1} style={styles.scopeMeta}>{detail}</Text>
       </View>
-      <Text style={styles.incomeAmount}>{formatMoney(scope.amountMinor, scope.currencyCode)}</Text>
+      <View style={styles.rowEnd}>
+        {scope.isLinked ? (
+          <LinkedTransactionIndicator label testID={`linked-source-scope-${scope.id}`} />
+        ) : null}
+        <Text style={styles.incomeAmount}>{formatMoney(scope.amountMinor, scope.currencyCode)}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -398,6 +406,7 @@ function TargetCandidateOptions({
         transaction: candidate.transaction,
         lines: snapshot.transactionLines,
         currencyCode,
+        transactionLinks: snapshot.transactionLinks,
       })
     : [
         {
@@ -411,6 +420,7 @@ function TargetCandidateOptions({
           subcategoryId: candidate.subcategoryId,
           eligible: false,
           disabledReason: candidate.disabledReason,
+          isLinked: candidate.isLinked,
         },
       ];
 
@@ -458,7 +468,12 @@ function TargetOptionRow({
           {option.eligible ? detail : option.disabledReason}
         </Text>
       </View>
-      <Text style={styles.expenseAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
+      <View style={styles.rowEnd}>
+        {option.isLinked ? (
+          <LinkedTransactionIndicator label testID={`linked-target-option-${option.id}`} />
+        ) : null}
+        <Text style={styles.expenseAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
+      </View>
     </Pressable>
   );
 }
@@ -671,6 +686,11 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',
+  },
+  rowEnd: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: spacing.xs,
   },
   incomeAmount: {
     color: colors.success,

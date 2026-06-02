@@ -307,3 +307,41 @@ function getTransactionCurrencyCodes(
       .map((line) => normalizeCurrencyCode(line.currencyCode)),
   );
 }
+
+export function isTransactionLinked(transactionId: string, links: TransactionLink[]): boolean {
+  return links.some(
+    (link) => link.sourceTransactionId === transactionId || link.targetTransactionId === transactionId,
+  );
+}
+
+export function isTransactionParentLinked(transactionId: string, links: TransactionLink[]): boolean {
+  return links.some(
+    (link) =>
+      (link.sourceTransactionId === transactionId && !normalizeOptionalId(link.sourceLineId)) ||
+      (link.targetTransactionId === transactionId && !normalizeOptionalId(link.targetLineId)),
+  );
+}
+
+export function isTransactionLineLinked(lineId: string, links: TransactionLink[]): boolean {
+  return links.some(
+    (link) => normalizeOptionalId(link.sourceLineId) === lineId || normalizeOptionalId(link.targetLineId) === lineId,
+  );
+}
+
+export function getTransactionDisplayLinkStatus({
+  transactionId,
+  lineIds,
+  links,
+  showLineLevel,
+}: {
+  transactionId: string;
+  lineIds: string[];
+  links: TransactionLink[];
+  showLineLevel: boolean;
+}): { isParentLinked: boolean; linkedLineIds: string[] } {
+  const linkedLineIds = lineIds.filter((lineId) => isTransactionLineLinked(lineId, links));
+  return {
+    isParentLinked: isTransactionParentLinked(transactionId, links) || (!showLineLevel && linkedLineIds.length > 0),
+    linkedLineIds: showLineLevel ? linkedLineIds : [],
+  };
+}

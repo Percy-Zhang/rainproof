@@ -6,7 +6,7 @@ import {
   getDashboardSelectedAccountIds,
   toggleDashboardAccountSelection,
 } from '../dashboard';
-import type { Account, AccountBalance, AppSnapshot, Transaction, TransactionLine } from '../types';
+import type { Account, AccountBalance, AppSnapshot, Transaction, TransactionLine, TransactionLink } from '../types';
 
 function account(id: string, sortOrder: number): Account {
   return {
@@ -71,7 +71,28 @@ function line(
   };
 }
 
-function snapshot(accounts: Account[], transactions: Transaction[], transactionLines: TransactionLine[]): AppSnapshot {
+function link(overrides: Partial<TransactionLink> = {}): TransactionLink {
+  return {
+    id: 'link-1',
+    sourceTransactionId: 'income-1',
+    targetTransactionId: 'expense-1',
+    sourceLineId: null,
+    targetLineId: null,
+    linkType: 'reimbursement',
+    amountMinor: 100,
+    currencyCode: 'AUD',
+    createdAt: '',
+    updatedAt: '',
+    ...overrides,
+  };
+}
+
+function snapshot(
+  accounts: Account[],
+  transactions: Transaction[],
+  transactionLines: TransactionLine[],
+  transactionLinks: TransactionLink[] = [],
+): AppSnapshot {
   return {
     defaultCurrencyCode: 'AUD',
     settings: {
@@ -84,7 +105,7 @@ function snapshot(accounts: Account[], transactions: Transaction[], transactionL
     accounts,
     transactions,
     transactionLines,
-    transactionLinks: [],
+    transactionLinks,
     budgets: [],
     recurringItems: [],
     recurringBills: [],
@@ -224,6 +245,67 @@ describe('dashboard helpers', () => {
     });
 
     expect(recent.map((entry) => entry.transaction.id)).toEqual(['tx-1']);
+  });
+
+  it('marks linked recent transactions without marking unlinked rows', () => {
+    const accounts = [account('a1', 0)];
+    const income = transaction('income-1', new Date(2026, 4, 18, 9).toISOString(), 'income');
+    const expense = transaction('expense-1', new Date(2026, 4, 19, 9).toISOString());
+    const unlinked = transaction('expense-2', new Date(2026, 4, 20, 9).toISOString());
+
+    const recent = getDashboardRecentTransactions({
+      previewAccountIds: ['a1'],
+      snapshot: snapshot(
+        accounts,
+        [income, expense, unlinked],
+        [
+          line('income-1', 'a1', { amountMinor: 100, categoryId: 'income', subcategoryId: 'salary' }),
+          line('expense-1', 'a1'),
+          line('expense-2', 'a1'),
+        ],
+        [link()],
+      ),
+      selectedAccountIds: ['a1'],
+    });
+
+    expect(Object.fromEntries(recent.map((entry) => [entry.transaction.id, entry.isLinked]))).toEqual({
+      'expense-2': false,
+      'expense-1': true,
+      'income-1': true,
+    });
+  });
+
+  it('marks linked recent split lines without marking the split parent for line-level links', () => {
+    const accounts = [account('a1', 0)];
+    const income = transaction('income-1', new Date(2026, 4, 18, 9).toISOString(), 'income');
+    const splitExpense = transaction('split-expense', new Date(2026, 4, 19, 9).toISOString());
+
+    const recent = getDashboardRecentTransactions({
+      previewAccountIds: ['a1'],
+      snapshot: snapshot(
+        accounts,
+        [income, splitExpense],
+        [
+          line('income-1', 'a1', { id: 'income-line', amountMinor: 100, categoryId: 'income', subcategoryId: 'salary' }),
+          line('split-expense', 'a1', { id: 'food-line', amountMinor: -60, categoryId: 'food', subcategoryId: 'groceries' }),
+          line('split-expense', 'a1', { id: 'home-line', amountMinor: -40, categoryId: 'housing', subcategoryId: 'rent' }),
+        ],
+        [link({
+          sourceTransactionId: 'income-1',
+          sourceLineId: 'income-line',
+          targetTransactionId: 'split-expense',
+          targetLineId: 'food-line',
+          amountMinor: 60,
+        })],
+      ),
+      selectedAccountIds: ['a1'],
+    });
+    const splitEntry = recent.find((entry) => entry.transaction.id === 'split-expense');
+
+    expect(splitEntry).toEqual(expect.objectContaining({
+      isLinked: false,
+      linkedLineIds: ['food-line'],
+    }));
   });
 
   it('sorts recent transactions globally before taking the latest five', () => {

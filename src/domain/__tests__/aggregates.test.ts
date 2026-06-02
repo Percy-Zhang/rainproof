@@ -830,6 +830,93 @@ describe('aggregates', () => {
     expect(getAccountBalances(accounts, linkedLines).find((balance) => balance.account.id === 'acct_aud')?.balanceMinor).toBe(4000);
   });
 
+  it('marks transaction display entries that participate in links', () => {
+    const linkedTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('linked_expense', 'expense'),
+      makeTransaction('unlinked_expense', 'expense'),
+    ];
+    const linkedLines = [
+      makeLine({
+        id: 'linked_income_line',
+        transactionId: 'linked_income',
+        amountMinor: 4000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'linked_expense_line',
+        transactionId: 'linked_expense',
+        amountMinor: -4000,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'unlinked_expense_line',
+        transactionId: 'unlinked_expense',
+        amountMinor: -1200,
+        categoryId: 'food',
+      }),
+    ];
+
+    const entries = getTransactionDisplayEntries({
+      transactions: linkedTransactions,
+      lines: linkedLines,
+      transactionLinks: [makeLink()],
+    });
+
+    expect(Object.fromEntries(entries.map((entry) => [entry.transaction.id, entry.isLinked]))).toEqual({
+      linked_income: true,
+      linked_expense: true,
+      unlinked_expense: false,
+    });
+  });
+
+  it('marks linked split lines without marking the parent row for line-level links', () => {
+    const splitTransactions = [
+      makeTransaction('linked_income', 'income'),
+      makeTransaction('split_expense', 'expense'),
+    ];
+    const splitLines = [
+      makeLine({
+        id: 'linked_income_line',
+        transactionId: 'linked_income',
+        amountMinor: 2000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'split_food',
+        transactionId: 'split_expense',
+        amountMinor: -1200,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'split_housing',
+        transactionId: 'split_expense',
+        amountMinor: -800,
+        categoryId: 'housing',
+      }),
+    ];
+
+    const entries = getTransactionDisplayEntries({
+      transactions: splitTransactions,
+      lines: splitLines,
+      transactionLinks: [
+        makeLink({
+          sourceTransactionId: 'linked_income',
+          sourceLineId: 'linked_income_line',
+          targetTransactionId: 'split_expense',
+          targetLineId: 'split_food',
+          amountMinor: 1200,
+        }),
+      ],
+    });
+    const splitEntry = entries.find((entry) => entry.transaction.id === 'split_expense');
+
+    expect(splitEntry).toEqual(expect.objectContaining({
+      isLinked: false,
+      linkedLineIds: ['split_food'],
+    }));
+  });
+
   it('shows internal transfer sides as separate display entries instead of netting to zero', () => {
     const entries = getTransactionDisplayEntries({
       transactions,

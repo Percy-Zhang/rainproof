@@ -83,6 +83,7 @@ export function useTransactionsViewModel({
     const entries = getTransactionDisplayEntries({
       transactions: snapshot.transactions,
       lines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
       accountIds: selectedAccountIds,
     })
       .filter((entry) => isWithinDateRange(entry.transaction.datetime, range));
@@ -101,6 +102,7 @@ export function useTransactionsViewModel({
     selectedAccountIds,
     snapshot.accounts,
     snapshot.transactionLines,
+    snapshot.transactionLinks,
     snapshot.transactions,
   ]);
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;

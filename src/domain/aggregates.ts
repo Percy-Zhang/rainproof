@@ -1,6 +1,7 @@
 import { isWithinDateRange } from './dates';
 import { getLinkedStatsAdjustments } from './linkedStats';
 import { getUpcomingRecurringItems } from './recurringItems';
+import { getTransactionDisplayLinkStatus } from './transactionLinks';
 import type {
   Account,
   AccountBalance,
@@ -27,6 +28,8 @@ export type TransactionDisplayEntry = {
   lines: TransactionLine[];
   amountMinor: number;
   currencyCode: CurrencyCode;
+  isLinked?: boolean;
+  linkedLineIds?: string[];
 };
 
 export function compareTransactionsDescending(left: Transaction, right: Transaction): number {
@@ -230,11 +233,13 @@ export function getTransactionLineTotal(transactionId: string, lines: Transactio
 export function getTransactionDisplayEntries({
   transactions,
   lines,
+  transactionLinks = [],
   currencyCode,
   accountIds,
 }: {
   transactions: Transaction[];
   lines: TransactionLine[];
+  transactionLinks?: TransactionLink[];
   currencyCode?: CurrencyCode;
   accountIds?: string[];
 }): TransactionDisplayEntry[] {
@@ -266,17 +271,33 @@ export function getTransactionDisplayEntries({
     }
 
     if (transaction.kind === 'transfer') {
-      return visibleLines.map((line) => ({
-        id: `${transaction.id}:${line.id}`,
-        accountId: line.accountId,
-        transaction,
-        lines: [line],
-        amountMinor: line.amountMinor,
-        currencyCode: line.currencyCode,
-      }));
+      return visibleLines.map((line) => {
+        const linkStatus = getTransactionDisplayLinkStatus({
+          transactionId: transaction.id,
+          lineIds: [line.id],
+          links: transactionLinks,
+          showLineLevel: false,
+        });
+        return {
+          id: `${transaction.id}:${line.id}`,
+          accountId: line.accountId,
+          transaction,
+          lines: [line],
+          amountMinor: line.amountMinor,
+          currencyCode: line.currencyCode,
+          isLinked: linkStatus.isParentLinked,
+          linkedLineIds: linkStatus.linkedLineIds,
+        };
+      });
     }
 
     const entryCurrencyCode = currencyCode ?? visibleLines[0].currencyCode;
+    const linkStatus = getTransactionDisplayLinkStatus({
+      transactionId: transaction.id,
+      lineIds: visibleLines.map((line) => line.id),
+      links: transactionLinks,
+      showLineLevel: visibleLines.length > 1,
+    });
     return [
       {
         id: transaction.id,
@@ -287,6 +308,8 @@ export function getTransactionDisplayEntries({
           .filter((line) => line.currencyCode === entryCurrencyCode)
           .reduce((sum, line) => sum + line.amountMinor, 0),
         currencyCode: entryCurrencyCode,
+        isLinked: linkStatus.isParentLinked,
+        linkedLineIds: linkStatus.linkedLineIds,
       },
     ];
   });

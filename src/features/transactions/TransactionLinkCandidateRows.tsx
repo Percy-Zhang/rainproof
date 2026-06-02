@@ -17,6 +17,7 @@ import type {
 } from '../../domain/transactionLinking';
 import type { AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { LinkedTransactionIndicator } from './LinkedTransactionIndicator';
 
 type ExpenseTargetRowProps = {
   candidate: ExpenseLinkTargetCandidate;
@@ -56,6 +57,9 @@ export function ExpenseTargetRow({
           <Text numberOfLines={1} style={styles.targetTitle}>
             {candidate.transaction.title || subcategoryName}
           </Text>
+          {candidate.isLinked ? (
+            <LinkedTransactionIndicator label testID={`linked-expense-target-${candidate.transaction.id}`} />
+          ) : null}
           <Text style={styles.targetAmount}>
             {formatMoney(candidate.amountMinor, candidate.currencyCode)}
           </Text>
@@ -101,6 +105,9 @@ export function IncomeSourceRow({ candidate, snapshot, onPress }: IncomeSourceRo
           <Text numberOfLines={1} style={styles.targetTitle}>
             {candidate.transaction.title || 'Income'}
           </Text>
+          {candidate.isLinked ? (
+            <LinkedTransactionIndicator label testID={`linked-income-source-${candidate.transaction.id}`} />
+          ) : null}
           <Text style={[styles.targetAmount, styles.incomeAmount]}>
             {formatMoney(candidate.amountMinor, candidate.currencyCode)}
           </Text>

@@ -130,6 +130,20 @@ describe('transaction linking helpers', () => {
     ).toEqual(['expense-usd']);
   });
 
+  it('marks already-linked parent expense targets in link selection data', () => {
+    const candidates = getExpenseLinkTargetCandidates({
+      sourceTransactionId: 'income',
+      sourceCurrencyCode: 'AUD',
+      transactions,
+      lines,
+      transactionLinks: [link({ targetLineId: null })],
+      query: '',
+    });
+
+    expect(candidates.find((candidate) => candidate.transaction.id === 'expense-aud')?.isLinked).toBe(true);
+    expect(candidates.find((candidate) => candidate.transaction.id === 'expense-usd')?.isLinked).toBe(false);
+  });
+
   it('returns already-linked same-currency income sources as eligible for additional allocations', () => {
     const candidates = getIncomeLinkSourceCandidates({
       targetTransactionId: 'expense-aud',
@@ -144,6 +158,19 @@ describe('transaction linking helpers', () => {
     expect(candidates[0]).toEqual(
       expect.objectContaining({ eligible: true, disabledReason: '' }),
     );
+  });
+
+  it('marks already-linked parent income sources in link selection data', () => {
+    const candidates = getIncomeLinkSourceCandidates({
+      targetTransactionId: 'expense-aud',
+      targetCurrencyCode: 'AUD',
+      transactions,
+      lines,
+      transactionLinks: [link({ sourceLineId: null })],
+      query: '',
+    });
+
+    expect(candidates.find((candidate) => candidate.transaction.id === 'income')?.isLinked).toBe(true);
   });
 
   it('allows an unlinked same-currency income source for an expense', () => {

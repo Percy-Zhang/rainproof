@@ -1,5 +1,6 @@
 import { getLinkedStatsAdjustments } from './linkedStats';
 import { normalizeCurrencyCode } from './money';
+import { isTransactionParentLinked } from './transactionLinks';
 import type { CurrencyCode, Transaction, TransactionLine, TransactionLink, TransactionLinkType } from './types';
 
 export type IncomeLinkTreatment = TransactionLinkType | 'normal';
@@ -18,6 +19,7 @@ export type ExpenseLinkTargetCandidate = {
   subcategoryId: string;
   eligible: boolean;
   disabledReason: string;
+  isLinked: boolean;
 };
 
 export type IncomeLinkSourceCandidate = {
@@ -27,6 +29,7 @@ export type IncomeLinkSourceCandidate = {
   accountId: string;
   eligible: boolean;
   disabledReason: string;
+  isLinked: boolean;
 };
 
 export type TransactionLinkEditSummary = {
@@ -92,12 +95,14 @@ export function getExpenseLinkTargetCandidates({
   sourceCurrencyCode,
   transactions,
   lines,
+  transactionLinks = [],
   query,
 }: {
   sourceTransactionId: string;
   sourceCurrencyCode: CurrencyCode | null;
   transactions: Transaction[];
   lines: TransactionLine[];
+  transactionLinks?: TransactionLink[];
   query: string;
 }): ExpenseLinkTargetCandidate[] {
   const normalizedQuery = query.trim().toLowerCase();
@@ -131,6 +136,7 @@ export function getExpenseLinkTargetCandidates({
         subcategoryId: firstLine?.subcategoryId ?? '',
         eligible,
         disabledReason: eligible ? '' : 'Different currency',
+        isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)
@@ -157,7 +163,7 @@ export function getIncomeLinkSourceCandidates({
   targetCurrencyCode,
   transactions,
   lines,
-  transactionLinks: _transactionLinks,
+  transactionLinks,
   query,
 }: {
   targetTransactionId: string;
@@ -196,6 +202,7 @@ export function getIncomeLinkSourceCandidates({
         accountId: firstLine?.accountId ?? '',
         eligible: currencyMatches,
         disabledReason: currencyMatches ? '' : 'Different currency',
+        isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)

@@ -96,6 +96,26 @@ describe('transaction link allocation form helpers', () => {
     ]);
   });
 
+  it('marks linked source scopes at the whole or split-line level', () => {
+    const scopes = getTransactionLinkSourceScopes(
+      transaction('income-1', 'income'),
+      [
+        line({ id: 'salary', transactionId: 'income-1', amountMinor: 3000, categoryId: 'income', subcategoryId: 'salary' }),
+        line({ id: 'bonus', transactionId: 'income-1', amountMinor: 2000, categoryId: 'income', subcategoryId: 'bonus' }),
+      ],
+      [
+        link({ id: 'whole-link', sourceLineId: null }),
+        link({ id: 'line-link', sourceLineId: 'bonus' }),
+      ],
+    );
+
+    expect(scopes.map((scope) => [scope.sourceLineId, scope.isLinked])).toEqual([
+      [null, true],
+      ['salary', false],
+      ['bonus', true],
+    ]);
+  });
+
   it('builds whole-target and split-line target options', () => {
     const options = getTransactionLinkTargetOptions({
       transaction: transaction('expense-1', 'expense'),
@@ -110,6 +130,27 @@ describe('transaction link allocation form helpers', () => {
       expect.objectContaining({ targetLineId: null, amountMinor: 5000 }),
       expect.objectContaining({ targetLineId: 'food', amountMinor: 3000, subcategoryId: 'groceries' }),
       expect.objectContaining({ targetLineId: 'home', amountMinor: 2000, subcategoryId: 'rent' }),
+    ]);
+  });
+
+  it('marks linked target options at the whole or split-line level', () => {
+    const options = getTransactionLinkTargetOptions({
+      transaction: transaction('expense-1', 'expense'),
+      lines: [
+        line({ id: 'food', transactionId: 'expense-1', amountMinor: -3000, categoryId: 'food', subcategoryId: 'groceries' }),
+        line({ id: 'home', transactionId: 'expense-1', amountMinor: -2000, categoryId: 'housing', subcategoryId: 'rent' }),
+      ],
+      currencyCode: 'AUD',
+      transactionLinks: [
+        link({ id: 'whole-link', targetLineId: null }),
+        link({ id: 'line-link', targetLineId: 'home' }),
+      ],
+    });
+
+    expect(options.map((option) => [option.targetLineId, option.isLinked])).toEqual([
+      [null, true],
+      ['food', false],
+      ['home', true],
     ]);
   });
 
