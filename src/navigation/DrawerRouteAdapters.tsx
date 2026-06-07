@@ -157,7 +157,7 @@ function BudgetsDrawerRoute({ actions, rootNavigation, snapshot }: DrawerRouteAd
   );
 }
 
-function RecurringDrawerRoute({ rootNavigation, snapshot }: DrawerRouteAdapterProps) {
+function RecurringDrawerRoute({ actions, rootNavigation, snapshot }: DrawerRouteAdapterProps) {
   return (
     <RecurringItemsScreen
       snapshot={snapshot}
@@ -165,6 +165,7 @@ function RecurringDrawerRoute({ rootNavigation, snapshot }: DrawerRouteAdapterPr
       onCreateTransaction={(recurringItemId) =>
         rootNavigation?.navigate('CreateRecurringTransaction', { recurringItemId })}
       onEditRecurringItem={(recurringItemId) => rootNavigation?.navigate('EditRecurringItem', { recurringItemId })}
+      onUndoRecurringTransaction={actions.undoLatestRecurringTransaction}
     />
   );
 }

@@ -112,6 +112,23 @@ CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
 ON recurring_items(is_active, next_due_date);
 `;
 
+const RECURRING_TRANSACTION_HISTORY_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS recurring_transaction_history (
+  id TEXT PRIMARY KEY NOT NULL,
+  recurring_item_id TEXT NOT NULL REFERENCES recurring_items(id) ON DELETE CASCADE,
+  transaction_id TEXT NOT NULL,
+  previous_next_due_date TEXT NOT NULL,
+  advanced_next_due_date TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (recurring_item_id, sequence),
+  UNIQUE (transaction_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_transaction_history_item_sequence
+ON recurring_transaction_history(recurring_item_id, sequence DESC);
+`;
+
 const TRANSACTION_TEMPLATES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS transaction_templates (
   id TEXT PRIMARY KEY NOT NULL,
@@ -156,6 +173,7 @@ ON transaction_template_lines(template_id, sort_order, created_at, id);
 
 const PLANNING_AND_RAINY_DAY_SCHEMA_SQL = `
 ${RECURRING_ITEMS_SCHEMA_SQL}
+${RECURRING_TRANSACTION_HISTORY_SCHEMA_SQL}
 ${TRANSACTION_TEMPLATES_SCHEMA_SQL}
 ${TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL}
 
@@ -257,6 +275,12 @@ const migrations: Migration[] = [
     version: 12,
     migrate: async (db) => {
       await ensureBudgetScopeSchema(db);
+    },
+  },
+  {
+    version: 13,
+    migrate: async (db) => {
+      await db.execAsync(RECURRING_TRANSACTION_HISTORY_SCHEMA_SQL);
     },
   },
 ];

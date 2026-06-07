@@ -6,6 +6,7 @@ import {
 import type {
   Account,
   CategoryDefinition,
+  CreateRecurringTransactionInput,
   NewTransactionInput,
   RecurringItem,
   UpdateRecurringItemInput,
@@ -29,8 +30,7 @@ type RecurringTransactionInputParams = {
 };
 
 type SaveRecurringTransactionParams = RecurringTransactionInputParams & {
-  addTransaction: (input: NewTransactionInput) => Promise<void>;
-  updateRecurringItem: (input: UpdateRecurringItemInput) => Promise<void>;
+  createRecurringTransaction: (input: CreateRecurringTransactionInput) => Promise<void>;
 };
 
 export function buildRecurringTransactionInputFromDraft({
@@ -84,11 +84,10 @@ export function buildRecurringItemAdvanceInput(
 
 export async function saveRecurringTransactionFromDraft({
   accounts,
-  addTransaction,
   categories,
+  createRecurringTransaction,
   draft,
   recurringItem,
-  updateRecurringItem,
 }: SaveRecurringTransactionParams): Promise<{
   transactionInput: NewTransactionInput;
   recurringItemInput: UpdateRecurringItemInput;
@@ -101,14 +100,12 @@ export async function saveRecurringTransactionFromDraft({
   });
   const recurringItemInput = buildRecurringItemAdvanceInput(recurringItem, accounts);
 
-  await addTransaction(transactionInput);
-
-  try {
-    await updateRecurringItem(recurringItemInput);
-  } catch (caught) {
-    const detail = caught instanceof Error ? caught.message : 'Could not advance the recurring item.';
-    throw new Error(`Transaction was created, but the recurring item was not advanced. ${detail}`);
-  }
+  await createRecurringTransaction({
+    recurringItemId: recurringItem.id,
+    previousNextDueDate: recurringItem.nextDueDate,
+    transactionInput,
+    recurringItemInput,
+  });
 
   return {
     transactionInput,

@@ -148,6 +148,16 @@ export type RecurringItem = {
 
 export type RecurringBill = RecurringItem;
 
+export type RecurringTransactionHistory = {
+  id: string;
+  recurringItemId: string;
+  transactionId: string;
+  previousNextDueDate: string;
+  advancedNextDueDate: string;
+  sequence: number;
+  createdAt: string;
+};
+
 export type TransactionTemplateKind = Extract<TransactionKind, 'expense' | 'income'>;
 
 export type TransactionTemplate = {
@@ -285,6 +295,7 @@ export type AppSnapshot = {
   budgets: Budget[];
   recurringItems: RecurringItem[];
   recurringBills: RecurringBill[];
+  recurringTransactionHistory?: RecurringTransactionHistory[];
   transactionTemplates: TransactionTemplate[];
   rainyDayFund: RainyDayFund;
 };
@@ -386,6 +397,13 @@ export type NewRecurringItemInput = {
 
 export type UpdateRecurringItemInput = NewRecurringItemInput & {
   id: string;
+};
+
+export type CreateRecurringTransactionInput = {
+  recurringItemId: string;
+  previousNextDueDate: string;
+  transactionInput: NewTransactionInput;
+  recurringItemInput: UpdateRecurringItemInput;
 };
 
 export type NewRecurringBillInput = NewRecurringItemInput;

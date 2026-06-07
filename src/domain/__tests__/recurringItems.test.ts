@@ -4,12 +4,13 @@ import {
   calculateNextRecurringDueDate,
   classifyRecurringItemsByDueDate,
   dateOnlyToLocalDate,
+  getLatestRecurringTransactionHistoryByItem,
   getRecurringCurrencyCodeForAccount,
   getNextMonthlyDueDateForDay,
   toLocalDateOnly,
   validateRecurringItemInput,
 } from '../recurringItems';
-import type { Account, RecurringItem } from '../types';
+import type { Account, RecurringItem, RecurringTransactionHistory } from '../types';
 
 const now = '2026-05-15T12:00:00.000Z';
 const accounts: Account[] = [
@@ -198,6 +199,17 @@ describe('recurring item helpers', () => {
       '2026-05-29',
     );
   });
+
+  it('selects the newest undoable transaction for each recurring item', () => {
+    const latestByItem = getLatestRecurringTransactionHistoryByItem([
+      recurringHistory({ id: 'rent-1', recurringItemId: 'rent', sequence: 1 }),
+      recurringHistory({ id: 'salary-1', recurringItemId: 'salary', sequence: 1 }),
+      recurringHistory({ id: 'rent-2', recurringItemId: 'rent', sequence: 2 }),
+    ]);
+
+    expect(latestByItem.get('rent')?.id).toBe('rent-2');
+    expect(latestByItem.get('salary')?.id).toBe('salary-1');
+  });
 });
 
 function recurringItem(overrides: Partial<RecurringItem>): RecurringItem {
@@ -216,6 +228,21 @@ function recurringItem(overrides: Partial<RecurringItem>): RecurringItem {
     isActive: true,
     createdAt: now,
     updatedAt: now,
+    ...overrides,
+  };
+}
+
+function recurringHistory(
+  overrides: Partial<RecurringTransactionHistory>,
+): RecurringTransactionHistory {
+  return {
+    id: 'history-1',
+    recurringItemId: 'recurring-1',
+    transactionId: 'transaction-1',
+    previousNextDueDate: '2026-05-01',
+    advancedNextDueDate: '2026-06-01',
+    sequence: 1,
+    createdAt: now,
     ...overrides,
   };
 }

@@ -13,6 +13,7 @@ import type {
   RecurringFrequency,
   RecurringItem,
   RecurringItemKind,
+  RecurringTransactionHistory,
   Transaction,
   TransactionTemplate,
   TransactionTemplateKind,
@@ -116,6 +117,16 @@ export type RecurringItemRow = {
   is_active: number;
   created_at: string;
   updated_at: string;
+};
+
+export type RecurringTransactionHistoryRow = {
+  id: string;
+  recurring_item_id: string;
+  transaction_id: string;
+  previous_next_due_date: string;
+  advanced_next_due_date: string;
+  sequence: number;
+  created_at: string;
 };
 
 export type TransactionTemplateRow = {
@@ -263,6 +274,20 @@ export function mapRecurringItem(row: RecurringItemRow): RecurringItem {
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function mapRecurringTransactionHistory(
+  row: RecurringTransactionHistoryRow,
+): RecurringTransactionHistory {
+  return {
+    id: row.id,
+    recurringItemId: row.recurring_item_id,
+    transactionId: row.transaction_id,
+    previousNextDueDate: row.previous_next_due_date,
+    advancedNextDueDate: row.advanced_next_due_date,
+    sequence: row.sequence,
+    createdAt: row.created_at,
   };
 }
 

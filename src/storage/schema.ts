@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -133,6 +133,21 @@ CREATE TABLE IF NOT EXISTS recurring_items (
 
 CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
 ON recurring_items(is_active, next_due_date);
+
+CREATE TABLE IF NOT EXISTS recurring_transaction_history (
+  id TEXT PRIMARY KEY NOT NULL,
+  recurring_item_id TEXT NOT NULL REFERENCES recurring_items(id) ON DELETE CASCADE,
+  transaction_id TEXT NOT NULL,
+  previous_next_due_date TEXT NOT NULL,
+  advanced_next_due_date TEXT NOT NULL,
+  sequence INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE (recurring_item_id, sequence),
+  UNIQUE (transaction_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_transaction_history_item_sequence
+ON recurring_transaction_history(recurring_item_id, sequence DESC);
 
 CREATE TABLE IF NOT EXISTS transaction_templates (
   id TEXT PRIMARY KEY NOT NULL,

@@ -27,9 +27,8 @@ import {
 import { saveRecurringTransactionFromDraft } from '../../domain/recurringTransactionReview';
 import type {
   AppSnapshot,
-  NewTransactionInput,
+  CreateRecurringTransactionInput,
   RecurringItem,
-  UpdateRecurringItemInput,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
@@ -42,8 +41,7 @@ import { getNativePickerDisplay, NativePickerRow } from '../transactions/Transac
 type RecurringTransactionReviewScreenProps = {
   snapshot: AppSnapshot;
   recurringItem: RecurringItem;
-  onAddTransaction: (input: NewTransactionInput) => Promise<void>;
-  onUpdateRecurringItem: (input: UpdateRecurringItemInput) => Promise<void>;
+  onCreateRecurringTransaction: (input: CreateRecurringTransactionInput) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
@@ -55,11 +53,10 @@ type RecurringTransactionReviewScreenProps = {
 export function RecurringTransactionReviewScreen({
   snapshot,
   recurringItem,
-  onAddTransaction,
   onCancel,
+  onCreateRecurringTransaction,
   onDone,
   onOpenCategorySelect,
-  onUpdateRecurringItem,
 }: RecurringTransactionReviewScreenProps) {
   const accounts = snapshot.accounts.filter((account) => !account.isArchived);
   const categories = useMemo(() => snapshot.categories ?? defaultCategories, [snapshot.categories]);
@@ -135,8 +132,7 @@ export function RecurringTransactionReviewScreen({
           subcategoryId,
           note,
         },
-        addTransaction: onAddTransaction,
-        updateRecurringItem: onUpdateRecurringItem,
+        createRecurringTransaction: onCreateRecurringTransaction,
       });
 
       setError('');

@@ -136,58 +136,38 @@ describe('recurring transaction review helpers', () => {
     expect(input.nextDueDate).toBe('2026-02-28');
   });
 
-  it('saves the real transaction before advancing the recurring item', async () => {
-    const calls: string[] = [];
-    const addTransaction = jest.fn(async () => {
-      calls.push('transaction');
-    });
-    const updateRecurringItem = jest.fn(async () => {
-      calls.push('recurring');
-    });
+  it('submits one recurring transaction action with the previous and advanced due dates', async () => {
+    const createRecurringTransaction = jest.fn(async () => undefined);
 
     const result = await saveRecurringTransactionFromDraft({
       accounts,
       recurringItem: recurringItem({ frequency: 'fortnightly', nextDueDate: '2026-05-15' }),
       draft: draft({ transactionDate: '2026-05-20' }),
-      addTransaction,
-      updateRecurringItem,
+      createRecurringTransaction,
     });
 
-    expect(calls).toEqual(['transaction', 'recurring']);
     expect(result.recurringItemInput.nextDueDate).toBe('2026-05-29');
-  });
-
-  it('does not advance the recurring item when transaction creation fails', async () => {
-    const addTransaction = jest.fn(async () => {
-      throw new Error('Transaction failed.');
+    expect(createRecurringTransaction).toHaveBeenCalledWith({
+      recurringItemId: 'recurring-1',
+      previousNextDueDate: '2026-05-15',
+      transactionInput: result.transactionInput,
+      recurringItemInput: result.recurringItemInput,
     });
-    const updateRecurringItem = jest.fn();
-
-    await expect(
-      saveRecurringTransactionFromDraft({
-        accounts,
-        recurringItem: recurringItem({}),
-        draft: draft({}),
-        addTransaction,
-        updateRecurringItem,
-      }),
-    ).rejects.toThrow('Transaction failed.');
-
-    expect(updateRecurringItem).not.toHaveBeenCalled();
   });
 
-  it('reports a due-date advance failure after transaction creation', async () => {
+  it('surfaces atomic recurring transaction creation failures', async () => {
+    const createRecurringTransaction = jest.fn(async () => {
+      throw new Error('Could not save recurring payment.');
+    });
+
     await expect(
       saveRecurringTransactionFromDraft({
         accounts,
         recurringItem: recurringItem({}),
         draft: draft({}),
-        addTransaction: jest.fn(async () => undefined),
-        updateRecurringItem: jest.fn(async () => {
-          throw new Error('Update failed.');
-        }),
+        createRecurringTransaction,
       }),
-    ).rejects.toThrow('Transaction was created, but the recurring item was not advanced. Update failed.');
+    ).rejects.toThrow('Could not save recurring payment.');
   });
 
   it('blocks creation when reviewed references are invalid', () => {

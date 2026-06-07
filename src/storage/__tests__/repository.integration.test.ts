@@ -10,13 +10,18 @@ import {
   getSpendingByCategory,
   getTransactionDisplayEntries,
 } from '../../domain/aggregates';
+import { getBudgetUsageFromStatsReport } from '../../domain/budgets';
 import { getDefaultDashboardCardSettings } from '../../domain/dashboardCards';
 import { getNextMonthlyDueDateForDay } from '../../domain/recurringItems';
+import { getStatsReport } from '../../domain/statsReports';
 import type {
   Account,
   AppSnapshot,
+  NewTransactionInput,
+  RecurringItem,
   Transaction,
   TransactionLine,
+  UpdateRecurringItemInput,
 } from '../../domain/types';
 import {
   createSQLiteFinanceRepositoryForDatabase,
@@ -228,6 +233,45 @@ async function addTransaction(
   return getTransactionByTitle(await repository.getSnapshot(), input.title);
 }
 
+function recurringExpenseInput(
+  accountId: string,
+  title: string,
+  date: string,
+): NewTransactionInput {
+  return {
+    kind: 'expense',
+    title,
+    datetime: `${date}T12:00:00.000Z`,
+    lines: [{
+      accountId,
+      amountMinor: -10000,
+      currencyCode: 'AUD',
+      categoryId: 'housing',
+      subcategoryId: 'rent',
+    }],
+  };
+}
+
+function recurringUpdateInput(
+  recurringItem: RecurringItem,
+  nextDueDate: string,
+): UpdateRecurringItemInput {
+  return {
+    id: recurringItem.id,
+    name: recurringItem.name,
+    kind: recurringItem.kind,
+    amountMinor: recurringItem.amountMinor,
+    currencyCode: recurringItem.currencyCode,
+    accountId: recurringItem.accountId,
+    categoryId: recurringItem.categoryId,
+    subcategoryId: recurringItem.subcategoryId,
+    note: recurringItem.note,
+    frequency: recurringItem.frequency,
+    nextDueDate,
+    isActive: recurringItem.isActive,
+  };
+}
+
 function getAccountByName(snapshot: AppSnapshot, name: string): Account {
   const account = snapshot.accounts.find((item) => item.name === name);
   if (!account) {
@@ -282,6 +326,28 @@ function getBalanceByAccountId(snapshot: AppSnapshot): Record<string, number> {
       balance.balanceMinor,
     ]),
   );
+}
+
+function getExpenseStatsAndBudgetSpent(snapshot: AppSnapshot): { stats: number; budget: number } {
+  const report = getStatsReport({
+    reportKind: 'expense',
+    transactions: snapshot.transactions,
+    transactionLines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    accounts: snapshot.accounts,
+    categories: snapshot.categories,
+    range: {
+      startIso: '2026-05-01T00:00:00.000Z',
+      endIso: '2026-07-31T23:59:59.999Z',
+    },
+    currencyCode: 'AUD',
+  });
+  const usage = getBudgetUsageFromStatsReport({ budgets: snapshot.budgets, report })[0];
+
+  return {
+    stats: report.totalNetAmountMinor,
+    budget: usage?.spentMinor ?? 0,
+  };
 }
 
 const expectedCurrentTableColumns: Record<string, string[]> = {
@@ -356,6 +422,15 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
     'created_at',
     'updated_at',
   ],
+  recurring_transaction_history: [
+    'id',
+    'recurring_item_id',
+    'transaction_id',
+    'previous_next_due_date',
+    'advanced_next_due_date',
+    'sequence',
+    'created_at',
+  ],
   settings: [
     'key',
     'value',
@@ -426,6 +501,7 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
 const expectedCurrentIndexes: Record<string, string[]> = {
   budgets: ['idx_budgets_active_scope'],
   recurring_items: ['idx_recurring_items_active_due'],
+  recurring_transaction_history: ['idx_recurring_transaction_history_item_sequence'],
   transaction_lines: ['idx_transaction_lines_account_id', 'idx_transaction_lines_transaction_id'],
   transaction_links: [
     'idx_transaction_links_link_type',
@@ -495,6 +571,7 @@ describe('SQLite finance repository integration', () => {
       expect(snapshot.budgets).toEqual([]);
       expect(snapshot.recurringItems).toEqual([]);
       expect(snapshot.recurringBills).toEqual([]);
+      expect(snapshot.recurringTransactionHistory).toEqual([]);
       expect(snapshot.transactionTemplates).toEqual([]);
       expect(snapshot.rainyDayFund.goalMinor).toBe(0);
       expect(snapshot.rainyDayFund.linkedAccountIds).toEqual([]);
@@ -846,6 +923,134 @@ describe('SQLite finance repository integration', () => {
 
       await repository.deleteRecurringItem(item.id);
       expect((await repository.getSnapshot()).recurringItems).toEqual([]);
+    });
+  });
+
+  it('undoes recurring-generated transactions newest-to-oldest without touching manual transactions', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      await repository.addRecurringItem({
+        name: 'Rent',
+        kind: 'expense',
+        amountMinor: 10000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-01',
+      });
+      await repository.addBudget({
+        name: 'Overall',
+        amountMinor: 50000,
+        currencyCode: 'AUD',
+        period: 'monthly',
+        scopeType: 'overall',
+      });
+      let snapshot = await repository.getSnapshot();
+      const recurringItem = snapshot.recurringItems[0];
+
+      await repository.createRecurringTransaction({
+        recurringItemId: recurringItem.id,
+        previousNextDueDate: '2026-05-01',
+        transactionInput: recurringExpenseInput(everyday.id, 'Rent May', '2026-05-01'),
+        recurringItemInput: recurringUpdateInput(recurringItem, '2026-06-01'),
+      });
+      await repository.createRecurringTransaction({
+        recurringItemId: recurringItem.id,
+        previousNextDueDate: '2026-06-01',
+        transactionInput: recurringExpenseInput(everyday.id, 'Rent June', '2026-06-01'),
+        recurringItemInput: recurringUpdateInput(recurringItem, '2026-07-01'),
+      });
+      await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Manual coffee',
+        lines: [{
+          accountId: everyday.id,
+          amountMinor: -500,
+          categoryId: 'food',
+          subcategoryId: 'coffee',
+        }],
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.recurringItems[0].nextDueDate).toBe('2026-07-01');
+      expect(snapshot.recurringTransactionHistory?.map((entry) => entry.sequence)).toEqual([2, 1]);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-20500);
+      expect(getExpenseStatsAndBudgetSpent(snapshot)).toEqual({ stats: 20500, budget: 20500 });
+
+      expect(await repository.undoLatestRecurringTransaction(recurringItem.id)).toBe(true);
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.map((transaction) => transaction.title)).toEqual(
+        expect.arrayContaining(['Rent May', 'Manual coffee']),
+      );
+      expect(snapshot.transactions.some((transaction) => transaction.title === 'Rent June')).toBe(false);
+      expect(snapshot.recurringItems[0].nextDueDate).toBe('2026-06-01');
+      expect(snapshot.recurringTransactionHistory).toHaveLength(1);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-10500);
+      expect(getExpenseStatsAndBudgetSpent(snapshot)).toEqual({ stats: 10500, budget: 10500 });
+
+      expect(await repository.undoLatestRecurringTransaction(recurringItem.id)).toBe(true);
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.map((transaction) => transaction.title)).toEqual(['Manual coffee']);
+      expect(snapshot.recurringItems[0].nextDueDate).toBe('2026-05-01');
+      expect(snapshot.recurringTransactionHistory).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-500);
+      expect(getExpenseStatsAndBudgetSpent(snapshot)).toEqual({ stats: 500, budget: 500 });
+      expect(await repository.undoLatestRecurringTransaction(recurringItem.id)).toBe(false);
+    });
+  });
+
+  it('restores the prior due date when an undoable generated transaction is already missing', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      await repository.addRecurringItem({
+        name: 'Salary',
+        kind: 'income',
+        amountMinor: 10000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-15',
+      });
+      let snapshot = await repository.getSnapshot();
+      const recurringItem = snapshot.recurringItems[0];
+
+      await repository.createRecurringTransaction({
+        recurringItemId: recurringItem.id,
+        previousNextDueDate: '2026-05-15',
+        transactionInput: {
+          kind: 'income',
+          title: 'Salary May',
+          datetime: '2026-05-15T12:00:00.000Z',
+          lines: [{
+            accountId: everyday.id,
+            amountMinor: 10000,
+            currencyCode: 'AUD',
+            categoryId: 'income',
+            subcategoryId: 'salary',
+          }],
+        },
+        recurringItemInput: {
+          ...recurringUpdateInput(recurringItem, '2026-06-15'),
+          kind: 'income',
+          categoryId: 'income',
+          subcategoryId: 'salary',
+        },
+      });
+
+      snapshot = await repository.getSnapshot();
+      const generatedTransactionId = snapshot.recurringTransactionHistory?.[0].transactionId;
+      expect(generatedTransactionId).toBeTruthy();
+      await repository.deleteTransaction(generatedTransactionId!);
+
+      expect(await repository.undoLatestRecurringTransaction(recurringItem.id)).toBe(true);
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.recurringItems[0].nextDueDate).toBe('2026-05-15');
+      expect(snapshot.recurringTransactionHistory).toEqual([]);
+      expect(snapshot.transactions).toEqual([]);
     });
   });
 

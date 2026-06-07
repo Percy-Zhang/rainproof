@@ -406,8 +406,7 @@ export function CreateRecurringTransactionRouteScreen() {
       <RecurringTransactionReviewScreen
         snapshot={snapshot}
         recurringItem={recurringItem}
-        onAddTransaction={actions.addTransaction}
-        onUpdateRecurringItem={actions.updateRecurringItem}
+        onCreateRecurringTransaction={actions.createRecurringTransaction}
         onOpenCategorySelect={openCategorySelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}

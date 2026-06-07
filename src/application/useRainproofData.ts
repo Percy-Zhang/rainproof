@@ -17,6 +17,7 @@ import type {
   AppSnapshot,
   BudgetUsage,
   CashFlowSummary,
+  CreateRecurringTransactionInput,
   CurrencyTotal,
   NewAccountInput,
   NewBudgetInput,
@@ -67,6 +68,8 @@ type RainproofActions = {
   archiveBudget(budgetId: string): Promise<void>;
   addRecurringItem(input: NewRecurringItemInput): Promise<void>;
   updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
+  createRecurringTransaction(input: CreateRecurringTransactionInput): Promise<void>;
+  undoLatestRecurringTransaction(recurringItemId: string): Promise<void>;
   archiveRecurringItem(recurringItemId: string): Promise<void>;
   deleteRecurringItem(recurringItemId: string): Promise<void>;
   addTransactionTemplate(input: NewTransactionTemplateInput): Promise<void>;
@@ -285,6 +288,12 @@ export function useRainproofData(): RainproofDataState {
       addRecurringItem: (input) => runMutation((repository) => repository.addRecurringItem(input)),
       updateRecurringItem: (input) =>
         runMutation((repository) => repository.updateRecurringItem(input), { rethrow: true }),
+      createRecurringTransaction: (input) =>
+        runMutation((repository) => repository.createRecurringTransaction(input), { rethrow: true }),
+      undoLatestRecurringTransaction: (recurringItemId) =>
+        runMutation(async (repository) => {
+          await repository.undoLatestRecurringTransaction(recurringItemId);
+        }, { rethrow: true }),
       archiveRecurringItem: (recurringItemId) =>
         runMutation((repository) => repository.archiveRecurringItem(recurringItemId)),
       deleteRecurringItem: (recurringItemId) =>

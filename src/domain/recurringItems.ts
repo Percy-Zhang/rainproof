@@ -11,10 +11,30 @@ import type {
   NewRecurringItemInput,
   RecurringFrequency,
   RecurringItem,
+  RecurringTransactionHistory,
   RecurringItemKind,
   UpdateRecurringItemInput,
   UpcomingRecurringItem,
 } from './types';
+
+export function getLatestRecurringTransactionHistoryByItem(
+  history: RecurringTransactionHistory[],
+): Map<string, RecurringTransactionHistory> {
+  const latestByItem = new Map<string, RecurringTransactionHistory>();
+
+  for (const entry of history) {
+    const current = latestByItem.get(entry.recurringItemId);
+    if (
+      !current ||
+      entry.sequence > current.sequence ||
+      (entry.sequence === current.sequence && entry.createdAt > current.createdAt)
+    ) {
+      latestByItem.set(entry.recurringItemId, entry);
+    }
+  }
+
+  return latestByItem;
+}
 
 export const RECURRING_DUE_SOON_DAYS = 7;
 

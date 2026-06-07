@@ -1,14 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
-import { ActionButton, Card } from '../../components/ui';
+import { ActionButton, Card, FormError } from '../../components/ui';
 import { defaultCategories, getCategory, getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from '../../domain/categories';
 import { formatLongDateLabel } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
-import { classifyRecurringItemsByDueDate } from '../../domain/recurringItems';
-import type { Account, AppSnapshot, CategoryDefinition, RecurringFrequency, UpcomingRecurringItem } from '../../domain/types';
+import {
+  classifyRecurringItemsByDueDate,
+  getLatestRecurringTransactionHistoryByItem,
+} from '../../domain/recurringItems';
+import type {
+  Account,
+  AppSnapshot,
+  CategoryDefinition,
+  RecurringFrequency,
+  RecurringTransactionHistory,
+  UpcomingRecurringItem,
+} from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type RecurringItemsScreenProps = {
@@ -16,6 +26,7 @@ type RecurringItemsScreenProps = {
   onAddRecurringItem: () => void;
   onEditRecurringItem: (recurringItemId: string) => void;
   onCreateTransaction: (recurringItemId: string) => void;
+  onUndoRecurringTransaction: (recurringItemId: string) => Promise<void>;
 };
 
 type Section = {
@@ -29,7 +40,10 @@ export function RecurringItemsScreen({
   onAddRecurringItem,
   onCreateTransaction,
   onEditRecurringItem,
+  onUndoRecurringTransaction,
 }: RecurringItemsScreenProps) {
+  const [undoingRecurringItemId, setUndoingRecurringItemId] = useState('');
+  const [undoError, setUndoError] = useState('');
   const categories = snapshot.categories ?? defaultCategories;
   const accountById = useMemo(
     () => new Map(snapshot.accounts.map((account) => [account.id, account])),
@@ -39,6 +53,19 @@ export function RecurringItemsScreen({
     () => classifyRecurringItemsByDueDate(snapshot.recurringItems),
     [snapshot.recurringItems],
   );
+  const latestHistoryByItem = useMemo(
+    () => getLatestRecurringTransactionHistoryByItem(snapshot.recurringTransactionHistory ?? []),
+    [snapshot.recurringTransactionHistory],
+  );
+  const historyCountByItem = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    for (const entry of snapshot.recurringTransactionHistory ?? []) {
+      counts.set(entry.recurringItemId, (counts.get(entry.recurringItemId) ?? 0) + 1);
+    }
+
+    return counts;
+  }, [snapshot.recurringTransactionHistory]);
   const sections: Section[] = [
     {
       title: 'Overdue',
@@ -58,6 +85,22 @@ export function RecurringItemsScreen({
   ];
   const activeCount = sections.reduce((sum, section) => sum + section.rows.length, 0);
 
+  async function undoLatestTransaction(recurringItemId: string) {
+    if (undoingRecurringItemId) {
+      return;
+    }
+
+    try {
+      setUndoingRecurringItemId(recurringItemId);
+      await onUndoRecurringTransaction(recurringItemId);
+      setUndoError('');
+    } catch (caught) {
+      setUndoError(caught instanceof Error ? caught.message : 'Could not undo the recurring transaction.');
+    } finally {
+      setUndoingRecurringItemId('');
+    }
+  }
+
   return (
     <View style={styles.shell}>
       <ScrollView
@@ -75,6 +118,8 @@ export function RecurringItemsScreen({
           </ActionButton>
         </View>
 
+        <FormError message={undoError} />
+
         {activeCount ? (
           <View style={styles.sectionList}>
             {sections.map((section) => (
@@ -90,10 +135,14 @@ export function RecurringItemsScreen({
                         key={item.id}
                         account={accountById.get(item.accountId)}
                         categories={categories}
+                        latestHistory={latestHistoryByItem.get(item.id)}
+                        undoHistoryCount={historyCountByItem.get(item.id) ?? 0}
                         item={item}
                         showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
                         onCreateTransaction={() => onCreateTransaction(item.id)}
                         onPress={() => onEditRecurringItem(item.id)}
+                        onUndoTransaction={() => undoLatestTransaction(item.id)}
+                        undoing={undoingRecurringItemId === item.id}
                       />
                     ))}
                   </View>
@@ -124,16 +173,24 @@ function RecurringItemCard({
   account,
   categories,
   item,
+  latestHistory,
   onCreateTransaction,
   onPress,
+  onUndoTransaction,
   showCurrencyCodes,
+  undoHistoryCount,
+  undoing,
 }: {
   account?: Account;
   categories: CategoryDefinition[];
   item: UpcomingRecurringItem;
+  latestHistory?: RecurringTransactionHistory;
   onCreateTransaction: () => void;
   onPress: () => void;
+  onUndoTransaction: () => void;
   showCurrencyCodes: boolean;
+  undoHistoryCount: number;
+  undoing: boolean;
 }) {
   const icon = getSubcategoryIcon(item.categoryId, item.subcategoryId ?? '', categories);
   const color = getSubcategoryColor(item.categoryId, item.subcategoryId ?? '', categories);
@@ -180,6 +237,33 @@ function RecurringItemCard({
           {actionLabel}
         </ActionButton>
       </View>
+
+      {latestHistory ? (
+        <Pressable
+          accessibilityLabel={`Undo last ${item.kind === 'income' ? 'received' : 'paid'} transaction`}
+          accessibilityRole="button"
+          disabled={undoing}
+          onPress={onUndoTransaction}
+          style={({ pressed }) => [
+            styles.undoAction,
+            undoing && styles.undoActionDisabled,
+            pressed && !undoing && styles.pressed,
+          ]}
+          testID={`undo-recurring-transaction-${item.id}`}
+        >
+          <Ionicons name="arrow-undo-outline" size={20} color={colors.primaryDark} />
+          <View style={styles.undoActionText}>
+            <Text style={styles.undoActionTitle}>
+              {undoing ? 'Undoing...' : `Undo last ${item.kind === 'income' ? 'received' : 'paid'}`}
+            </Text>
+            <Text style={styles.undoActionDetail}>
+              {undoHistoryCount > 1
+                ? `${undoHistoryCount} generated transactions can be undone, newest first.`
+                : 'Removes the generated transaction and restores the previous due date.'}
+            </Text>
+          </View>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -354,6 +438,36 @@ const styles = StyleSheet.create({
   },
   cardActions: {
     alignItems: 'flex-start',
+  },
+  undoAction: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 52,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  undoActionDisabled: {
+    opacity: 0.5,
+  },
+  undoActionText: {
+    flex: 1,
+    gap: 2,
+    minWidth: 0,
+  },
+  undoActionTitle: {
+    color: colors.primaryDark,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  undoActionDetail: {
+    color: colors.muted,
+    fontSize: typography.small,
+    lineHeight: 18,
   },
   emptyIcon: {
     alignItems: 'center',

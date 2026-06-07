@@ -17,47 +17,41 @@ export async function addTransactionStorage(
   db: RepositoryDatabase,
   input: NewTransactionInput,
 ): Promise<void> {
+  await db.withTransactionAsync(async () => {
+    await insertTransactionRecordsStorage(db, input);
+  });
+}
+
+export async function insertTransactionRecordsStorage(
+  db: RepositoryDatabase,
+  input: NewTransactionInput,
+  options: { transactionId?: string; createdAt?: string } = {},
+): Promise<string> {
   validateTransactionLinesForStorage(input.kind, input.lines);
 
-  const now = new Date().toISOString();
-  const transactionId = createLocalId('txn');
+  const now = options.createdAt ?? new Date().toISOString();
+  const transactionId = options.transactionId ?? createLocalId('txn');
 
-  await db.withTransactionAsync(async () => {
-    await db.runAsync(
-      `INSERT INTO transactions (
-        id, kind, title, datetime, notes, labels_json, group_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      transactionId,
-      input.kind,
-      input.title.trim() || fallbackTransactionTitle(input.kind),
-      input.datetime,
-      input.notes?.trim() ?? '',
-      JSON.stringify(input.labels ?? []),
-      input.groupId?.trim() ?? '',
-      now,
-      now,
-    );
+  await db.runAsync(
+    `INSERT INTO transactions (
+      id, kind, title, datetime, notes, labels_json, group_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    transactionId,
+    input.kind,
+    input.title.trim() || fallbackTransactionTitle(input.kind),
+    input.datetime,
+    input.notes?.trim() ?? '',
+    JSON.stringify(input.labels ?? []),
+    input.groupId?.trim() ?? '',
+    now,
+    now,
+  );
 
-    for (const line of input.lines) {
-      await db.runAsync(
-        `INSERT INTO transaction_lines (
-          id, transaction_id, account_id, amount_minor, currency_code, category_id,
-          subcategory_id, external_party, transfer_peer_account_id, note, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        createLocalId('line'),
-        transactionId,
-        line.accountId,
-        line.amountMinor,
-        normalizeCurrencyCode(line.currencyCode),
-        line.categoryId ?? '',
-        line.subcategoryId ?? '',
-        line.externalParty?.trim() ?? '',
-        line.transferPeerAccountId ?? '',
-        line.note?.trim() ?? '',
-        now,
-      );
-    }
-  });
+  for (const line of input.lines) {
+    await insertTransactionLineStorage(db, transactionId, line, now);
+  }
+
+  return transactionId;
 }
 
 export async function updateTransactionStorage(
@@ -110,19 +104,32 @@ export async function deleteTransactionStorage(
   transactionId: string,
 ): Promise<void> {
   await db.withTransactionAsync(async () => {
-    const transaction = await db.getFirstAsync<TransactionRow>(
-      'SELECT * FROM transactions WHERE id = ?',
-      transactionId,
-    );
-    if (!transaction) {
-      throw new Error('Transaction not found.');
+    await deleteTransactionRecordsStorage(db, transactionId);
+  });
+}
+
+export async function deleteTransactionRecordsStorage(
+  db: RepositoryDatabase,
+  transactionId: string,
+  options: { allowMissing?: boolean } = {},
+): Promise<boolean> {
+  const transaction = await db.getFirstAsync<TransactionRow>(
+    'SELECT * FROM transactions WHERE id = ?',
+    transactionId,
+  );
+  if (!transaction) {
+    if (options.allowMissing) {
+      return false;
     }
 
-    await removeTransactionLinksForTransactionStorage(db, transactionId);
-    await deleteTransactionLinkedRecords(db, transactionId);
-    await db.runAsync('DELETE FROM transaction_lines WHERE transaction_id = ?', transactionId);
-    await db.runAsync('DELETE FROM transactions WHERE id = ?', transactionId);
-  });
+    throw new Error('Transaction not found.');
+  }
+
+  await removeTransactionLinksForTransactionStorage(db, transactionId);
+  await deleteTransactionLinkedRecords(db, transactionId);
+  await db.runAsync('DELETE FROM transaction_lines WHERE transaction_id = ?', transactionId);
+  await db.runAsync('DELETE FROM transactions WHERE id = ?', transactionId);
+  return true;
 }
 
 async function deleteTransactionLinkedRecords(
