@@ -21,6 +21,11 @@ type CompactAccountSelectorProps = {
   testID?: string;
 };
 
+const ACCOUNT_TILE_MIN_HEIGHT = 62;
+const NEXT_ROW_PEEK_HEIGHT = 6;
+const SCROLLABLE_ACCOUNT_LIST_HEIGHT =
+  ACCOUNT_TILE_MIN_HEIGHT + spacing.sm + NEXT_ROW_PEEK_HEIGHT;
+
 export function CompactAccountSelector({
   accounts,
   accountBalances = [],
@@ -35,7 +40,7 @@ export function CompactAccountSelector({
   const selectedAccountIdSet = new Set(selectedAccountIds);
   const allSelected = accounts.length > 0 && selectedAccountIds.length === accounts.length;
   const summary = getAccountSelectionSummary(accounts, selectedAccountIds);
-  const listShouldScroll = accounts.length > 4;
+  const listShouldScroll = accounts.length > 2;
   const balanceMinorByAccountId = new Map(
     accountBalances.map(({ account, balanceMinor }) => [account.id, balanceMinor]),
   );
@@ -169,7 +174,7 @@ const styles = StyleSheet.create({
     paddingBottom: 1,
   },
   accountListScrollable: {
-    maxHeight: 120,
+    height: SCROLLABLE_ACCOUNT_LIST_HEIGHT,
   },
   accountName: {
     color: colors.ink,
@@ -221,7 +226,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     gap: spacing.xs,
-    minHeight: 52,
+    minHeight: ACCOUNT_TILE_MIN_HEIGHT,
     width: '48%',
     minWidth: 130,
     padding: spacing.sm,
