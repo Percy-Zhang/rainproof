@@ -7,6 +7,8 @@ import type {
   Account,
   AccountType,
   Budget,
+  BudgetScopeItem,
+  BudgetScopeType,
   RainyDayFund,
   RecurringFrequency,
   RecurringItem,
@@ -89,9 +91,10 @@ export type BudgetRow = {
   amount_minor: number;
   currency_code: string;
   period: 'monthly';
-  scope_type: 'overall' | 'category' | 'subcategory';
+  scope_type: BudgetScopeType;
   category_id: string | null;
   subcategory_id: string | null;
+  scope_items_json?: string;
   sort_order: number;
   is_active: number;
   created_at: string;
@@ -236,6 +239,7 @@ export function mapBudget(row: BudgetRow): Budget {
     scopeType: row.scope_type,
     categoryId: row.category_id || null,
     subcategoryId: row.subcategory_id || null,
+    scopeItems: safeParseBudgetScopeItems(row.scope_items_json, row.scope_type, row.category_id, row.subcategory_id),
     sortOrder: Number.isInteger(row.sort_order) ? row.sort_order : 0,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
@@ -346,4 +350,37 @@ export function safeParseJson(value: string | undefined): unknown {
   } catch {
     return undefined;
   }
+}
+
+function safeParseBudgetScopeItems(
+  value: string | undefined,
+  scopeType: BudgetScopeType,
+  categoryId: string | null,
+  subcategoryId: string | null,
+): BudgetScopeItem[] {
+  const parsed = safeParseJson(value);
+  if (Array.isArray(parsed)) {
+    return parsed
+      .filter((item): item is Partial<BudgetScopeItem> =>
+        Boolean(item && typeof item === 'object' && typeof item.categoryId === 'string'),
+      )
+      .map((item) => ({
+        categoryId: item.categoryId ?? '',
+        subcategoryId: typeof item.subcategoryId === 'string' && item.subcategoryId.trim()
+          ? item.subcategoryId
+          : null,
+      }))
+      .filter((item) => item.categoryId.trim());
+  }
+
+  if (scopeType !== 'overall' && categoryId) {
+    return [{
+      categoryId,
+      subcategoryId: scopeType === 'subcategory' || scopeType === 'include' || scopeType === 'exclude'
+        ? subcategoryId || null
+        : null,
+    }];
+  }
+
+  return [];
 }

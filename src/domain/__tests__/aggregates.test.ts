@@ -304,6 +304,7 @@ describe('aggregates', () => {
         scopeType: 'category',
         categoryId: 'food',
         subcategoryId: null,
+        scopeItems: [{ categoryId: 'food', subcategoryId: null }],
         currencyCode: 'AUD',
         sortOrder: 0,
         isActive: true,

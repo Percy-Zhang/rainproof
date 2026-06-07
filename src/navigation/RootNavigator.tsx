@@ -10,6 +10,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
+import { BudgetScopeSelectionRequestProvider } from '../features/budgets/BudgetScopeSelectionContext';
 import { CategorySelectionRequestProvider } from '../features/categorySelection/CategorySelectionContext';
 import { CategorySettingsDraftProvider } from '../features/settings/CategorySettingsDraftContext';
 import { colors, spacing, typography } from '../theme/tokens';
@@ -40,6 +41,7 @@ import {
   DashboardAddCardsRouteScreen,
   DashboardEditRouteScreen,
   AddTransactionTemplateRouteScreen,
+  BudgetScopeSelectRouteScreen,
   CategorySelectRouteScreen,
   CreateRecurringTransactionRouteScreen,
   EditBudgetRouteScreen,
@@ -56,97 +58,107 @@ export function RootNavigator() {
   return (
     <CategorySettingsDraftProvider>
       <CategorySelectionRequestProvider>
-        <RootStack.Navigator
-          initialRouteName="MainDrawer"
-          screenOptions={{
-            headerShown: false,
-            headerStyle: styles.header,
-            headerTintColor: colors.primaryDark,
-            headerTitleStyle: styles.headerTitle,
-          }}
-        >
-          <RootStack.Screen name="MainDrawer" component={MainDrawerNavigator} />
-          <RootStack.Screen name="AddAccount" component={AddAccountRouteScreen} />
-          <RootStack.Screen name="EditAccount" component={EditAccountRouteScreen} />
-          <RootStack.Screen name="AddTransaction" component={AddTransactionRouteScreen} />
-          <RootStack.Screen name="EditTransaction" component={EditTransactionRouteScreen} />
-          <RootStack.Screen name="LinkTransaction" component={LinkTransactionRouteScreen} />
-          <RootStack.Screen
-            name="StatsDrilldown"
-            component={StatsDrilldownRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="RainyDayFund"
-            component={RainyDayFundRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="AddBudget"
-            component={AddBudgetRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="EditBudget"
-            component={EditBudgetRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="AddRecurringItem"
-            component={AddRecurringItemRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="EditRecurringItem"
-            component={EditRecurringItemRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="CreateRecurringTransaction"
-            component={CreateRecurringTransactionRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="AddTransactionTemplate"
-            component={AddTransactionTemplateRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="EditTransactionTemplate"
-            component={EditTransactionTemplateRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="CategorySelect"
-            component={CategorySelectRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="DashboardEdit"
-            component={DashboardEditRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="DashboardAddCards"
-            component={DashboardAddCardsRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="CategoryManagement"
-            component={CategoryManagementRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="CategoryEdit"
-            component={CategoryEditRouteScreen}
-            options={{ headerShown: false }}
-          />
-          <RootStack.Screen
-            name="SubcategoryEdit"
-            component={SubcategoryEditRouteScreen}
-            options={{ headerShown: false }}
-          />
-        </RootStack.Navigator>
+        <BudgetScopeSelectionRequestProvider>
+          <RootStack.Navigator
+            initialRouteName="MainDrawer"
+            screenOptions={{
+              headerShown: false,
+              headerStyle: styles.header,
+              headerTintColor: colors.primaryDark,
+              headerTitleStyle: styles.headerTitle,
+            }}
+          >
+            <RootStack.Screen
+              name="MainDrawer"
+              component={MainDrawerNavigator}
+            />
+            <RootStack.Screen name="AddAccount" component={AddAccountRouteScreen} />
+            <RootStack.Screen name="EditAccount" component={EditAccountRouteScreen} />
+            <RootStack.Screen name="AddTransaction" component={AddTransactionRouteScreen} />
+            <RootStack.Screen name="EditTransaction" component={EditTransactionRouteScreen} />
+            <RootStack.Screen name="LinkTransaction" component={LinkTransactionRouteScreen} />
+            <RootStack.Screen
+              name="StatsDrilldown"
+              component={StatsDrilldownRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="RainyDayFund"
+              component={RainyDayFundRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="AddBudget"
+              component={AddBudgetRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="EditBudget"
+              component={EditBudgetRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="AddRecurringItem"
+              component={AddRecurringItemRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="EditRecurringItem"
+              component={EditRecurringItemRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="CreateRecurringTransaction"
+              component={CreateRecurringTransactionRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="AddTransactionTemplate"
+              component={AddTransactionTemplateRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="EditTransactionTemplate"
+              component={EditTransactionTemplateRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="BudgetScopeSelect"
+              component={BudgetScopeSelectRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="CategorySelect"
+              component={CategorySelectRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="DashboardEdit"
+              component={DashboardEditRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="DashboardAddCards"
+              component={DashboardAddCardsRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="CategoryManagement"
+              component={CategoryManagementRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="CategoryEdit"
+              component={CategoryEditRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
+              name="SubcategoryEdit"
+              component={SubcategoryEditRouteScreen}
+              options={{ headerShown: false }}
+            />
+          </RootStack.Navigator>
+        </BudgetScopeSelectionRequestProvider>
       </CategorySelectionRequestProvider>
     </CategorySettingsDraftProvider>
   );

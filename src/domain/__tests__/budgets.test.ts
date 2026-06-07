@@ -85,6 +85,76 @@ describe('budget helpers', () => {
     ]);
   });
 
+  it('calculates include and exclude category scopes from expense report rows', () => {
+    const splitExpense = makeTransaction('split_expense', 'expense', 'Split shop');
+    const fuelExpense = makeTransaction('fuel_expense', 'expense', 'Fuel');
+    const income = makeTransaction('salary', 'income', 'Salary');
+    const transfer = makeTransaction('transfer', 'transfer', 'Transfer');
+    const lines = [
+      makeLine('split_groceries', splitExpense.id, 'checking', -5000, 'AUD', 'food', 'groceries'),
+      makeLine('split_restaurants', splitExpense.id, 'checking', -3000, 'AUD', 'food', 'restaurants'),
+      makeLine('split_rent', splitExpense.id, 'checking', -7000, 'AUD', 'housing', 'rent'),
+      makeLine('fuel', fuelExpense.id, 'checking', -2000, 'AUD', 'transport', 'fuel'),
+      makeLine('salary_line', income.id, 'checking', 100000, 'AUD', 'income', 'salary'),
+      makeLine('transfer_out', transfer.id, 'checking', -2000, 'AUD', '', '', '', 'credit_card'),
+      makeLine('transfer_in', transfer.id, 'credit_card', 2000, 'AUD', '', '', '', 'checking'),
+    ];
+    const report = getExpenseReport({
+      transactions: [splitExpense, fuelExpense, income, transfer],
+      lines,
+    });
+
+    const usages = getBudgetUsageFromStatsReport({
+      budgets: [
+        makeBudget('include_food', 'Food', 20000, 'include', 'food', null, 'AUD', 0, [
+          { categoryId: 'food', subcategoryId: null },
+        ]),
+        makeBudget('include_groceries', 'Groceries', 10000, 'include', 'food', 'groceries', 'AUD', 0, [
+          { categoryId: 'food', subcategoryId: 'groceries' },
+        ]),
+        makeBudget('include_many', 'Food and fuel', 25000, 'include', 'food', null, 'AUD', 0, [
+          { categoryId: 'food', subcategoryId: null },
+          { categoryId: 'transport', subcategoryId: 'fuel' },
+        ]),
+        makeBudget('exclude_food', 'Not food', 25000, 'exclude', 'food', null, 'AUD', 0, [
+          { categoryId: 'food', subcategoryId: null },
+        ]),
+        makeBudget('exclude_groceries', 'Not groceries', 25000, 'exclude', 'food', 'groceries', 'AUD', 0, [
+          { categoryId: 'food', subcategoryId: 'groceries' },
+        ]),
+      ],
+      report,
+    });
+
+    expect(usages).toEqual([
+      expect.objectContaining({
+        budget: expect.objectContaining({ id: 'include_food' }),
+        spentMinor: 8000,
+        matchingLineIds: ['split_groceries', 'split_restaurants'],
+      }),
+      expect.objectContaining({
+        budget: expect.objectContaining({ id: 'include_groceries' }),
+        spentMinor: 5000,
+        matchingLineIds: ['split_groceries'],
+      }),
+      expect.objectContaining({
+        budget: expect.objectContaining({ id: 'include_many' }),
+        spentMinor: 10000,
+        matchingLineIds: ['fuel', 'split_groceries', 'split_restaurants'],
+      }),
+      expect.objectContaining({
+        budget: expect.objectContaining({ id: 'exclude_food' }),
+        spentMinor: 9000,
+        matchingLineIds: ['fuel', 'split_rent'],
+      }),
+      expect.objectContaining({
+        budget: expect.objectContaining({ id: 'exclude_groceries' }),
+        spentMinor: 12000,
+        matchingLineIds: ['fuel', 'split_restaurants', 'split_rent'],
+      }),
+    ]);
+  });
+
   it('reduces only the targeted budget line for line-level links', () => {
     const source = makeTransaction('payback', 'income', 'Payback');
     const target = makeTransaction('split_expense', 'expense', 'Split expense');
@@ -205,6 +275,13 @@ describe('budget helpers', () => {
     const rows = getBudgetUsageDisplayRows([
       makeUsage(categoryBudget, 2000),
       makeUsage(subcategoryBudget, 3000),
+      makeUsage(makeBudget('multi', 'Multi', 10000, 'include', 'food', null, 'AUD', 0, [
+        { categoryId: 'food', subcategoryId: null },
+        { categoryId: 'transport', subcategoryId: 'fuel' },
+      ]), 4000),
+      makeUsage(makeBudget('exclude', 'Exclude', 10000, 'exclude', 'food', null, 'AUD', 0, [
+        { categoryId: 'food', subcategoryId: null },
+      ]), 5000),
     ]);
 
     expect(getBudgetScopeLabel(makeBudget('overall', 'Overall', 10000, 'overall'))).toBe('Overall monthly spending');
@@ -222,6 +299,20 @@ describe('budget helpers', () => {
         scopeLabel: 'Groceries',
         scopeDetail: 'Food & Dining',
         icon: 'basket-outline',
+        color: '#C45A16',
+      }),
+      expect.objectContaining({
+        id: 'multi',
+        scopeLabel: 'Food & Dining + 1 more',
+        scopeDetail: '2 selected categories',
+        icon: 'restaurant-outline',
+        color: '#C45A16',
+      }),
+      expect.objectContaining({
+        id: 'exclude',
+        scopeLabel: 'Excludes Food & Dining',
+        scopeDetail: 'All spending except selected',
+        icon: 'restaurant-outline',
         color: '#C45A16',
       }),
     ]);
@@ -305,6 +396,7 @@ function makeBudget(
   subcategoryId: string | null = null,
   currencyCode = 'AUD',
   sortOrder = 0,
+  scopeItems?: Budget['scopeItems'],
 ): Budget {
   return {
     id,
@@ -315,11 +407,27 @@ function makeBudget(
     scopeType,
     categoryId,
     subcategoryId,
+    scopeItems: scopeItems ?? getTestBudgetScopeItems(scopeType, categoryId, subcategoryId),
     sortOrder,
     isActive: true,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function getTestBudgetScopeItems(
+  scopeType: Budget['scopeType'],
+  categoryId: string | null,
+  subcategoryId: string | null,
+): Budget['scopeItems'] {
+  if (scopeType === 'overall' || !categoryId) {
+    return [];
+  }
+
+  return [{
+    categoryId,
+    subcategoryId: scopeType === 'subcategory' ? subcategoryId : null,
+  }];
 }
 
 function makeUsage(budget: Budget, spentMinor: number) {

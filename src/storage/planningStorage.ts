@@ -29,8 +29,8 @@ export async function addBudgetStorage(
     await db.runAsync(
       `INSERT INTO budgets (
         id, name, amount_minor, currency_code, period, scope_type, category_id,
-        subcategory_id, sort_order, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       createLocalId('budget'),
       validated.name,
       validated.amountMinor,
@@ -39,6 +39,7 @@ export async function addBudgetStorage(
       validated.scopeType,
       validated.categoryId,
       validated.subcategoryId,
+      JSON.stringify(validated.scopeItems),
       sortOrder,
       validated.isActive ? 1 : 0,
       now,
@@ -64,7 +65,7 @@ export async function updateBudgetStorage(
     await db.runAsync(
       `UPDATE budgets
        SET name = ?, amount_minor = ?, currency_code = ?, period = ?, scope_type = ?,
-           category_id = ?, subcategory_id = ?, is_active = ?, updated_at = ?
+           category_id = ?, subcategory_id = ?, scope_items_json = ?, is_active = ?, updated_at = ?
        WHERE id = ?`,
       validated.name,
       validated.amountMinor,
@@ -73,6 +74,7 @@ export async function updateBudgetStorage(
       validated.scopeType,
       validated.categoryId,
       validated.subcategoryId,
+      JSON.stringify(validated.scopeItems),
       validated.isActive ? 1 : 0,
       now,
       input.id,

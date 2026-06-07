@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -94,17 +94,19 @@ CREATE TABLE IF NOT EXISTS budgets (
   scope_type TEXT NOT NULL DEFAULT 'category',
   category_id TEXT,
   subcategory_id TEXT,
+  scope_items_json TEXT NOT NULL DEFAULT '[]',
   sort_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (amount_minor > 0),
   CHECK (period IN ('monthly')),
-  CHECK (scope_type IN ('overall', 'category', 'subcategory')),
+  CHECK (scope_type IN ('overall', 'category', 'subcategory', 'include', 'exclude')),
   CHECK (
-    (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL) OR
+    (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL AND scope_items_json = '[]') OR
     (scope_type = 'category' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NULL) OR
-    (scope_type = 'subcategory' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NOT NULL AND subcategory_id <> '')
+    (scope_type = 'subcategory' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NOT NULL AND subcategory_id <> '') OR
+    (scope_type IN ('include', 'exclude') AND scope_items_json <> '' AND scope_items_json <> '[]')
   )
 );
 

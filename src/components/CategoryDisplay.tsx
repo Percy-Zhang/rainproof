@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import type { AccessibilityState } from 'react-native';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { CategoryDefinition, SubcategoryDefinition } from '../domain/types';
@@ -29,17 +30,26 @@ export function CategoryRow({
   category,
   expanded,
   onPress,
+  accessibilityLabel,
+  accessibilityState,
+  testID,
   trailingIcon,
 }: {
   category: CategoryDefinition;
   expanded?: boolean;
   onPress: () => void;
+  accessibilityLabel?: string;
+  accessibilityState?: AccessibilityState;
+  testID?: string;
   trailingIcon?: IconName;
 }) {
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
+      accessibilityState={accessibilityState}
       onPress={onPress}
+      testID={testID}
       style={({ pressed }) => [
         styles.categoryRow,
         { borderColor: expanded ? category.color : colors.faint },
@@ -59,17 +69,28 @@ export function SubcategoryRow({
   name,
   selected,
   onPress,
+  accessibilityLabel,
+  accessibilityState,
+  testID,
+  trailingIcon,
 }: {
   color: string;
   icon: string;
   name: string;
   selected?: boolean;
   onPress: () => void;
+  accessibilityLabel?: string;
+  accessibilityState?: AccessibilityState;
+  testID?: string;
+  trailingIcon?: IconName;
 }) {
   return (
     <Pressable
+      accessibilityLabel={accessibilityLabel}
       accessibilityRole="button"
+      accessibilityState={accessibilityState}
       onPress={onPress}
+      testID={testID}
       style={({ pressed }) => [
         styles.subcategoryRow,
         { borderColor: selected ? color : colors.faint },
@@ -82,6 +103,7 @@ export function SubcategoryRow({
       <Text numberOfLines={1} style={[styles.subcategoryTitle, selected && styles.subcategoryTitleSelected]}>
         {name}
       </Text>
+      {trailingIcon ? <Ionicons name={trailingIcon} size={18} color={selected ? color : colors.muted} /> : null}
     </Pressable>
   );
 }

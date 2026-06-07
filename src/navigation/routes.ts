@@ -1,5 +1,6 @@
 import type { NavigatorScreenParams } from '@react-navigation/native';
 import type { CategorySelectRouteParams } from '../features/categorySelection/categorySelectionModel';
+import type { BudgetScopeSelectRouteParams } from '../features/budgets/budgetScopeSelectionModel';
 import type { StatsReportKind, StatsReportSort } from '../domain/statsReports';
 
 export type HomeStackParamList = {
@@ -70,6 +71,7 @@ export type RootStackParamList = {
   CreateRecurringTransaction: { recurringItemId: string };
   AddTransactionTemplate: undefined;
   EditTransactionTemplate: { templateId: string };
+  BudgetScopeSelect: BudgetScopeSelectRouteParams;
   CategorySelect: CategorySelectRouteParams;
   DashboardEdit: undefined;
   DashboardAddCards: undefined;

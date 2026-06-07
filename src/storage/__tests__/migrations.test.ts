@@ -58,6 +58,7 @@ const currentBudgetColumns = [
   'scope_type',
   'category_id',
   'subcategory_id',
+  'scope_items_json',
   'sort_order',
   'is_active',
   'created_at',
@@ -188,7 +189,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
@@ -202,7 +203,9 @@ describe('SQLite migrations', () => {
       accounts: currentAccountColumns,
       transactions: currentTransactionColumns,
       transaction_lines: currentTransactionLineColumns,
-      budgets: currentBudgetColumns.filter((columnName) => columnName !== 'sort_order'),
+      budgets: currentBudgetColumns.filter(
+        (columnName) => columnName !== 'sort_order' && columnName !== 'scope_items_json',
+      ),
       recurring_items: currentRecurringItemColumns,
       transaction_templates: currentTransactionTemplateColumns,
       transaction_template_lines: currentTransactionTemplateLineColumns,
@@ -211,8 +214,28 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([11]);
+    expect(db.versionWrites).toEqual([11, 12]);
     expect(db.getColumnNames('budgets')).toEqual(expect.arrayContaining(['sort_order']));
+  });
+
+  it('adds budget scope items when migrating from the previous current schema', async () => {
+    const db = new FakeMigrationDatabase(11, {
+      accounts: currentAccountColumns,
+      transactions: currentTransactionColumns,
+      transaction_lines: currentTransactionLineColumns,
+      budgets: currentBudgetColumns.filter((columnName) => columnName !== 'scope_items_json'),
+      recurring_items: currentRecurringItemColumns,
+      transaction_templates: currentTransactionTemplateColumns,
+      transaction_template_lines: currentTransactionTemplateLineColumns,
+    });
+
+    await runMigrations(db.asMigrationDatabase());
+
+    expect(db.userVersion).toBe(SCHEMA_VERSION);
+    expect(db.versionWrites).toEqual([12]);
+    expect(
+      db.execStatements.some((statement) => statement.includes('CREATE TABLE budgets_scope_next')),
+    ).toBe(true);
   });
 
   it('keeps a current database version stable when the current columns exist', async () => {

@@ -14,27 +14,28 @@ import {
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
 import {
   defaultCategories,
-  getCategory,
-  getDefaultSubcategoryId,
-  getSubcategory,
-  getSubcategoryColor,
-  getSubcategoryIcon,
-  getSubcategoryName,
 } from '../../domain/categories';
-import { getBudgetCurrencyOptions } from '../../domain/budgets';
+import {
+  getBudgetCurrencyOptions,
+  getBudgetScopeItems,
+  getBudgetScopeLabel,
+  normalizeBudgetScopeItems,
+} from '../../domain/budgets';
 import { parseMoneyInput } from '../../domain/money';
 import type {
   AppSnapshot,
   Budget,
+  BudgetScopeItem,
   BudgetScopeType,
+  CategoryDefinition,
   NewBudgetInput,
   UpdateBudgetInput,
 } from '../../domain/types';
-import type {
-  CategorySelectLaunchParams,
-  CategorySelectionResult,
-} from '../categorySelection/categorySelectionModel';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
+import {
+  getBudgetScopeFormSummary,
+  type BudgetScopeSelectLaunchParams,
+} from './budgetScopeSelectionModel';
 import { colors } from '../../theme/tokens';
 
 type BudgetFormScreenProps =
@@ -42,9 +43,9 @@ type BudgetFormScreenProps =
       mode: 'add';
       snapshot: AppSnapshot;
       onAddBudget: (input: NewBudgetInput) => Promise<void>;
-      onOpenCategorySelect: (
-        params: CategorySelectLaunchParams,
-        onSelect: (selection: CategorySelectionResult) => void,
+      onOpenBudgetScopeSelect: (
+        params: BudgetScopeSelectLaunchParams,
+        onConfirm: (scopeItems: BudgetScopeItem[]) => void,
       ) => void;
       onCancel: () => void;
       onDone: () => void;
@@ -55,18 +56,20 @@ type BudgetFormScreenProps =
       budget: Budget;
       onUpdateBudget: (input: UpdateBudgetInput) => Promise<void>;
       onArchiveBudget: (budgetId: string) => Promise<void>;
-      onOpenCategorySelect: (
-        params: CategorySelectLaunchParams,
-        onSelect: (selection: CategorySelectionResult) => void,
+      onOpenBudgetScopeSelect: (
+        params: BudgetScopeSelectLaunchParams,
+        onConfirm: (scopeItems: BudgetScopeItem[]) => void,
       ) => void;
       onCancel: () => void;
       onDone: () => void;
     };
 
-const scopeOptions: { value: BudgetScopeType; label: string }[] = [
+type BudgetScopeMode = Extract<BudgetScopeType, 'overall' | 'include' | 'exclude'>;
+
+const scopeOptions: { value: BudgetScopeMode; label: string }[] = [
   { value: 'overall', label: 'Overall' },
-  { value: 'category', label: 'Category' },
-  { value: 'subcategory', label: 'Subcategory' },
+  { value: 'include', label: 'Include selected categories' },
+  { value: 'exclude', label: 'Exclude selected categories' },
 ];
 
 export function BudgetFormScreen(props: BudgetFormScreenProps) {
@@ -77,9 +80,6 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   );
   const firstCategory = categories[0];
   const editingBudget = mode === 'edit' ? props.budget : null;
-  const initialCategoryId = editingBudget?.categoryId ?? firstCategory?.id ?? 'food';
-  const initialCategory = getCategory(initialCategoryId, categories);
-  const initialSubcategoryId = editingBudget?.subcategoryId ?? getDefaultSubcategoryId(initialCategory);
   const currencyOptions = useMemo(
     () => getBudgetCurrencyOptions({
       accounts: snapshot.accounts,
@@ -90,37 +90,39 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   const [name, setName] = useState(editingBudget?.name ?? '');
   const [amount, setAmount] = useState(formatOptionalMoneyInput(editingBudget?.amountMinor));
   const [currencyCode, setCurrencyCode] = useState(editingBudget?.currencyCode ?? currencyOptions[0]?.code ?? '');
-  const [scopeType, setScopeType] = useState<BudgetScopeType>(editingBudget?.scopeType ?? 'overall');
-  const [categoryId, setCategoryId] = useState(initialCategory.id);
-  const [subcategoryId, setSubcategoryId] = useState(initialSubcategoryId);
+  const [scopeMode, setScopeMode] = useState<BudgetScopeMode>(getInitialBudgetScopeMode(editingBudget));
+  const [scopeItems, setScopeItems] = useState<BudgetScopeItem[]>(() =>
+    getInitialBudgetScopeItems(editingBudget, firstCategory),
+  );
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [error, setError] = useState('');
-  const selectedCategory = getCategory(categoryId, categories);
+  const scopeDraft = getBudgetScopeDraft(scopeMode, scopeItems);
+  const scopeSummary = getBudgetScopeFormSummary({
+    categories,
+    currencyCode,
+    mode: scopeMode,
+    scopeItems,
+  });
 
-  function setSelectedScope(nextScopeType: BudgetScopeType) {
-    setScopeType(nextScopeType);
+  function setSelectedScope(nextScopeMode: BudgetScopeMode) {
+    setScopeMode(nextScopeMode);
+    if (nextScopeMode !== 'overall' && !scopeItems.length && firstCategory) {
+      setScopeItems([{ categoryId: firstCategory.id, subcategoryId: null }]);
+    }
     setConfirmArchive(false);
   }
 
-  function openCategorySelect() {
-    if (scopeType === 'overall') {
+  function openBudgetScopeSelect() {
+    if (scopeMode === 'overall') {
       return;
     }
 
-    props.onOpenCategorySelect(
+    props.onOpenBudgetScopeSelect(
       {
-        kind: 'expense',
-        selectedCategoryId: categoryId,
-        selectedSubcategoryId: scopeType === 'subcategory' ? subcategoryId : null,
-        selectionMode: scopeType === 'category' ? 'category' : 'subcategory',
-        showSuggestions: false,
-        title: scopeType === 'category' ? 'Budget category' : 'Budget subcategory',
+        mode: scopeMode,
+        selectedItems: normalizeBudgetScopeItems(scopeItems),
       },
-      ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
-        const nextCategory = getCategory(nextCategoryId, categories);
-        setCategoryId(nextCategory.id);
-        setSubcategoryId(nextSubcategoryId ?? getDefaultSubcategoryId(nextCategory));
-      },
+      (confirmedItems) => setScopeItems(normalizeBudgetScopeItems(confirmedItems)),
     );
   }
 
@@ -165,17 +167,18 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   }
 
   function buildBudgetInput(amountMinor: number): NewBudgetInput {
-    const categoryForInput = scopeType === 'overall' ? null : categoryId;
-    const subcategoryForInput = scopeType === 'subcategory' ? subcategoryId : null;
+    const normalizedScopeItems = scopeMode === 'overall' ? [] : normalizeBudgetScopeItems(scopeItems);
+    const primaryScopeItem = normalizedScopeItems[0] ?? null;
 
     return {
-      name: name.trim() || getFallbackBudgetName(scopeType, selectedCategory, subcategoryForInput, categories),
+      name: name.trim() || getFallbackBudgetName(scopeMode, scopeDraft, categories),
       amountMinor,
       currencyCode,
       period: 'monthly',
-      scopeType,
-      categoryId: categoryForInput,
-      subcategoryId: subcategoryForInput,
+      scopeType: scopeMode,
+      categoryId: scopeMode === 'overall' ? null : primaryScopeItem?.categoryId ?? null,
+      subcategoryId: scopeMode === 'overall' ? null : primaryScopeItem?.subcategoryId ?? null,
+      scopeItems: normalizedScopeItems,
       isActive: true,
     };
   }
@@ -192,7 +195,7 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
           label="Name"
           value={name}
           onChangeText={setName}
-          placeholder={getFallbackBudgetName(scopeType, selectedCategory, subcategoryId, categories)}
+          placeholder={getFallbackBudgetName(scopeMode, scopeDraft, categories)}
         />
         <TextField
           label="Monthly limit"
@@ -214,7 +217,7 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
             {scopeOptions.map((option) => (
               <Chip
                 key={option.value}
-                selected={scopeType === option.value}
+                selected={scopeMode === option.value}
                 onPress={() => setSelectedScope(option.value)}
                 testID={`budget-scope-${option.value}`}
               >
@@ -225,23 +228,24 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
           <FormHelperText>Budgets are monthly calendar limits in v1.</FormHelperText>
         </FormSection>
 
-        {scopeType !== 'overall' ? (
-          <FormSection label="Category">
+        {scopeMode !== 'overall' ? (
+          <FormSection label="Category scope">
             <CategorySelectionField
-              label={scopeType === 'subcategory' ? 'Subcategory' : 'Category'}
-              value={getBudgetCategorySelectionLabel(scopeType, selectedCategory, subcategoryId, categories)}
-              onPress={openCategorySelect}
-              color={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
-              icon={getSubcategoryIcon(selectedCategory.id, subcategoryId, categories)}
-              iconColor={getSubcategoryColor(selectedCategory.id, subcategoryId, categories)}
+              color={scopeMode === 'exclude' ? colors.danger : colors.primary}
+              empty={!scopeItems.length}
+              icon={scopeMode === 'exclude' ? 'remove-circle-outline' : 'checkmark-circle-outline'}
+              label={scopeSummary.fieldLabel}
+              onPress={openBudgetScopeSelect}
+              value={scopeSummary.title}
             />
+            <FormHelperText>{scopeSummary.detail}</FormHelperText>
           </FormSection>
         ) : (
           <FormPreviewRow
             color={colors.primary}
             icon="wallet-outline"
-            title="Overall monthly spending"
-            detail={`Counts all expense categories in ${currencyCode || 'selected currency'}.`}
+            title={scopeSummary.title}
+            detail={scopeSummary.detail}
           />
         )}
 
@@ -262,33 +266,54 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   );
 }
 
-function getBudgetCategorySelectionLabel(
-  scopeType: BudgetScopeType,
-  category: ReturnType<typeof getCategory>,
-  subcategoryId: string | null,
-  categories = defaultCategories,
-): string {
-  if (scopeType === 'subcategory') {
-    return `${category.name} / ${getSubcategoryName(category.id, subcategoryId ?? '', categories)}`;
-  }
-
-  return category.name;
-}
-
 function getFallbackBudgetName(
-  scopeType: BudgetScopeType,
-  category: ReturnType<typeof getCategory>,
-  subcategoryId: string | null,
+  scopeMode: BudgetScopeMode,
+  scopeDraft: Pick<Budget, 'scopeType' | 'categoryId' | 'subcategoryId' | 'scopeItems'>,
   categories = defaultCategories,
 ): string {
-  if (scopeType === 'overall') {
+  if (scopeMode === 'overall') {
     return 'Overall spending';
   }
 
-  if (scopeType === 'subcategory') {
-    const subcategory = getSubcategory(category.id, subcategoryId ?? '', categories);
-    return `${subcategory?.name ?? 'Subcategory'} budget`;
+  if (scopeMode === 'exclude') {
+    return 'Filtered spending budget';
   }
 
-  return `${category.name} budget`;
+  return `${getBudgetScopeLabel(scopeDraft, categories)} budget`;
+}
+
+function getInitialBudgetScopeMode(budget: Budget | null): BudgetScopeMode {
+  if (!budget) {
+    return 'overall';
+  }
+
+  if (budget.scopeType === 'exclude') {
+    return 'exclude';
+  }
+
+  if (budget.scopeType === 'overall') {
+    return 'overall';
+  }
+
+  return 'include';
+}
+
+function getInitialBudgetScopeItems(budget: Budget | null, fallbackCategory: CategoryDefinition | undefined): BudgetScopeItem[] {
+  if (budget) {
+    return getBudgetScopeItems(budget);
+  }
+
+  return fallbackCategory ? [{ categoryId: fallbackCategory.id, subcategoryId: null }] : [];
+}
+
+function getBudgetScopeDraft(scopeType: BudgetScopeMode, scopeItems: BudgetScopeItem[]) {
+  const normalizedScopeItems = scopeType === 'overall' ? [] : normalizeBudgetScopeItems(scopeItems);
+  const primaryScopeItem = normalizedScopeItems[0] ?? null;
+
+  return {
+    scopeType,
+    categoryId: primaryScopeItem?.categoryId ?? null,
+    subcategoryId: primaryScopeItem?.subcategoryId ?? null,
+    scopeItems: normalizedScopeItems,
+  };
 }

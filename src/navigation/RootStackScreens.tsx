@@ -5,6 +5,14 @@ import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { getDashboardRecurringSummary } from '../domain/dashboardRecurring';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
 import { BudgetFormScreen } from '../features/budgets/BudgetFormScreen';
+import { BudgetScopeSelectScreen } from '../features/budgets/BudgetScopeSelectScreen';
+import {
+  createBudgetScopeSelectionRequestId,
+  useBudgetScopeSelectionRequests,
+} from '../features/budgets/BudgetScopeSelectionContext';
+import type {
+  BudgetScopeSelectLaunchParams,
+} from '../features/budgets/budgetScopeSelectionModel';
 import { buildAddTransactionPrefillFromTemplate } from '../domain/transactionTemplates';
 import {
   createCategorySelectionRequestId,
@@ -28,7 +36,7 @@ import { AddTransactionScreen } from '../features/transactions/AddTransactionScr
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
 import { spacing } from '../theme/tokens';
-import type { AccountBalance, Budget, RecurringItem } from '../domain/types';
+import type { AccountBalance, Budget, BudgetScopeItem, RecurringItem } from '../domain/types';
 import {
   ComposerRouteScaffold,
   PREPARING_RAINPROOF_MESSAGE,
@@ -44,6 +52,11 @@ type OpenCategorySelect = (
   onSelect: (selection: CategorySelectionResult) => void,
 ) => void;
 
+type OpenBudgetScopeSelect = (
+  params: BudgetScopeSelectLaunchParams,
+  onConfirm: (scopeItems: BudgetScopeItem[]) => void,
+) => void;
+
 function useOpenCategorySelect(navigation: RootStackNavigation): OpenCategorySelect {
   const { registerCategorySelectionRequest } = useCategorySelectionRequests();
 
@@ -52,6 +65,16 @@ function useOpenCategorySelect(navigation: RootStackNavigation): OpenCategorySel
     registerCategorySelectionRequest(requestId, onSelect);
     navigation.navigate('CategorySelect', { ...params, requestId });
   }, [navigation, registerCategorySelectionRequest]);
+}
+
+function useOpenBudgetScopeSelect(navigation: RootStackNavigation): OpenBudgetScopeSelect {
+  const { registerBudgetScopeSelectionRequest } = useBudgetScopeSelectionRequests();
+
+  return useCallback((params, onConfirm) => {
+    const requestId = createBudgetScopeSelectionRequestId();
+    registerBudgetScopeSelectionRequest(requestId, onConfirm);
+    navigation.navigate('BudgetScopeSelect', { ...params, requestId });
+  }, [navigation, registerBudgetScopeSelectionRequest]);
 }
 
 export function AddAccountRouteScreen() {
@@ -254,7 +277,7 @@ export function RainyDayFundRouteScreen() {
 export function AddBudgetRouteScreen() {
   const navigation = useRootStackNavigation();
   const { snapshot, actions } = useRainproofDataContext();
-  const openCategorySelect = useOpenCategorySelect(navigation);
+  const openBudgetScopeSelect = useOpenBudgetScopeSelect(navigation);
 
   if (!snapshot) {
     return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
@@ -266,7 +289,7 @@ export function AddBudgetRouteScreen() {
         mode="add"
         snapshot={snapshot}
         onAddBudget={actions.addBudget}
-        onOpenCategorySelect={openCategorySelect}
+        onOpenBudgetScopeSelect={openBudgetScopeSelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}
       />
@@ -279,7 +302,7 @@ export function EditBudgetRouteScreen() {
   const route = useRootStackRoute<'EditBudget'>();
   const { snapshot, actions } = useRainproofDataContext();
   const budget = findRouteItemById(snapshot?.budgets, route.params.budgetId);
-  const openCategorySelect = useOpenCategorySelect(navigation);
+  const openBudgetScopeSelect = useOpenBudgetScopeSelect(navigation);
 
   if (!snapshot) {
     return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
@@ -297,7 +320,7 @@ export function EditBudgetRouteScreen() {
         budget={budget}
         onUpdateBudget={actions.updateBudget}
         onArchiveBudget={actions.archiveBudget}
-        onOpenCategorySelect={openCategorySelect}
+        onOpenBudgetScopeSelect={openBudgetScopeSelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}
       />
@@ -443,6 +466,51 @@ export function EditTransactionTemplateRouteScreen() {
         onOpenCategorySelect={openCategorySelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}
+      />
+    </ComposerRouteScaffold>
+  );
+}
+
+export function BudgetScopeSelectRouteScreen() {
+  const navigation = useRootStackNavigation();
+  const route = useRootStackRoute<'BudgetScopeSelect'>();
+  const { snapshot } = useRainproofDataContext();
+  const {
+    hasBudgetScopeSelectionRequest,
+    resolveBudgetScopeSelectionRequest,
+    unregisterBudgetScopeSelectionRequest,
+  } = useBudgetScopeSelectionRequests();
+  const requestId = route.params.requestId;
+  const requestExists = hasBudgetScopeSelectionRequest(requestId);
+
+  useEffect(() => {
+    if (!requestExists) {
+      navigation.goBack();
+    }
+
+    return () => unregisterBudgetScopeSelectionRequest(requestId);
+  }, [navigation, requestExists, requestId, unregisterBudgetScopeSelectionRequest]);
+
+  if (!snapshot) {
+    return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
+  }
+
+  if (!requestExists) {
+    return <RouteMessageShell message="Budget category selection expired." />;
+  }
+
+  return (
+    <ComposerRouteScaffold screenKey="budgetScopeSelect">
+      <BudgetScopeSelectScreen
+        categories={snapshot.categories}
+        mode={route.params.mode}
+        selectedItems={route.params.selectedItems}
+        onBack={() => navigation.goBack()}
+        onConfirm={(scopeItems) => {
+          if (resolveBudgetScopeSelectionRequest(requestId, scopeItems)) {
+            navigation.goBack();
+          }
+        }}
       />
     </ComposerRouteScaffold>
   );

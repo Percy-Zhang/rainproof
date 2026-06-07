@@ -102,7 +102,12 @@ export type SubcategoryDefinition = {
 
 export type BudgetPeriod = 'monthly';
 
-export type BudgetScopeType = 'overall' | 'category' | 'subcategory';
+export type BudgetScopeType = 'overall' | 'category' | 'subcategory' | 'include' | 'exclude';
+
+export type BudgetScopeItem = {
+  categoryId: string;
+  subcategoryId: string | null;
+};
 
 export type Budget = {
   id: string;
@@ -113,6 +118,7 @@ export type Budget = {
   scopeType: BudgetScopeType;
   categoryId: string | null;
   subcategoryId: string | null;
+  scopeItems: BudgetScopeItem[];
   sortOrder: number;
   isActive: boolean;
   createdAt: string;
@@ -356,6 +362,7 @@ export type NewBudgetInput = {
   scopeType: BudgetScopeType;
   categoryId?: string | null;
   subcategoryId?: string | null;
+  scopeItems?: BudgetScopeItem[];
   isActive?: boolean;
 };
 

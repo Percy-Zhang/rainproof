@@ -313,6 +313,7 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
     'scope_type',
     'category_id',
     'subcategory_id',
+    'scope_items_json',
     'sort_order',
     'is_active',
     'created_at',
@@ -606,7 +607,9 @@ describe('SQLite finance repository integration', () => {
 
       let budgets = (await repository.getSnapshot()).budgets;
       const overall = budgets.find((budget) => budget.scopeType === 'overall');
-      const groceries = budgets.find((budget) => budget.scopeType === 'subcategory');
+      const groceries = budgets.find(
+        (budget) => budget.scopeType === 'include' && budget.scopeItems.some((item) => item.subcategoryId === 'groceries'),
+      );
 
       expect(overall).toEqual(
         expect.objectContaining({
@@ -625,9 +628,10 @@ describe('SQLite finance repository integration', () => {
         expect.objectContaining({
           name: 'Groceries',
           amountMinor: 50000,
-          scopeType: 'subcategory',
+          scopeType: 'include',
           categoryId: 'food',
           subcategoryId: 'groceries',
+          scopeItems: [{ categoryId: 'food', subcategoryId: 'groceries' }],
           sortOrder: 1,
           isActive: true,
         }),
@@ -670,6 +674,55 @@ describe('SQLite finance repository integration', () => {
         subcategoryId: 'groceries',
       });
       expect((await repository.getSnapshot()).budgets.filter((budget) => budget.isActive)).toHaveLength(2);
+    });
+  });
+
+  it('persists multi-category budget scopes', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await repository.addBudget({
+        name: 'Food and fuel',
+        amountMinor: 90000,
+        currencyCode: 'AUD',
+        scopeType: 'include',
+        scopeItems: [
+          { categoryId: 'food', subcategoryId: null },
+          { categoryId: 'transport', subcategoryId: 'fuel' },
+        ],
+      });
+
+      let budget = (await repository.getSnapshot()).budgets[0];
+      expect(budget).toEqual(
+        expect.objectContaining({
+          name: 'Food and fuel',
+          scopeType: 'include',
+          categoryId: 'food',
+          subcategoryId: null,
+          scopeItems: [
+            { categoryId: 'food', subcategoryId: null },
+            { categoryId: 'transport', subcategoryId: 'fuel' },
+          ],
+        }),
+      );
+
+      await repository.updateBudget({
+        id: budget.id,
+        name: 'Everything but food',
+        amountMinor: 120000,
+        currencyCode: 'AUD',
+        scopeType: 'exclude',
+        scopeItems: [{ categoryId: 'food', subcategoryId: null }],
+      });
+
+      budget = (await repository.getSnapshot()).budgets[0];
+      expect(budget).toEqual(
+        expect.objectContaining({
+          name: 'Everything but food',
+          scopeType: 'exclude',
+          categoryId: 'food',
+          subcategoryId: null,
+          scopeItems: [{ categoryId: 'food', subcategoryId: null }],
+        }),
+      );
     });
   });
 
@@ -2465,7 +2518,7 @@ describe('SQLite finance repository integration', () => {
       const snapshot = await fixture.repository.getSnapshot();
       expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
       expect(await getColumnNames(fixture.db, 'budgets')).toEqual(
-        expect.arrayContaining(['name', 'amount_minor', 'period', 'scope_type', 'sort_order', 'is_active']),
+        expect.arrayContaining(['name', 'amount_minor', 'period', 'scope_type', 'scope_items_json', 'sort_order', 'is_active']),
       );
       expect(snapshot.budgets).toEqual([
         expect.objectContaining({
@@ -2475,9 +2528,10 @@ describe('SQLite finance repository integration', () => {
           sortOrder: 0,
           currencyCode: 'AUD',
           period: 'monthly',
-          scopeType: 'category',
+          scopeType: 'include',
           categoryId: 'food',
           subcategoryId: null,
+          scopeItems: [{ categoryId: 'food', subcategoryId: null }],
           isActive: true,
         }),
       ]);

@@ -65,22 +65,24 @@ CREATE TABLE IF NOT EXISTS budgets (
   scope_type TEXT NOT NULL DEFAULT 'category',
   category_id TEXT,
   subcategory_id TEXT,
+  scope_items_json TEXT NOT NULL DEFAULT '[]',
   sort_order INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (amount_minor > 0),
   CHECK (period IN ('monthly')),
-  CHECK (scope_type IN ('overall', 'category', 'subcategory')),
+  CHECK (scope_type IN ('overall', 'category', 'subcategory', 'include', 'exclude')),
   CHECK (
-    (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL) OR
+    (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL AND scope_items_json = '[]') OR
     (scope_type = 'category' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NULL) OR
-    (scope_type = 'subcategory' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NOT NULL AND subcategory_id <> '')
+    (scope_type = 'subcategory' AND category_id IS NOT NULL AND category_id <> '' AND subcategory_id IS NOT NULL AND subcategory_id <> '') OR
+    (scope_type IN ('include', 'exclude') AND scope_items_json <> '' AND scope_items_json <> '[]')
   )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope
-ON budgets(period, currency_code, scope_type, COALESCE(category_id, ''), COALESCE(subcategory_id, ''))
+ON budgets(period, currency_code, scope_type, scope_items_json)
 WHERE is_active = 1;
 `;
 
@@ -251,6 +253,12 @@ const migrations: Migration[] = [
       await ensureBudgetSortOrderColumn(db);
     },
   },
+  {
+    version: 12,
+    migrate: async (db) => {
+      await ensureBudgetScopeSchema(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -320,7 +328,7 @@ async function ensureBudgetSchema(db: MigrationDatabase): Promise<void> {
 
   if (columnNames.has('amount_minor') && columnNames.has('scope_type') && columnNames.has('is_active')) {
     await ensureBudgetSortOrderColumn(db);
-    await db.execAsync(BUDGETS_SCHEMA_SQL);
+    await ensureBudgetScopeSchema(db);
     await normalizeBudgetSortOrder(db);
     return;
   }
@@ -348,13 +356,14 @@ ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE
     await db.runAsync(
       `INSERT INTO budgets_v1_next (
         id, name, amount_minor, currency_code, period, scope_type, category_id,
-        subcategory_id, sort_order, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'monthly', 'category', ?, NULL, ?, 1, ?, ?)`,
+        subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'monthly', 'include', ?, NULL, ?, ?, 1, ?, ?)`,
       row.id,
       name,
       amountMinor,
       row.currency_code,
       categoryId,
+      JSON.stringify([{ categoryId, subcategoryId: null }]),
       sortOrder,
       row.created_at,
       row.updated_at,
@@ -367,6 +376,160 @@ ALTER TABLE budgets_v1_next RENAME TO budgets;
 ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
 `);
   await normalizeBudgetSortOrder(db);
+}
+
+type BudgetScopeMigrationRow = {
+  id: string;
+  name: string;
+  amount_minor: number;
+  currency_code: string;
+  period: string;
+  scope_type: string;
+  category_id: string | null;
+  subcategory_id: string | null;
+  scope_items_json?: string | null;
+  sort_order: number | null;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type BudgetScopeMigrationItem = {
+  categoryId: string;
+  subcategoryId: string | null;
+};
+
+async function ensureBudgetScopeSchema(db: MigrationDatabase): Promise<void> {
+  const columns = await db.getAllAsync<TableColumnRow>('PRAGMA table_info(budgets)');
+  const columnNames = new Set(columns.map((column) => column.name));
+
+  if (!columnNames.has('scope_items_json')) {
+    await rebuildBudgetsForScopeItems(db);
+    return;
+  }
+
+  await db.execAsync(BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, ''));
+}
+
+async function rebuildBudgetsForScopeItems(db: MigrationDatabase): Promise<void> {
+  const rows = await db.getAllAsync<BudgetScopeMigrationRow>(
+    `SELECT id, name, amount_minor, currency_code, period, scope_type, category_id,
+            subcategory_id, sort_order, is_active, created_at, updated_at
+     FROM budgets
+     ORDER BY sort_order ASC, created_at ASC, id ASC`,
+  );
+
+  await db.execAsync(`
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS budgets_scope_next;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_scope_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+`);
+
+  for (const [index, row] of rows.entries()) {
+    const migratedScope = getMigratedBudgetScope(row);
+    const primaryScopeItem = migratedScope.scopeItems[0] ?? null;
+    const amountMinor = Number(row.amount_minor);
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      continue;
+    }
+
+    await db.runAsync(
+      `INSERT INTO budgets_scope_next (
+        id, name, amount_minor, currency_code, period, scope_type, category_id,
+        subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'monthly', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.id,
+      row.name?.trim() || getMigratedBudgetName(row, migratedScope.scopeType),
+      amountMinor,
+      row.currency_code,
+      migratedScope.scopeType,
+      migratedScope.scopeType === 'overall' ? null : primaryScopeItem?.categoryId ?? null,
+      migratedScope.scopeType === 'overall' ? null : primaryScopeItem?.subcategoryId ?? null,
+      JSON.stringify(migratedScope.scopeItems),
+      Number.isInteger(row.sort_order) ? row.sort_order : index,
+      row.is_active === 1 ? 1 : 0,
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
+  await db.execAsync(`
+DROP TABLE budgets;
+ALTER TABLE budgets_scope_next RENAME TO budgets;
+PRAGMA foreign_keys = ON;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+`);
+  await normalizeBudgetSortOrder(db);
+}
+
+function getMigratedBudgetScope(row: BudgetScopeMigrationRow): {
+  scopeType: 'overall' | 'include' | 'exclude';
+  scopeItems: BudgetScopeMigrationItem[];
+} {
+  if (row.scope_type === 'overall') {
+    return { scopeType: 'overall', scopeItems: [] };
+  }
+
+  const existingItems = safeParseBudgetScopeMigrationItems(row.scope_items_json);
+  if (row.scope_type === 'exclude') {
+    return { scopeType: 'exclude', scopeItems: existingItems.length ? existingItems : getLegacyBudgetMigrationItems(row) };
+  }
+
+  if (row.scope_type === 'include') {
+    return { scopeType: 'include', scopeItems: existingItems.length ? existingItems : getLegacyBudgetMigrationItems(row) };
+  }
+
+  return { scopeType: 'include', scopeItems: getLegacyBudgetMigrationItems(row) };
+}
+
+function getLegacyBudgetMigrationItems(row: BudgetScopeMigrationRow): BudgetScopeMigrationItem[] {
+  const categoryId = row.category_id?.trim();
+  const subcategoryId = row.subcategory_id?.trim();
+  if (!categoryId) {
+    return [];
+  }
+
+  return [{ categoryId, subcategoryId: row.scope_type === 'subcategory' ? subcategoryId || null : null }];
+}
+
+function safeParseBudgetScopeMigrationItems(value: string | null | undefined): BudgetScopeMigrationItem[] {
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item): item is Partial<BudgetScopeMigrationItem> =>
+        Boolean(item && typeof item === 'object' && typeof item.categoryId === 'string'),
+      )
+      .map((item) => ({
+        categoryId: item.categoryId?.trim() ?? '',
+        subcategoryId: typeof item.subcategoryId === 'string' && item.subcategoryId.trim()
+          ? item.subcategoryId.trim()
+          : null,
+      }))
+      .filter((item) => item.categoryId);
+  } catch {
+    return [];
+  }
+}
+
+function getMigratedBudgetName(row: BudgetScopeMigrationRow, scopeType: 'overall' | 'include' | 'exclude'): string {
+  if (scopeType === 'overall') {
+    return 'Overall spending';
+  }
+
+  if (scopeType === 'exclude') {
+    return 'Filtered spending budget';
+  }
+
+  return `${formatBudgetMigrationLabel(row.category_id ?? 'category')} budget`;
 }
 
 async function getBudgetMigrationCategoryNames(db: MigrationDatabase): Promise<Map<string, string>> {
