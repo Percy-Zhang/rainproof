@@ -1,20 +1,21 @@
 import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useMemo, useState } from 'react';
-import { Keyboard, Platform, Pressable, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useCallback, useMemo, useState } from 'react';
+import { BackHandler, Keyboard, Platform, Pressable, Text, View } from 'react-native';
 
 import { ActionButton, Chip, FormError, TextField } from '../../components/ui';
 import {
-  AccountOptionList,
   FormChipRow,
   FormDangerZone,
   FormPreviewRow,
   FormScreenShell,
   FormSection,
   KeyboardAwareFormScroll,
-  ReadonlyField,
   formLayoutStyles,
 } from '../../components/FormLayout';
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
+import { getAccountBalances } from '../../domain/aggregates';
+import { getAccountDisplayName } from '../../domain/accountThemes';
 import {
   defaultCategories,
   getCategory,
@@ -26,7 +27,7 @@ import {
   getSubcategoryName,
 } from '../../domain/categories';
 import { formatLongDateLabel } from '../../domain/dates';
-import { parseMoneyInput } from '../../domain/money';
+import { formatMoney, parseMoneyInput } from '../../domain/money';
 import {
   dateOnlyToLocalDate,
   getRecurringCurrencyCodeForAccount,
@@ -44,12 +45,20 @@ import type {
   RecurringItemKind,
   UpdateRecurringItemInput,
 } from '../../domain/types';
+import { colors } from '../../theme/tokens';
 import type {
   CategorySelectLaunchParams,
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
-import { AutocompleteField, getNativePickerDisplay, NativePickerRow, useAutocompleteOptions } from '../transactions/TransactionFormComponents';
+import {
+  AutocompleteField,
+  getNativePickerDisplay,
+  NativePickerRow,
+  SelectorRow,
+  TransactionPickerScreen,
+  useAutocompleteOptions,
+} from '../transactions/TransactionFormComponents';
 
 type RecurringItemFormScreenProps =
   | {
@@ -88,6 +97,8 @@ const frequencyOptions: { value: RecurringFrequency; label: string }[] = [
   { value: 'yearly', label: 'Yearly' },
 ];
 
+type RecurringFormPage = 'form' | 'account';
+
 export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   const { mode, snapshot, onCancel, onDone } = props;
   const editingItem = mode === 'edit' ? props.recurringItem : null;
@@ -111,9 +122,15 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [error, setError] = useState('');
+  const [page, setPage] = useState<RecurringFormPage>('form');
   const selectedCategory = getCategory(categoryId, categoryOptions);
   const selectedAccount = accounts.find((account) => account.id === accountId);
   const currencyCode = getRecurringCurrencyCodeForAccount(accounts, accountId);
+  const selectedAccountBalance = useMemo(
+    () => getAccountBalances(snapshot.accounts, snapshot.transactionLines)
+      .find(({ account }) => account.id === accountId),
+    [accountId, snapshot.accounts, snapshot.transactionLines],
+  );
   const datePickerValue = isValidDateOnly(nextDueDate) ? dateOnlyToLocalDate(nextDueDate) : new Date();
   const itemNameSuggestionValues = useMemo(
     () => getTransactionItemNameSuggestionValues({
@@ -133,6 +150,21 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   );
   const nameSuggestions = useAutocompleteOptions(itemNameSuggestionValues, name);
 
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        if (page === 'account') {
+          setPage('form');
+          return true;
+        }
+
+        return false;
+      });
+
+      return () => subscription.remove();
+    }, [page]),
+  );
+
   function changeKind(nextKind: RecurringItemKind) {
     const nextCategory = getDefaultCategoryForKind(nextKind, categories);
     setKind(nextKind);
@@ -144,6 +176,9 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
 
   function selectAccount(nextAccountId: string) {
     setAccountId(nextAccountId);
+    setPage('form');
+    setConfirmArchive(false);
+    setError('');
   }
 
   async function submit() {
@@ -244,6 +279,29 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
     );
   }
 
+  if (page === 'account') {
+    return (
+      <TransactionPickerScreen
+        mode="sourceAccount"
+        accounts={accounts}
+        selectedAccountId={accountId}
+        selectedCategoryId={categoryId}
+        selectedSubcategoryId={subcategoryId ?? ''}
+        kind={kind}
+        categories={categories}
+        transactions={snapshot.transactions}
+        transactionLines={snapshot.transactionLines}
+        showCurrencyCodes
+        sourceAccountId={accountId}
+        onClose={() => setPage('form')}
+        onExit={onCancel}
+        onSelectAccount={selectAccount}
+        onSelectCategory={() => undefined}
+        cancelTestID="cancel-recurring-account-picker"
+      />
+    );
+  }
+
   return (
     <FormScreenShell
       title={mode === 'add' ? 'Add recurring' : 'Edit recurring'}
@@ -283,19 +341,21 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
         />
 
         <FormSection label="Account">
-          <AccountOptionList
-            accounts={accounts}
-            emptyMessage="Add an account before creating recurring items."
-            selectedAccountId={accountId}
-            onSelectAccount={selectAccount}
+          <SelectorRow
+            label="Account"
+            value={getRecurringAccountLabel(
+              selectedAccount,
+              selectedAccountBalance?.balanceMinor,
+            )}
+            onPress={() => setPage('account')}
+            color={selectedAccount?.themeColor ?? colors.primary}
+            icon={selectedAccount?.iconName ?? 'wallet-outline'}
+            iconColor={selectedAccount?.themeColor}
+            iconKind="account"
+            empty={!selectedAccount}
+            testID="recurring-account-row"
           />
         </FormSection>
-
-        <ReadonlyField
-          label="Currency"
-          value={selectedAccount ? currencyCode : 'Select an account'}
-          detail={selectedAccount ? 'From selected account' : 'Choose an account before saving.'}
-        />
 
         <FormSection label="Frequency">
           <FormChipRow>
@@ -393,6 +453,25 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
       </KeyboardAwareFormScroll>
     </FormScreenShell>
   );
+}
+
+function getRecurringAccountLabel(
+  account: AppSnapshot['accounts'][number] | undefined,
+  balanceMinor: number | undefined,
+): string {
+  if (!account) {
+    return 'Add or select an account';
+  }
+
+  const balanceLabel = balanceMinor === undefined
+    ? null
+    : formatMoney(balanceMinor, account.currencyCode);
+
+  return [
+    getAccountDisplayName(account),
+    account.currencyCode,
+    balanceLabel,
+  ].filter(Boolean).join(' / ');
 }
 
 function RecurringPreview({

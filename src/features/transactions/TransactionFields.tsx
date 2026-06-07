@@ -21,6 +21,7 @@ export function SelectorRow({
   iconColor,
   iconKind = 'category',
   empty = false,
+  testID,
 }: {
   label: string;
   value: string;
@@ -30,11 +31,13 @@ export function SelectorRow({
   iconColor?: string;
   iconKind?: 'account' | 'category';
   empty?: boolean;
+  testID?: string;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
+      testID={testID}
       style={({ pressed }) => [
         styles.selectorRow,
         {
