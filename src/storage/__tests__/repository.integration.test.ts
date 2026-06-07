@@ -601,6 +601,23 @@ describe('SQLite finance repository integration', () => {
     });
   });
 
+  it('persists a manually selected default currency', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await repository.updateSettings({
+        defaultCurrencyCode: 'JPY',
+        multiCurrencyEnabled: true,
+        enabledCurrencyCodes: ['AUD', 'USD'],
+      });
+
+      const snapshot = await repository.getSnapshot();
+
+      expect(snapshot.defaultCurrencyCode).toBe('JPY');
+      expect(snapshot.settings.defaultCurrencyCode).toBe('JPY');
+      expect(snapshot.settings.defaultCurrencyMode).toBe('manual');
+      expect(snapshot.settings.enabledCurrencyCodes).toEqual(['AUD', 'JPY', 'USD']);
+    });
+  });
+
   it('persists dashboard selected account ids without changing account visibility', async () => {
     await withInitializedRepository(async ({ repository }) => {
       await addAccount(repository, { name: 'Everyday' });

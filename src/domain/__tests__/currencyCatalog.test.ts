@@ -1,11 +1,13 @@
 import {
   createCurrencySearchIndex,
   filterCurrencySearchOptions,
+  getActiveAccountCurrencyOptions,
   getAvailableCurrencyCodes,
   getDefaultEnabledCurrencyCodes,
   getCurrencyName,
   uniqueCurrencyCodes,
 } from '../currencyCatalog';
+import type { Account } from '../types';
 
 describe('currency catalog', () => {
   it('includes common currencies from runtime support or fallback data', () => {
@@ -23,6 +25,21 @@ describe('currency catalog', () => {
 
   it('normalizes and de-duplicates currency codes', () => {
     expect(uniqueCurrencyCodes(['aud', 'AUD', 'usd', null, undefined])).toEqual(['AUD', 'USD']);
+  });
+
+  it('builds stable default currency options from active accounts and keeps the current default', () => {
+    const accounts = [
+      account('aud-primary', 'AUD'),
+      account('usd', 'USD'),
+      account('aud-secondary', 'AUD'),
+      account('archived-eur', 'EUR', true),
+    ];
+
+    expect(getActiveAccountCurrencyOptions(accounts, 'JPY').map((option) => option.code)).toEqual([
+      'AUD',
+      'USD',
+      'JPY',
+    ]);
   });
 
   it('has full fallback names for common currencies', () => {
@@ -46,3 +63,25 @@ describe('currency catalog', () => {
     expect(filterCurrencySearchOptions(indexedOptions, 'euro').map((option) => option.code)).toEqual(['EUR']);
   });
 });
+
+function account(id: string, currencyCode: string, isArchived = false): Account {
+  return {
+    id,
+    name: id,
+    nickname: '',
+    type: 'checking',
+    currencyCode,
+    openingBalanceMinor: 0,
+    creditLimitMinor: null,
+    notes: '',
+    institutionName: '',
+    includeInRainyDay: false,
+    themeColor: '#1876A8',
+    iconName: 'wallet-outline',
+    showOnDashboard: true,
+    sortOrder: 0,
+    isArchived,
+    createdAt: '',
+    updatedAt: '',
+  };
+}

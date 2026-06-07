@@ -1,5 +1,5 @@
 import { getCurrencySymbol, normalizeCurrencyCode } from './money';
-import type { CurrencyCode } from './types';
+import type { Account, CurrencyCode } from './types';
 
 const FALLBACK_CURRENCY_CODES = [
   'AED',
@@ -359,6 +359,31 @@ export function getAvailableCurrencyCodes(): CurrencyCode[] {
 
 export function getCurrencyOptions(): CurrencyOption[] {
   return getAvailableCurrencyCodes().map((code) => ({
+    code,
+    label: getCurrencyName(code),
+    symbol: getCurrencySymbol(code),
+  }));
+}
+
+export function getActiveAccountCurrencyOptions(
+  accounts: Account[],
+  currentCurrencyCode?: CurrencyCode | null,
+): CurrencyOption[] {
+  const codes: CurrencyCode[] = [];
+
+  for (const account of accounts) {
+    const code = normalizeCurrencyCode(account.currencyCode, '');
+    if (!account.isArchived && code && !codes.includes(code)) {
+      codes.push(code);
+    }
+  }
+
+  const currentCode = normalizeCurrencyCode(currentCurrencyCode, '');
+  if (currentCode && !codes.includes(currentCode)) {
+    codes.push(currentCode);
+  }
+
+  return codes.map((code) => ({
     code,
     label: getCurrencyName(code),
     symbol: getCurrencySymbol(code),

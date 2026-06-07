@@ -1,10 +1,10 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
+import { CurrencyDropdown } from '../../components/CurrencyDropdown';
 import { Card, SectionHeader } from '../../components/ui';
-import { getCurrencyName, uniqueCurrencyCodes } from '../../domain/currencyCatalog';
-import { getCurrencySymbol } from '../../domain/money';
-import type { AppSnapshot, UpdateAppSettingsInput } from '../../domain/types';
+import { getActiveAccountCurrencyOptions } from '../../domain/currencyCatalog';
+import type { AppSnapshot, CurrencyCode, UpdateAppSettingsInput } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type SettingsScreenProps = {
@@ -17,10 +17,21 @@ type SettingsScreenProps = {
 export function SettingsScreen({
   snapshot,
   onOpenCategoryManagement,
+  onUpdateSettings,
   showHeader = true,
 }: SettingsScreenProps) {
-  const accountCurrencyCodes = uniqueCurrencyCodes(snapshot.accounts.map((account) => account.currencyCode));
-  const displayCurrencyCodes = accountCurrencyCodes.length ? accountCurrencyCodes : [snapshot.settings.defaultCurrencyCode];
+  const defaultCurrencyOptions = getActiveAccountCurrencyOptions(
+    snapshot.accounts,
+    snapshot.settings.defaultCurrencyCode,
+  );
+
+  function updateDefaultCurrency(defaultCurrencyCode: CurrencyCode) {
+    void onUpdateSettings({
+      defaultCurrencyCode,
+      multiCurrencyEnabled: snapshot.settings.multiCurrencyEnabled,
+      enabledCurrencyCodes: snapshot.settings.enabledCurrencyCodes,
+    });
+  }
 
   return (
     <View style={styles.stack}>
@@ -30,17 +41,17 @@ export function SettingsScreen({
 
       <Card testID="currency-settings-card">
         <Text style={styles.cardTitle}>Currency</Text>
-        <View style={styles.settingRow}>
-          <View style={styles.settingText}>
-            <Text style={styles.settingTitle}>Default currency</Text>
-            <Text style={styles.smallMuted}>
-              New accounts default to this currency, detected from your device when Rainproof is first set up.
-            </Text>
-          </View>
-          <Text style={styles.currencyBadge}>
-            {snapshot.settings.defaultCurrencyCode} {getCurrencySymbol(snapshot.settings.defaultCurrencyCode)}
-          </Text>
-        </View>
+        <CurrencyDropdown
+          label="Default currency"
+          value={snapshot.settings.defaultCurrencyCode}
+          options={defaultCurrencyOptions}
+          onChange={updateDefaultCurrency}
+          testID="default-currency-dropdown"
+        />
+        <Text style={styles.smallMuted}>
+          Used as the default for new accounts. Existing account, transaction, and budget currencies are unchanged;
+          Rainproof does not convert amounts.
+        </Text>
 
         <View style={styles.settingRow}>
           <View style={styles.settingText}>
@@ -54,16 +65,6 @@ export function SettingsScreen({
           </Text>
         </View>
 
-        <View style={styles.currencyList}>
-          {displayCurrencyCodes.map((currencyCode) => (
-            <View key={currencyCode} style={styles.currencyRow}>
-              <Text style={styles.currencyPillText}>
-                {currencyCode} {getCurrencySymbol(currencyCode)}
-              </Text>
-              <Text style={styles.smallMuted}>{getCurrencyName(currencyCode)}</Text>
-            </View>
-          ))}
-        </View>
       </Card>
 
       <Card testID="category-settings-card">
@@ -137,22 +138,6 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '900',
     textAlign: 'right',
-  },
-  currencyList: {
-    gap: spacing.sm,
-  },
-  currencyRow: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.xs,
-    padding: spacing.md,
-  },
-  currencyPillText: {
-    color: colors.ink,
-    fontSize: typography.body,
-    fontWeight: '800',
   },
   note: {
     color: colors.muted,
