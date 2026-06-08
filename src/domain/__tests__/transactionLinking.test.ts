@@ -2,6 +2,8 @@ import {
   getExpenseLinkTargetCandidates,
   getIncomeLinkTreatment,
   getIncomeLinkSourceCandidates,
+  getLinkedCounterpartDisplayLabelForEndpoint,
+  getTransactionLinkCounterpartDisplayLabel,
   getTransactionLinkEditSummary,
   getTransactionLinkSourceAmount,
 } from '../transactionLinking';
@@ -204,10 +206,65 @@ describe('transaction linking helpers', () => {
       }),
     ).toEqual({
       linked: true,
-      title: 'Paid back for: Groceries',
-      detail: 'Linked amount: AUD $25.00',
-      secondaryDetail: '',
+      title: 'Linked transaction',
+      detail: 'Paid back for: Groceries / May 17',
+      secondaryDetail: 'Linked amount: AUD $25.00',
     });
+  });
+
+  it('labels split-line linked endpoints with split item and parent context', () => {
+    const splitExpenseLine = line(
+      'expense-split-line',
+      'expense-aud',
+      -1800,
+      'AUD',
+      'food',
+      'groceries',
+    );
+
+    expect(
+      getTransactionLinkCounterpartDisplayLabel({
+        link: link({ targetLineId: 'expense-split-line' }),
+        endpoint: 'target',
+        transactions,
+        lines: [{ ...splitExpenseLine, note: 'Snacks' }],
+      }),
+    ).toBe('Snacks · Groceries / May 17');
+  });
+
+  it('uses parent fallback for blank split-line linked endpoint labels', () => {
+    expect(
+      getTransactionLinkCounterpartDisplayLabel({
+        link: link({ targetLineId: 'expense-aud-line' }),
+        endpoint: 'target',
+        transactions,
+        lines,
+      }),
+    ).toBe('Groceries / May 17');
+  });
+
+  it('does not fall back to the parent when a split-line link id cannot be resolved', () => {
+    expect(
+      getTransactionLinkCounterpartDisplayLabel({
+        link: link({ targetLineId: 'missing-line' }),
+        endpoint: 'target',
+        transactions,
+        lines,
+      }),
+    ).toBe('');
+  });
+
+  it('resolves linked-to labels from the current source or target endpoint', () => {
+    expect(
+      getLinkedCounterpartDisplayLabelForEndpoint({
+        endpoint: 'source',
+        transactionId: 'income',
+        lineId: null,
+        transactions,
+        lines,
+        transactionLinks: [link({ targetLineId: 'expense-aud-line' })],
+      }),
+    ).toBe('Groceries / May 17');
   });
 
   it('summarizes income linked to multiple expense allocations', () => {
@@ -241,9 +298,9 @@ describe('transaction linking helpers', () => {
       }),
     ).toEqual({
       linked: true,
-      title: 'Money received back: AUD $15.00',
-      detail: 'Original: AUD $40.00 / Counted in stats: AUD $25.00',
-      secondaryDetail: 'Refund: AUD $15.00',
+      title: 'Linked transaction',
+      detail: 'Refund from: Refund / May 17 / Received back: AUD $15.00',
+      secondaryDetail: 'Original: AUD $40.00 / Counted in stats: AUD $25.00',
     });
   });
 
@@ -255,7 +312,7 @@ describe('transaction linking helpers', () => {
         lines,
         transactionLinks: [link({ amountMinor: 5000 })],
         formatAmount: formatTestMoney,
-      }).detail,
+      }).secondaryDetail,
     ).toBe('Original: AUD $40.00 / Counted in stats: AUD $0.00');
   });
 });

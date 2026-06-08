@@ -537,12 +537,83 @@ describe('transaction edit helpers', () => {
         id: 'link-1',
         sourceTransactionId: 'tx-1',
         targetTransactionId: 'expense-1',
+        sourceLineId: null,
+        targetLineId: null,
         linkType: 'reimbursement',
         amountMinor: 4500,
         currencyCode: 'AUD',
       },
       targetLinkDeleteIds: [],
     });
+  });
+
+  it('preserves split-line source link identity after editing parent and split item names', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({ id: 'salary-line', amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary', note: 'Salary' }),
+        line({ id: 'bonus-line', amountMinor: 3400, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(
+      {
+        ...draft,
+        title: 'Renamed parent',
+        splitLines: draft.splitLines?.map((splitLine) =>
+          splitLine.id === 'bonus-line' ? { ...splitLine, note: 'Renamed bonus' } : splitLine,
+        ),
+      },
+      accounts,
+    );
+
+    expect(input.lines.find((inputLine) => inputLine.id === 'bonus-line')).toEqual(
+      expect.objectContaining({
+        id: 'bonus-line',
+        note: 'Renamed bonus',
+      }),
+    );
+    expect(getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({
+          sourceLineId: 'bonus-line',
+          targetLineId: 'expense-line',
+          amountMinor: 3400,
+        }),
+      ],
+    })).toEqual({
+      sourceLinkUpdate: {
+        id: 'link-1',
+        sourceTransactionId: 'tx-1',
+        targetTransactionId: 'expense-1',
+        sourceLineId: 'bonus-line',
+        targetLineId: 'expense-line',
+        linkType: 'reimbursement',
+        amountMinor: 3400,
+        currencyCode: 'AUD',
+      },
+      targetLinkDeleteIds: [],
+    });
+  });
+
+  it('keeps parent-level source links parent-level after editing', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [line({ amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' })]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({ ...draft, title: 'Renamed parent', amount: '45.00' }, accounts);
+
+    expect(getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({ sourceLineId: null, targetLineId: null })],
+    }).sourceLinkUpdate).toEqual(
+      expect.objectContaining({
+        sourceLineId: null,
+        targetLineId: null,
+      }),
+    );
   });
 
   it('plans source link deletion when edited transaction is no longer income', () => {

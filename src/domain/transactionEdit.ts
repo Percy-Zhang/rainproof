@@ -307,7 +307,10 @@ export function getTransactionEditLinkSavePlan({
   };
 
   if (existingSourceLink && input.kind === 'income') {
-    const positiveLines = input.lines.filter((line) => line.amountMinor > 0);
+    const positiveLines = input.lines.filter((line) =>
+      line.amountMinor > 0 &&
+      (!existingSourceLink.sourceLineId || line.id === existingSourceLink.sourceLineId),
+    );
     const currencyCode = positiveLines[0]?.currencyCode;
     const amountMinor = positiveLines
       .filter((line) => line.currencyCode === currencyCode)
@@ -318,10 +321,14 @@ export function getTransactionEditLinkSavePlan({
         id: existingSourceLink.id,
         sourceTransactionId: existingSourceLink.sourceTransactionId,
         targetTransactionId: existingSourceLink.targetTransactionId,
+        sourceLineId: existingSourceLink.sourceLineId ?? null,
+        targetLineId: existingSourceLink.targetLineId ?? null,
         linkType: existingSourceLink.linkType,
         amountMinor,
         currencyCode,
       };
+    } else {
+      plan.sourceLinkDeleteId = existingSourceLink.id;
     }
   } else if (existingSourceLink) {
     plan.sourceLinkDeleteId = existingSourceLink.id;

@@ -25,6 +25,7 @@ import {
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import {
   getExpenseLinkTargetCandidates,
+  getLinkedCounterpartDisplayLabelForEndpoint,
   type ExpenseLinkTargetCandidate,
 } from '../../domain/transactionLinking';
 import type {
@@ -212,6 +213,7 @@ export function IncomeLinkManager({
                 key={scope.id}
                 scope={scope}
                 snapshot={snapshot}
+                sourceTransaction={transaction}
                 selected={scope.id === selectedSourceScope.id}
                 onPress={() => setSelectedSourceScopeId(scope.id)}
               />
@@ -299,17 +301,30 @@ function SummaryItem({ label, value }: { label: string; value: string }) {
 function SourceScopeRow({
   scope,
   snapshot,
+  sourceTransaction,
   selected,
   onPress,
 }: {
   scope: TransactionLinkSourceScope;
   snapshot: AppSnapshot;
+  sourceTransaction: Transaction;
   selected: boolean;
   onPress: () => void;
 }) {
   const account = scope.line ? snapshot.accounts.find((item) => item.id === scope.line?.accountId) : undefined;
   const label = scope.line ? getLineLabel(scope.line, snapshot) : 'Whole income transaction';
   const detail = scope.line?.note || (account ? getAccountDisplayName(account) : 'All income lines');
+  const linkedDetail = scope.isLinked
+    ? getLinkedCounterpartDisplayLabelForEndpoint({
+        endpoint: 'source',
+        transactionId: sourceTransaction.id,
+        lineId: scope.sourceLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        categories: snapshot.categories,
+      })
+    : '';
 
   return (
     <Pressable
@@ -318,6 +333,7 @@ function SourceScopeRow({
       style={({ pressed }) => [
         styles.scopeRow,
         selected && styles.scopeRowSelected,
+        scope.isLinked && styles.linkedOptionRow,
         pressed && styles.pressed,
       ]}
     >
@@ -325,10 +341,17 @@ function SourceScopeRow({
       <View style={styles.scopeText}>
         <Text numberOfLines={1} style={styles.scopeTitle}>{label}</Text>
         <Text numberOfLines={1} style={styles.scopeMeta}>{detail}</Text>
+        {linkedDetail ? (
+          <Text numberOfLines={1} style={styles.linkedDetailText}>Linked to {linkedDetail}</Text>
+        ) : null}
       </View>
       <View style={styles.rowEnd}>
         {scope.isLinked ? (
-          <LinkedTransactionIndicator label testID={`linked-source-scope-${scope.id}`} />
+          <LinkedTransactionIndicator
+            label
+            labelText="Already linked"
+            testID={`linked-source-scope-${scope.id}`}
+          />
         ) : null}
         <Text style={styles.incomeAmount}>{formatMoney(scope.amountMinor, scope.currencyCode)}</Text>
       </View>
@@ -448,6 +471,17 @@ function TargetOptionRow({
   const account = snapshot.accounts.find((item) => item.id === option.accountId);
   const title = option.line ? getLineLabel(option.line, snapshot) : 'Whole transaction';
   const detail = option.line?.note || (account ? getAccountDisplayName(account) : option.disabledReason || 'Expense');
+  const linkedDetail = option.isLinked
+    ? getLinkedCounterpartDisplayLabelForEndpoint({
+        endpoint: 'target',
+        transactionId: option.transaction.id,
+        lineId: option.targetLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        categories: snapshot.categories,
+      })
+    : '';
 
   return (
     <Pressable
@@ -457,6 +491,7 @@ function TargetOptionRow({
       style={({ pressed }) => [
         styles.targetOptionRow,
         option.line && styles.targetOptionChild,
+        option.isLinked && styles.linkedOptionRow,
         !option.eligible && styles.targetOptionDisabled,
         pressed && option.eligible && styles.pressed,
       ]}
@@ -467,10 +502,17 @@ function TargetOptionRow({
         <Text numberOfLines={1} style={styles.targetOptionMeta}>
           {option.eligible ? detail : option.disabledReason}
         </Text>
+        {linkedDetail ? (
+          <Text numberOfLines={1} style={styles.linkedDetailText}>Linked to {linkedDetail}</Text>
+        ) : null}
       </View>
       <View style={styles.rowEnd}>
         {option.isLinked ? (
-          <LinkedTransactionIndicator label testID={`linked-target-option-${option.id}`} />
+          <LinkedTransactionIndicator
+            label
+            labelText="Already linked"
+            testID={`linked-target-option-${option.id}`}
+          />
         ) : null}
         <Text style={styles.expenseAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
       </View>
@@ -599,6 +641,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceMuted,
     borderColor: colors.primary,
   },
+  linkedOptionRow: {
+    borderColor: colors.primary,
+  },
   scopeText: {
     flex: 1,
     gap: spacing.xs,
@@ -613,6 +658,11 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',
+  },
+  linkedDetailText: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '800',
   },
   allocationList: {
     gap: spacing.sm,

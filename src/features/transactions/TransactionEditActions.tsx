@@ -5,6 +5,7 @@ import { formatMoney } from '../../domain/money';
 import { getTransactionLinkEditSummary } from '../../domain/transactionLinking';
 import type { AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { LinkedTransactionIndicator } from './LinkedTransactionIndicator';
 
 export function TransactionLinkEntryRow({
   snapshot,
@@ -15,16 +16,15 @@ export function TransactionLinkEntryRow({
   transactionId: string;
   onPress: () => void;
 }) {
-  const sourceLink = snapshot.transactionLinks.find((link) => link.sourceTransactionId === transactionId);
-  const targetLinks = snapshot.transactionLinks.filter((link) => link.targetTransactionId === transactionId);
   const summary = getTransactionLinkEditSummary({
     transactionId,
     transactions: snapshot.transactions,
     lines: snapshot.transactionLines,
     transactionLinks: snapshot.transactionLinks,
     formatAmount: formatMoney,
+    categories: snapshot.categories,
   });
-  const hasLinks = sourceLink || targetLinks.length > 0;
+  const hasLinks = summary.linked;
 
   return (
     <Pressable
@@ -37,7 +37,12 @@ export function TransactionLinkEntryRow({
         <Ionicons name={hasLinks ? 'link-outline' : 'add-outline'} size={18} color={colors.primaryDark} />
       </View>
       <View style={styles.linkEntryText}>
-        <Text numberOfLines={1} style={styles.linkEntryTitle}>{summary.title}</Text>
+        <View style={styles.linkEntryTitleRow}>
+          <Text numberOfLines={1} style={styles.linkEntryTitle}>{summary.title}</Text>
+          {hasLinks ? (
+            <LinkedTransactionIndicator label testID="transaction-link-entry-linked" />
+          ) : null}
+        </View>
         <Text numberOfLines={1} style={styles.linkEntryDetail}>{summary.detail}</Text>
         {summary.secondaryDetail ? (
           <Text numberOfLines={1} style={styles.linkEntryDetail}>{summary.secondaryDetail}</Text>
@@ -117,10 +122,17 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     minWidth: 0,
   },
+  linkEntryTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
   linkEntryTitle: {
     color: colors.ink,
+    flex: 1,
     fontSize: typography.body,
     fontWeight: '900',
+    minWidth: 0,
   },
   linkEntryDetail: {
     color: colors.muted,

@@ -1,7 +1,15 @@
 import { getLinkedStatsAdjustments } from './linkedStats';
 import { normalizeCurrencyCode } from './money';
+import { formatTransactionShortDate, getSplitLineChildDisplayText } from './transactionDisplay';
 import { isTransactionParentLinked } from './transactionLinks';
-import type { CurrencyCode, Transaction, TransactionLine, TransactionLink, TransactionLinkType } from './types';
+import type {
+  CategoryDefinition,
+  CurrencyCode,
+  Transaction,
+  TransactionLine,
+  TransactionLink,
+  TransactionLinkType,
+} from './types';
 
 export type IncomeLinkTreatment = TransactionLinkType | 'normal';
 
@@ -39,6 +47,8 @@ export type TransactionLinkEditSummary = {
   secondaryDetail: string;
 };
 
+type TransactionLinkEndpoint = 'source' | 'target';
+
 const linkTypeShortLabels: Record<TransactionLinkType, string> = {
   refund: 'Refund',
   reimbursement: 'Reimbursement',
@@ -49,6 +59,12 @@ const incomeLinkPrefixes: Record<TransactionLinkType, string> = {
   refund: 'Refund for',
   reimbursement: 'Paid back for',
   shared_expense_contribution: 'Contribution toward',
+};
+
+const expenseLinkPrefixes: Record<TransactionLinkType, string> = {
+  refund: 'Refund from',
+  reimbursement: 'Paid back by',
+  shared_expense_contribution: 'Contribution from',
 };
 
 export function getIncomeLinkTreatment(
@@ -228,12 +244,14 @@ export function getTransactionLinkEditSummary({
   lines,
   transactionLinks,
   formatAmount,
+  categories,
 }: {
   transactionId: string;
   transactions: Transaction[];
   lines: TransactionLine[];
   transactionLinks: TransactionLink[];
   formatAmount: (amountMinor: number, currencyCode: CurrencyCode) => string;
+  categories?: CategoryDefinition[];
 }): TransactionLinkEditSummary {
   const transaction = transactions.find((item) => item.id === transactionId);
 
@@ -243,7 +261,7 @@ export function getTransactionLinkEditSummary({
       return {
         linked: false,
         title: 'Link to expense',
-        detail: 'Refunds, reimbursements, shared costs',
+        detail: 'No linked expense yet. Add refunds, reimbursements, or shared costs.',
         secondaryDetail: '',
       };
     }
@@ -253,14 +271,22 @@ export function getTransactionLinkEditSummary({
     const linkedAmountMinor = sourceLinks
       .filter((link) => normalizeCurrencyCode(link.currencyCode) === normalizeCurrencyCode(currencyCode))
       .reduce((sum, link) => sum + link.amountMinor, 0);
-    const target = transactions.find((item) => item.id === sourceLink.targetTransactionId);
+    const targetLabel = getTransactionLinkCounterpartDisplayLabel({
+      link: sourceLink,
+      endpoint: 'target',
+      transactions,
+      lines,
+      categories,
+    });
     return {
       linked: true,
-      title: sourceLinks.length === 1
-        ? `${incomeLinkPrefixes[sourceLink.linkType]}: ${target?.title || 'expense'}`
-        : `Linked to ${sourceLinks.length} expenses`,
-      detail: `Linked amount: ${formatAmount(linkedAmountMinor, currencyCode)}`,
-      secondaryDetail: sourceLinks.length > 1 ? getLinkTypeAmountSummary(sourceLinks, currencyCode, formatAmount) : '',
+      title: sourceLinks.length === 1 ? 'Linked transaction' : `Linked to ${sourceLinks.length} expenses`,
+      detail: sourceLinks.length === 1
+        ? `${incomeLinkPrefixes[sourceLink.linkType]}: ${targetLabel || 'expense'}`
+        : `Linked amount: ${formatAmount(linkedAmountMinor, currencyCode)}`,
+      secondaryDetail: sourceLinks.length === 1
+        ? `Linked amount: ${formatAmount(linkedAmountMinor, currencyCode)}`
+        : getLinkTypeAmountSummary(sourceLinks, currencyCode, formatAmount),
     };
   }
 
@@ -270,7 +296,7 @@ export function getTransactionLinkEditSummary({
       return {
         linked: false,
         title: 'Link money received',
-        detail: 'Refunds, reimbursements, shared costs',
+        detail: 'No linked money received yet. Add refunds, reimbursements, or shared costs.',
         secondaryDetail: '',
       };
     }
@@ -294,12 +320,24 @@ export function getTransactionLinkEditSummary({
         0,
       );
     const typeSummary = getLinkTypeAmountSummary(targetLinks, currencyCode, formatAmount);
+    const sourceLabel = getTransactionLinkCounterpartDisplayLabel({
+      link: targetLinks[0],
+      endpoint: 'source',
+      transactions,
+      lines,
+      categories,
+    });
 
     return {
       linked: true,
-      title: `Money received back: ${formatAmount(linkedAmountMinor, currencyCode)}`,
-      detail: `Original: ${formatAmount(originalAmountMinor, currencyCode)} / Counted in stats: ${formatAmount(countedAmountMinor, currencyCode)}`,
-      secondaryDetail: typeSummary,
+      title: targetLinks.length === 1 ? 'Linked transaction' : `Linked to ${targetLinks.length} incoming payments`,
+      detail: targetLinks.length === 1
+        ? `${expenseLinkPrefixes[targetLinks[0].linkType]}: ${sourceLabel || 'income'} / Received back: ${formatAmount(linkedAmountMinor, currencyCode)}`
+        : `Money received back: ${formatAmount(linkedAmountMinor, currencyCode)}`,
+      secondaryDetail: [
+        `Original: ${formatAmount(originalAmountMinor, currencyCode)} / Counted in stats: ${formatAmount(countedAmountMinor, currencyCode)}`,
+        targetLinks.length > 1 ? typeSummary : '',
+      ].filter(Boolean).join(' / '),
     };
   }
 
@@ -309,6 +347,132 @@ export function getTransactionLinkEditSummary({
     detail: 'Transfers cannot be linked',
     secondaryDetail: '',
   };
+}
+
+export function getTransactionLinkCounterpartDisplayLabel({
+  link,
+  endpoint,
+  transactions,
+  lines,
+  categories,
+}: {
+  link: TransactionLink;
+  endpoint: TransactionLinkEndpoint;
+  transactions: Transaction[];
+  lines: TransactionLine[];
+  categories?: CategoryDefinition[];
+}): string {
+  const transactionId = endpoint === 'source' ? link.sourceTransactionId : link.targetTransactionId;
+  const lineId = endpoint === 'source' ? link.sourceLineId : link.targetLineId;
+
+  return getTransactionLinkEndpointDisplayLabel({
+    transactionId,
+    lineId,
+    transactions,
+    lines,
+    categories,
+  });
+}
+
+export function getLinkedCounterpartDisplayLabelForEndpoint({
+  endpoint,
+  transactionId,
+  lineId,
+  transactions,
+  lines,
+  transactionLinks,
+  categories,
+}: {
+  endpoint: TransactionLinkEndpoint;
+  transactionId: string;
+  lineId?: string | null;
+  transactions: Transaction[];
+  lines: TransactionLine[];
+  transactionLinks: TransactionLink[];
+  categories?: CategoryDefinition[];
+}): string {
+  const normalizedLineId = normalizeOptionalId(lineId);
+  const link = transactionLinks.find((candidate) => {
+    if (endpoint === 'source') {
+      return candidate.sourceTransactionId === transactionId &&
+        normalizeOptionalId(candidate.sourceLineId) === normalizedLineId;
+    }
+
+    return candidate.targetTransactionId === transactionId &&
+      normalizeOptionalId(candidate.targetLineId) === normalizedLineId;
+  });
+
+  if (!link) {
+    return '';
+  }
+
+  return getTransactionLinkCounterpartDisplayLabel({
+    link,
+    endpoint: endpoint === 'source' ? 'target' : 'source',
+    transactions,
+    lines,
+    categories,
+  });
+}
+
+function getTransactionLinkEndpointDisplayLabel({
+  transactionId,
+  lineId,
+  transactions,
+  lines,
+  categories,
+}: {
+  transactionId: string;
+  lineId?: string | null;
+  transactions: Transaction[];
+  lines: TransactionLine[];
+  categories?: CategoryDefinition[];
+}): string {
+  const transaction = transactions.find((item) => item.id === transactionId);
+  if (!transaction) {
+    return '';
+  }
+
+  const normalizedLineId = normalizeOptionalId(lineId);
+  if (normalizedLineId) {
+    const line = lines.find((item) => item.id === normalizedLineId && item.transactionId === transactionId);
+    if (!line) {
+      return '';
+    }
+
+    return `${getSplitLineLinkLabel(line, transaction, categories)} / ${formatTransactionShortDate(transaction.datetime)}`;
+  }
+
+  return `${getParentTransactionLabel(transaction)} / ${formatTransactionShortDate(transaction.datetime)}`;
+}
+
+function getSplitLineLinkLabel(
+  line: TransactionLine,
+  transaction: Transaction,
+  categories?: CategoryDefinition[],
+): string {
+  const parentLabel = getParentTransactionLabel(transaction);
+  const splitDisplayText = getSplitLineChildDisplayText(line, parentLabel, categories);
+  const lineItemLabel = line.note.trim() || splitDisplayText.secondaryText || splitDisplayText.title;
+
+  if (!parentLabel || isSameDisplayText(lineItemLabel, parentLabel)) {
+    return lineItemLabel;
+  }
+
+  return `${lineItemLabel} · ${parentLabel}`;
+}
+
+function getParentTransactionLabel(transaction: Transaction): string {
+  return transaction.title.trim() || transaction.kind;
+}
+
+function isSameDisplayText(left: string, right: string): boolean {
+  return left.trim().toLocaleLowerCase() === right.trim().toLocaleLowerCase();
+}
+
+function normalizeOptionalId(value: string | null | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed || null;
 }
 
 function getLinkTypeAmountSummary(

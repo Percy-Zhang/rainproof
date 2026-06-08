@@ -6,12 +6,14 @@ import { colors, spacing, typography } from '../../theme/tokens';
 type LinkedTransactionIndicatorProps = {
   compact?: boolean;
   label?: boolean;
+  labelText?: string;
   testID?: string;
 };
 
 export function LinkedTransactionIndicator({
   compact = false,
   label = false,
+  labelText = 'Linked',
   testID,
 }: LinkedTransactionIndicatorProps) {
   return (
@@ -27,7 +29,7 @@ export function LinkedTransactionIndicator({
       testID={testID}
     >
       <Ionicons name="link-outline" size={compact ? 12 : 13} color={colors.primaryDark} />
-      {label ? <Text style={styles.label}>Linked</Text> : null}
+      {label ? <Text style={styles.label}>{labelText}</Text> : null}
     </View>
   );
 }
