@@ -11,7 +11,7 @@ import {
 } from '../../domain/categories';
 import { formatMoney } from '../../domain/money';
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
-import { getLinkedCounterpartDisplayLabelForEndpoint } from '../../domain/transactionLinking';
+import { getLinkedCounterpartDisplayForEndpoint } from '../../domain/transactionLinking';
 import type {
   ExpenseLinkTargetCandidate,
   IncomeLinkSourceCandidate,
@@ -39,8 +39,9 @@ export function ExpenseTargetRow({
   const color = getSubcategoryColor(candidate.categoryId, candidate.subcategoryId, categories);
   const icon = getSubcategoryIcon(candidate.categoryId, candidate.subcategoryId, categories);
   const subcategoryName = getSubcategoryName(candidate.categoryId, candidate.subcategoryId, categories);
-  const linkedDetail = candidate.isLinked
-    ? getLinkedCounterpartDisplayLabelForEndpoint({
+  const dateLabel = formatTransactionShortDate(candidate.transaction.datetime);
+  const linkedDisplay = candidate.isLinked
+    ? getLinkedCounterpartDisplayForEndpoint({
         endpoint: 'target',
         transactionId: candidate.transaction.id,
         lineId: null,
@@ -49,7 +50,7 @@ export function ExpenseTargetRow({
         transactionLinks: snapshot.transactionLinks,
         categories,
       })
-    : '';
+    : null;
 
   return (
     <Pressable
@@ -66,26 +67,14 @@ export function ExpenseTargetRow({
     >
       <CategoryIconBadge color={color} icon={icon} size="md" />
       <View style={styles.targetText}>
-        <View style={styles.targetTitleRow}>
-          <Text numberOfLines={1} style={styles.targetTitle}>
-            {candidate.transaction.title || subcategoryName}
-          </Text>
-          {candidate.isLinked ? (
-            <LinkedTransactionIndicator
-              label
-              labelText="Already linked"
-              testID={`linked-expense-target-${candidate.transaction.id}`}
-            />
-          ) : null}
-          <Text style={styles.targetAmount}>
-            {formatMoney(candidate.amountMinor, candidate.currencyCode)}
-          </Text>
-        </View>
-        <Text numberOfLines={1} style={styles.targetMeta}>
-          {formatTransactionShortDate(candidate.transaction.datetime)} / {subcategoryName || category.name}
+        <Text numberOfLines={1} style={styles.targetTitle}>
+          {candidate.transaction.title || subcategoryName}
         </Text>
-        {linkedDetail ? (
-          <Text numberOfLines={1} style={styles.targetLinkedMeta}>Linked to {linkedDetail}</Text>
+        <Text numberOfLines={1} style={styles.targetMeta}>
+          {subcategoryName || category.name}
+        </Text>
+        {linkedDisplay?.title ? (
+          <LinkedItemMeta title={linkedDisplay.title} testID={`linked-expense-target-detail-${candidate.transaction.id}`} />
         ) : null}
         <View style={styles.accountMetaRow}>
           {account ? <AccountIconBadge account={account} size="sm" /> : null}
@@ -94,6 +83,12 @@ export function ExpenseTargetRow({
             {candidate.eligible ? '' : ` / ${candidate.disabledReason}`}
           </Text>
         </View>
+      </View>
+      <View style={styles.targetEnd}>
+        <Text style={styles.targetAmount}>
+          {formatMoney(candidate.amountMinor, candidate.currencyCode)}
+        </Text>
+        <Text style={styles.targetDate}>{dateLabel}</Text>
       </View>
     </Pressable>
   );
@@ -107,8 +102,9 @@ type IncomeSourceRowProps = {
 
 export function IncomeSourceRow({ candidate, snapshot, onPress }: IncomeSourceRowProps) {
   const account = snapshot.accounts.find((item) => item.id === candidate.accountId);
-  const linkedDetail = candidate.isLinked
-    ? getLinkedCounterpartDisplayLabelForEndpoint({
+  const dateLabel = formatTransactionShortDate(candidate.transaction.datetime);
+  const linkedDisplay = candidate.isLinked
+    ? getLinkedCounterpartDisplayForEndpoint({
         endpoint: 'source',
         transactionId: candidate.transaction.id,
         lineId: null,
@@ -117,7 +113,7 @@ export function IncomeSourceRow({ candidate, snapshot, onPress }: IncomeSourceRo
         transactionLinks: snapshot.transactionLinks,
         categories: snapshot.categories,
       })
-    : '';
+    : null;
 
   return (
     <Pressable
@@ -133,33 +129,33 @@ export function IncomeSourceRow({ candidate, snapshot, onPress }: IncomeSourceRo
     >
       <AccountIconBadge account={account} size="md" />
       <View style={styles.targetText}>
-        <View style={styles.targetTitleRow}>
-          <Text numberOfLines={1} style={styles.targetTitle}>
-            {candidate.transaction.title || 'Income'}
-          </Text>
-          {candidate.isLinked ? (
-            <LinkedTransactionIndicator
-              label
-              labelText="Already linked"
-              testID={`linked-income-source-${candidate.transaction.id}`}
-            />
-          ) : null}
-          <Text style={[styles.targetAmount, styles.incomeAmount]}>
-            {formatMoney(candidate.amountMinor, candidate.currencyCode)}
-          </Text>
-        </View>
-        <Text numberOfLines={1} style={styles.targetMeta}>
-          {formatTransactionShortDate(candidate.transaction.datetime)}
+        <Text numberOfLines={1} style={styles.targetTitle}>
+          {candidate.transaction.title || 'Income'}
         </Text>
-        {linkedDetail ? (
-          <Text numberOfLines={1} style={styles.targetLinkedMeta}>Linked to {linkedDetail}</Text>
+        {linkedDisplay?.title ? (
+          <LinkedItemMeta title={linkedDisplay.title} testID={`linked-income-source-detail-${candidate.transaction.id}`} />
         ) : null}
         <Text numberOfLines={1} style={styles.targetMeta}>
           {account ? getAccountDisplayName(account) : 'Account'}
           {candidate.eligible ? '' : ` / ${candidate.disabledReason}`}
         </Text>
       </View>
+      <View style={styles.targetEnd}>
+        <Text style={[styles.targetAmount, styles.incomeAmount]}>
+          {formatMoney(candidate.amountMinor, candidate.currencyCode)}
+        </Text>
+        <Text style={styles.targetDate}>{dateLabel}</Text>
+      </View>
     </Pressable>
+  );
+}
+
+function LinkedItemMeta({ title, testID }: { title: string; testID: string }) {
+  return (
+    <View style={styles.linkedMetaRow} testID={testID}>
+      <LinkedTransactionIndicator compact />
+      <Text numberOfLines={1} style={styles.targetLinkedMeta}>{title}</Text>
+    </View>
   );
 }
 
@@ -189,22 +185,25 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     minWidth: 0,
   },
-  targetTitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
   targetTitle: {
     color: colors.ink,
-    flex: 1,
     fontSize: typography.body,
     fontWeight: '900',
-    minWidth: 0,
   },
   targetAmount: {
     color: colors.danger,
     fontSize: typography.small,
     fontWeight: '900',
+  },
+  targetEnd: {
+    alignItems: 'flex-end',
+    flexShrink: 0,
+    gap: spacing.xs,
+  },
+  targetDate: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
   },
   incomeAmount: {
     color: colors.success,
@@ -218,8 +217,16 @@ const styles = StyleSheet.create({
   },
   targetLinkedMeta: {
     color: colors.primaryDark,
+    flex: 1,
     fontSize: typography.small,
     fontWeight: '800',
+    minWidth: 0,
+  },
+  linkedMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minWidth: 0,
   },
   accountMetaRow: {
     alignItems: 'center',

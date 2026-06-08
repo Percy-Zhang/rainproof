@@ -2,6 +2,7 @@ import { getLinkedStatsAdjustments } from './linkedStats';
 import { normalizeCurrencyCode } from './money';
 import { formatTransactionShortDate, getSplitLineChildDisplayText } from './transactionDisplay';
 import { isTransactionParentLinked } from './transactionLinks';
+import { getSubcategory } from './categories';
 import type {
   CategoryDefinition,
   CurrencyCode,
@@ -48,6 +49,15 @@ export type TransactionLinkEditSummary = {
 };
 
 type TransactionLinkEndpoint = 'source' | 'target';
+
+export type TransactionLinkEndpointDisplay = {
+  kind: 'parent' | 'split-line' | 'missing';
+  title: string;
+  metadata: string;
+  dateLabel: string;
+  context: string;
+  label: string;
+};
 
 const linkTypeShortLabels: Record<TransactionLinkType, string> = {
   refund: 'Refund',
@@ -365,13 +375,13 @@ export function getTransactionLinkCounterpartDisplayLabel({
   const transactionId = endpoint === 'source' ? link.sourceTransactionId : link.targetTransactionId;
   const lineId = endpoint === 'source' ? link.sourceLineId : link.targetLineId;
 
-  return getTransactionLinkEndpointDisplayLabel({
+  return getTransactionLinkEndpointDisplay({
     transactionId,
     lineId,
     transactions,
     lines,
     categories,
-  });
+  }).label;
 }
 
 export function getLinkedCounterpartDisplayLabelForEndpoint({
@@ -415,7 +425,50 @@ export function getLinkedCounterpartDisplayLabelForEndpoint({
   });
 }
 
-function getTransactionLinkEndpointDisplayLabel({
+export function getLinkedCounterpartDisplayForEndpoint({
+  endpoint,
+  transactionId,
+  lineId,
+  transactions,
+  lines,
+  transactionLinks,
+  categories,
+}: {
+  endpoint: TransactionLinkEndpoint;
+  transactionId: string;
+  lineId?: string | null;
+  transactions: Transaction[];
+  lines: TransactionLine[];
+  transactionLinks: TransactionLink[];
+  categories?: CategoryDefinition[];
+}): TransactionLinkEndpointDisplay {
+  const normalizedLineId = normalizeOptionalId(lineId);
+  const link = transactionLinks.find((candidate) => {
+    if (endpoint === 'source') {
+      return candidate.sourceTransactionId === transactionId &&
+        normalizeOptionalId(candidate.sourceLineId) === normalizedLineId;
+    }
+
+    return candidate.targetTransactionId === transactionId &&
+      normalizeOptionalId(candidate.targetLineId) === normalizedLineId;
+  });
+
+  if (!link) {
+    return missingTransactionLinkEndpointDisplay;
+  }
+
+  const counterpartTransactionId = endpoint === 'source' ? link.targetTransactionId : link.sourceTransactionId;
+  const counterpartLineId = endpoint === 'source' ? link.targetLineId : link.sourceLineId;
+  return getTransactionLinkEndpointDisplay({
+    transactionId: counterpartTransactionId,
+    lineId: counterpartLineId,
+    transactions,
+    lines,
+    categories,
+  });
+}
+
+export function getTransactionLinkEndpointDisplay({
   transactionId,
   lineId,
   transactions,
@@ -427,39 +480,78 @@ function getTransactionLinkEndpointDisplayLabel({
   transactions: Transaction[];
   lines: TransactionLine[];
   categories?: CategoryDefinition[];
-}): string {
+}): TransactionLinkEndpointDisplay {
   const transaction = transactions.find((item) => item.id === transactionId);
   if (!transaction) {
-    return '';
+    return missingTransactionLinkEndpointDisplay;
   }
 
   const normalizedLineId = normalizeOptionalId(lineId);
+  const dateLabel = formatTransactionShortDate(transaction.datetime);
   if (normalizedLineId) {
     const line = lines.find((item) => item.id === normalizedLineId && item.transactionId === transactionId);
     if (!line) {
-      return '';
+      return missingTransactionLinkEndpointDisplay;
     }
 
-    return `${getSplitLineLinkLabel(line, transaction, categories)} / ${formatTransactionShortDate(transaction.datetime)}`;
+    const title = getSplitLineLinkTitle(line, transaction, categories);
+    const parentLabel = getParentTransactionLabel(transaction);
+    const context = getSplitLineMetadataContext(line, title, parentLabel, categories);
+    const parentContext = parentLabel && !isSameDisplayText(title, parentLabel) ? parentLabel : '';
+    const labelTitle = parentContext ? `${title} · ${parentLabel}` : title;
+
+    return {
+      kind: 'split-line',
+      title,
+      metadata: context,
+      dateLabel,
+      context: [context, dateLabel].filter(Boolean).join(' / '),
+      label: [labelTitle, dateLabel].filter(Boolean).join(' / '),
+    };
   }
 
-  return `${getParentTransactionLabel(transaction)} / ${formatTransactionShortDate(transaction.datetime)}`;
+  const title = getParentTransactionLabel(transaction);
+  return {
+    kind: 'parent',
+    title,
+    metadata: '',
+    dateLabel,
+    context: dateLabel,
+    label: [title, dateLabel].filter(Boolean).join(' / '),
+  };
 }
 
-function getSplitLineLinkLabel(
+const missingTransactionLinkEndpointDisplay: TransactionLinkEndpointDisplay = {
+  kind: 'missing',
+  title: '',
+  metadata: '',
+  dateLabel: '',
+  context: '',
+  label: '',
+};
+
+function getSplitLineLinkTitle(
   line: TransactionLine,
   transaction: Transaction,
   categories?: CategoryDefinition[],
 ): string {
   const parentLabel = getParentTransactionLabel(transaction);
   const splitDisplayText = getSplitLineChildDisplayText(line, parentLabel, categories);
-  const lineItemLabel = line.note.trim() || splitDisplayText.secondaryText || splitDisplayText.title;
+  return line.note.trim() || splitDisplayText.title;
+}
 
-  if (!parentLabel || isSameDisplayText(lineItemLabel, parentLabel)) {
-    return lineItemLabel;
+function getSplitLineMetadataContext(
+  line: TransactionLine,
+  title: string,
+  parentLabel: string,
+  categories?: CategoryDefinition[],
+): string {
+  const subcategoryName = getSubcategory(line.categoryId, line.subcategoryId, categories)?.name.trim() ?? '';
+  if (subcategoryName) {
+    return isSameDisplayText(subcategoryName, title) ? '' : subcategoryName;
   }
 
-  return `${lineItemLabel} · ${parentLabel}`;
+  return parentLabel && !isSameDisplayText(parentLabel, title) ? parentLabel : '';
 }
 
 function getParentTransactionLabel(transaction: Transaction): string {

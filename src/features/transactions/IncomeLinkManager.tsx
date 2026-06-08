@@ -4,10 +4,8 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { getAccountDisplayName } from '../../domain/accountThemes';
 import {
-  getCategory,
   getSubcategoryColor,
   getSubcategoryIcon,
-  getSubcategoryName,
 } from '../../domain/categories';
 import { formatMoney } from '../../domain/money';
 import {
@@ -25,7 +23,8 @@ import {
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import {
   getExpenseLinkTargetCandidates,
-  getLinkedCounterpartDisplayLabelForEndpoint,
+  getLinkedCounterpartDisplayForEndpoint,
+  getTransactionLinkEndpointDisplay,
   type ExpenseLinkTargetCandidate,
 } from '../../domain/transactionLinking';
 import type {
@@ -106,12 +105,6 @@ export function IncomeLinkManager({
       setSelectedSourceScopeId(sourceScopes[0].id);
     }
   }, [selectedSourceScopeId, sourceScopes]);
-
-  function updateAllocation(allocationId: string, patch: Partial<TransactionLinkAllocationDraft>) {
-    setAllocations((current) =>
-      current.map((allocation) => (allocation.id === allocationId ? { ...allocation, ...patch } : allocation)),
-    );
-  }
 
   function removeAllocation(allocationId: string) {
     setAllocations((current) => current.filter((allocation) => allocation.id !== allocationId));
@@ -232,7 +225,6 @@ export function IncomeLinkManager({
                 allocation={allocation}
                 snapshot={snapshot}
                 sourceTransaction={transaction}
-                onChangeAmount={(amount) => updateAllocation(allocation.id, { amount })}
                 onRemove={() => removeAllocation(allocation.id)}
               />
             ))}
@@ -312,10 +304,20 @@ function SourceScopeRow({
   onPress: () => void;
 }) {
   const account = scope.line ? snapshot.accounts.find((item) => item.id === scope.line?.accountId) : undefined;
-  const label = scope.line ? getLineLabel(scope.line, snapshot) : 'Whole income transaction';
-  const detail = scope.line?.note || (account ? getAccountDisplayName(account) : 'All income lines');
-  const linkedDetail = scope.isLinked
-    ? getLinkedCounterpartDisplayLabelForEndpoint({
+  const sourceDisplay = scope.line
+    ? getTransactionLinkEndpointDisplay({
+        transactionId: sourceTransaction.id,
+        lineId: scope.sourceLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        categories: snapshot.categories,
+      })
+    : null;
+  const label = sourceDisplay?.title || 'Whole income transaction';
+  const detail = sourceDisplay?.metadata || scope.line?.note || (account ? getAccountDisplayName(account) : 'All income lines');
+  const dateLabel = sourceDisplay?.dateLabel || formatTransactionShortDate(sourceTransaction.datetime);
+  const linkedDisplay = scope.isLinked
+    ? getLinkedCounterpartDisplayForEndpoint({
         endpoint: 'source',
         transactionId: sourceTransaction.id,
         lineId: scope.sourceLineId,
@@ -324,7 +326,7 @@ function SourceScopeRow({
         transactionLinks: snapshot.transactionLinks,
         categories: snapshot.categories,
       })
-    : '';
+    : null;
 
   return (
     <Pressable
@@ -341,19 +343,13 @@ function SourceScopeRow({
       <View style={styles.scopeText}>
         <Text numberOfLines={1} style={styles.scopeTitle}>{label}</Text>
         <Text numberOfLines={1} style={styles.scopeMeta}>{detail}</Text>
-        {linkedDetail ? (
-          <Text numberOfLines={1} style={styles.linkedDetailText}>Linked to {linkedDetail}</Text>
+        {linkedDisplay?.title ? (
+          <LinkedItemMeta title={linkedDisplay.title} testID={`linked-source-scope-detail-${scope.id}`} />
         ) : null}
       </View>
       <View style={styles.rowEnd}>
-        {scope.isLinked ? (
-          <LinkedTransactionIndicator
-            label
-            labelText="Already linked"
-            testID={`linked-source-scope-${scope.id}`}
-          />
-        ) : null}
         <Text style={styles.incomeAmount}>{formatMoney(scope.amountMinor, scope.currencyCode)}</Text>
+        <Text style={styles.rowDate}>{dateLabel}</Text>
       </View>
     </Pressable>
   );
@@ -363,34 +359,49 @@ function AllocationRow({
   allocation,
   snapshot,
   sourceTransaction,
-  onChangeAmount,
   onRemove,
 }: {
   allocation: TransactionLinkAllocationDraft;
   snapshot: AppSnapshot;
   sourceTransaction: Transaction;
-  onChangeAmount: (amount: string) => void;
   onRemove: () => void;
 }) {
   const targetTransaction = snapshot.transactions.find((transaction) => transaction.id === allocation.targetTransactionId);
   const targetLine = allocation.targetLineId
     ? snapshot.transactionLines.find((line) => line.id === allocation.targetLineId)
     : undefined;
-  const sourceLine = allocation.sourceLineId
-    ? snapshot.transactionLines.find((line) => line.id === allocation.sourceLineId)
-    : undefined;
-  const title = targetTransaction?.title || 'Expense';
-  const targetDetail = targetLine ? getLineLabel(targetLine, snapshot) : 'Whole transaction';
-  const sourceDetail = sourceLine ? getLineLabel(sourceLine, snapshot) : sourceTransaction.title || 'Whole income';
+  const targetDisplay = getTransactionLinkEndpointDisplay({
+    transactionId: allocation.targetTransactionId,
+    lineId: allocation.targetLineId,
+    transactions: snapshot.transactions,
+    lines: snapshot.transactionLines,
+    categories: snapshot.categories,
+  });
+  const sourceDisplay = getTransactionLinkEndpointDisplay({
+    transactionId: sourceTransaction.id,
+    lineId: allocation.sourceLineId,
+    transactions: snapshot.transactions,
+    lines: snapshot.transactionLines,
+    categories: snapshot.categories,
+  });
+  const title = targetDisplay.kind === 'missing' ? 'Linked item unavailable' : targetDisplay.title || targetTransaction?.title || 'Expense';
+  const targetDetail = targetDisplay.kind === 'missing' ? 'Could not resolve linked expense' : targetDisplay.metadata || 'Whole transaction';
+  const sourceDetail = sourceDisplay.kind === 'missing' ? 'income unavailable' : sourceDisplay.label || sourceTransaction.title || 'Whole income';
 
   return (
     <View style={styles.allocationRow}>
       <View style={styles.allocationHeader}>
         {targetLine ? <LineIcon line={targetLine} snapshot={snapshot} size="sm" /> : null}
         <View style={styles.allocationText}>
-          <Text numberOfLines={1} style={styles.allocationTitle}>{title}</Text>
+          <View style={styles.allocationTitleRow}>
+            <LinkedTransactionIndicator compact />
+            <Text numberOfLines={1} style={styles.allocationTitle}>{title}</Text>
+          </View>
           <Text numberOfLines={1} style={styles.allocationMeta}>
             {targetDetail} / From {sourceDetail} / {getTransactionLinkTypeShortLabel(allocation.linkType)}
+          </Text>
+          <Text numberOfLines={1} style={styles.allocationAmount}>
+            {formatMoney(getAllocationAmountMinor(allocation), allocation.currencyCode)}
           </Text>
         </View>
         <Pressable
@@ -401,14 +412,6 @@ function AllocationRow({
           <Text style={styles.smallDangerText}>Remove</Text>
         </Pressable>
       </View>
-      <InlineField
-        label="Amount"
-        value={allocation.amount}
-        onChange={onChangeAmount}
-        placeholder="0.00"
-        keyboardType="decimal-pad"
-        rightLabel={formatMoney(getAllocationAmountMinor(allocation), allocation.currencyCode)}
-      />
     </View>
   );
 }
@@ -449,9 +452,6 @@ function TargetCandidateOptions({
 
   return (
     <View style={styles.targetGroup}>
-      <Text numberOfLines={1} style={styles.targetGroupTitle}>
-        {candidate.transaction.title || 'Expense'} / {formatTransactionShortDate(candidate.transaction.datetime)}
-      </Text>
       {options.map((option) => (
         <TargetOptionRow key={option.id} option={option} snapshot={snapshot} onPress={() => onSelect(option)} />
       ))}
@@ -469,10 +469,20 @@ function TargetOptionRow({
   onPress: () => void;
 }) {
   const account = snapshot.accounts.find((item) => item.id === option.accountId);
-  const title = option.line ? getLineLabel(option.line, snapshot) : 'Whole transaction';
-  const detail = option.line?.note || (account ? getAccountDisplayName(account) : option.disabledReason || 'Expense');
-  const linkedDetail = option.isLinked
-    ? getLinkedCounterpartDisplayLabelForEndpoint({
+  const targetDisplay = option.line
+    ? getTransactionLinkEndpointDisplay({
+        transactionId: option.transaction.id,
+        lineId: option.targetLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        categories: snapshot.categories,
+      })
+    : null;
+  const title = targetDisplay?.title || option.transaction.title || 'Expense';
+  const detail = targetDisplay?.metadata || option.line?.note || (account ? getAccountDisplayName(account) : option.disabledReason || 'Expense');
+  const dateLabel = targetDisplay?.dateLabel || formatTransactionShortDate(option.transaction.datetime);
+  const linkedDisplay = option.isLinked
+    ? getLinkedCounterpartDisplayForEndpoint({
         endpoint: 'target',
         transactionId: option.transaction.id,
         lineId: option.targetLineId,
@@ -481,7 +491,7 @@ function TargetOptionRow({
         transactionLinks: snapshot.transactionLinks,
         categories: snapshot.categories,
       })
-    : '';
+    : null;
 
   return (
     <Pressable
@@ -502,21 +512,24 @@ function TargetOptionRow({
         <Text numberOfLines={1} style={styles.targetOptionMeta}>
           {option.eligible ? detail : option.disabledReason}
         </Text>
-        {linkedDetail ? (
-          <Text numberOfLines={1} style={styles.linkedDetailText}>Linked to {linkedDetail}</Text>
+        {linkedDisplay?.title ? (
+          <LinkedItemMeta title={linkedDisplay.title} testID={`linked-target-option-detail-${option.id}`} />
         ) : null}
       </View>
       <View style={styles.rowEnd}>
-        {option.isLinked ? (
-          <LinkedTransactionIndicator
-            label
-            labelText="Already linked"
-            testID={`linked-target-option-${option.id}`}
-          />
-        ) : null}
         <Text style={styles.expenseAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
+        <Text style={styles.rowDate}>{dateLabel}</Text>
       </View>
     </Pressable>
+  );
+}
+
+function LinkedItemMeta({ title, testID }: { title: string; testID: string }) {
+  return (
+    <View style={styles.linkedMetaRow} testID={testID}>
+      <LinkedTransactionIndicator compact />
+      <Text numberOfLines={1} style={styles.linkedDetailText}>{title}</Text>
+    </View>
   );
 }
 
@@ -539,11 +552,6 @@ function LineIcon({
   const icon = getSubcategoryIcon(categoryId, subcategoryId, snapshot.categories);
 
   return <CategoryIconBadge color={color} icon={icon} size={size} />;
-}
-
-function getLineLabel(line: { categoryId: string; subcategoryId: string }, snapshot: AppSnapshot): string {
-  const category = getCategory(line.categoryId, snapshot.categories);
-  return getSubcategoryName(line.categoryId, line.subcategoryId, snapshot.categories) || category.name || 'Split line';
 }
 
 const styles = StyleSheet.create({
@@ -628,7 +636,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   scopeRow: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: colors.background,
     borderColor: colors.faint,
     borderRadius: 8,
@@ -661,8 +669,16 @@ const styles = StyleSheet.create({
   },
   linkedDetailText: {
     color: colors.primaryDark,
+    flex: 1,
     fontSize: typography.small,
     fontWeight: '800',
+    minWidth: 0,
+  },
+  linkedMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minWidth: 0,
   },
   allocationList: {
     gap: spacing.sm,
@@ -687,13 +703,26 @@ const styles = StyleSheet.create({
   },
   allocationTitle: {
     color: colors.ink,
+    flex: 1,
     fontSize: typography.body,
     fontWeight: '900',
+    minWidth: 0,
+  },
+  allocationTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minWidth: 0,
   },
   allocationMeta: {
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',
+  },
+  allocationAmount: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
   },
   searchResults: {
     gap: spacing.sm,
@@ -701,13 +730,8 @@ const styles = StyleSheet.create({
   targetGroup: {
     gap: spacing.xs,
   },
-  targetGroupTitle: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '900',
-  },
   targetOptionRow: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: colors.background,
     borderColor: colors.faint,
     borderRadius: 8,
@@ -741,6 +765,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     flexShrink: 0,
     gap: spacing.xs,
+  },
+  rowDate: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
   },
   incomeAmount: {
     color: colors.success,

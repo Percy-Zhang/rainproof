@@ -2,27 +2,23 @@ import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoney } from '../../domain/money';
-import { formatTransactionShortDate } from '../../domain/transactionDisplay';
-import {
-  getCategory,
-  getSubcategoryName,
-} from '../../domain/categories';
 import {
   getExpenseLinkTargetMoney,
   getIncomeLinkSourceCandidates,
+  getTransactionLinkEndpointDisplay,
   type IncomeLinkSourceCandidate,
 } from '../../domain/transactionLinking';
 import type {
   AppSnapshot,
   NewTransactionLinkInput,
   Transaction,
-  TransactionLink,
   TransactionLinkType,
   UpdateTransactionLinkInput,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { InlineField } from './TransactionFormComponents';
 import { IncomeSourceRow } from './TransactionLinkCandidateRows';
+import { LinkedTransactionIndicator } from './LinkedTransactionIndicator';
 import {
   getTransactionLinkTypeShortLabel,
   transactionLinkTypeOptions,
@@ -116,18 +112,43 @@ export function ExpenseLinkManager({
           <Text style={styles.sectionTitle}>Linked money received</Text>
           <View style={styles.linkSummaryList}>
             {targetLinks.map((link) => {
-              const source = snapshot.transactions.find((item) => item.id === link.sourceTransactionId);
+              const sourceDisplay = getTransactionLinkEndpointDisplay({
+                transactionId: link.sourceTransactionId,
+                lineId: link.sourceLineId,
+                transactions: snapshot.transactions,
+                lines: snapshot.transactionLines,
+                categories: snapshot.categories,
+              });
+              const targetDisplay = getTransactionLinkEndpointDisplay({
+                transactionId: link.targetTransactionId,
+                lineId: link.targetLineId,
+                transactions: snapshot.transactions,
+                lines: snapshot.transactionLines,
+                categories: snapshot.categories,
+              });
+              const primaryDisplay = targetDisplay.kind === 'split-line' ? targetDisplay : sourceDisplay;
+              const title = primaryDisplay.kind === 'missing' ? 'Linked item unavailable' : primaryDisplay.title || 'Income';
+              const primaryContext = primaryDisplay.kind === 'missing' ? '' : primaryDisplay.context;
+              const secondaryTitle = targetDisplay.kind === 'split-line' && sourceDisplay.kind !== 'missing'
+                ? sourceDisplay.title
+                : '';
               return (
                 <View key={link.id} style={styles.linkSummaryRow}>
                   <View style={styles.linkSummaryText}>
-                    <Text style={styles.linkSummaryTitle}>
-                      {getTransactionLinkTypeShortLabel(link.linkType)}:{' '}
-                      {formatMoney(link.amountMinor, link.currencyCode)}
-                    </Text>
+                    <View style={styles.linkSummaryTitleRow}>
+                      <LinkedTransactionIndicator compact />
+                      <Text numberOfLines={1} style={styles.linkSummaryTitle}>{title}</Text>
+                    </View>
                     <Text numberOfLines={1} style={styles.linkSummaryMeta}>
-                      {source?.title || 'Income'}{source ? ` / ${formatTransactionShortDate(source.datetime)}` : ''}
-                      {getLinkLineDetail(link, snapshot)}
+                      {[
+                        primaryContext,
+                        getTransactionLinkTypeShortLabel(link.linkType),
+                        formatMoney(link.amountMinor, link.currencyCode),
+                      ].filter(Boolean).join(' / ')}
                     </Text>
+                    {secondaryTitle ? (
+                      <Text numberOfLines={1} style={styles.linkSummaryMeta}>{secondaryTitle}</Text>
+                    ) : null}
                   </View>
                   <Pressable
                     accessibilityRole="button"
@@ -179,22 +200,6 @@ export function ExpenseLinkManager({
       </View>
     </>
   );
-}
-
-function getLinkLineDetail(link: TransactionLink, snapshot: AppSnapshot): string {
-  const targetLine = link.targetLineId
-    ? snapshot.transactionLines.find((line) => line.id === link.targetLineId)
-    : undefined;
-  if (!targetLine) {
-    return '';
-  }
-
-  const category = getCategory(targetLine.categoryId, snapshot.categories);
-  const lineLabel =
-    getSubcategoryName(targetLine.categoryId, targetLine.subcategoryId, snapshot.categories) ||
-    category.name ||
-    'split line';
-  return ` / ${lineLabel}`;
 }
 
 const styles = StyleSheet.create({
@@ -271,8 +276,16 @@ const styles = StyleSheet.create({
   },
   linkSummaryTitle: {
     color: colors.ink,
+    flex: 1,
     fontSize: typography.body,
     fontWeight: '900',
+    minWidth: 0,
+  },
+  linkSummaryTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+    minWidth: 0,
   },
   linkSummaryMeta: {
     color: colors.muted,

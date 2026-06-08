@@ -4,6 +4,7 @@ import {
   getIncomeLinkSourceCandidates,
   getLinkedCounterpartDisplayLabelForEndpoint,
   getTransactionLinkCounterpartDisplayLabel,
+  getTransactionLinkEndpointDisplay,
   getTransactionLinkEditSummary,
   getTransactionLinkSourceAmount,
 } from '../transactionLinking';
@@ -232,6 +233,33 @@ describe('transaction linking helpers', () => {
     ).toBe('Snacks · Groceries / May 17');
   });
 
+  it('uses split item title with subcategory metadata for linked endpoint display', () => {
+    const splitExpenseLine = line(
+      'expense-split-line',
+      'expense-aud',
+      -1800,
+      'AUD',
+      'food',
+      'groceries',
+    );
+
+    expect(
+      getTransactionLinkEndpointDisplay({
+        transactionId: 'expense-aud',
+        lineId: 'expense-split-line',
+        transactions,
+        lines: [{ ...splitExpenseLine, note: 'Snacks' }],
+      }),
+    ).toEqual({
+      kind: 'split-line',
+      title: 'Snacks',
+      metadata: 'Groceries',
+      dateLabel: 'May 17',
+      context: 'Groceries / May 17',
+      label: 'Snacks · Groceries / May 17',
+    });
+  });
+
   it('uses parent fallback for blank split-line linked endpoint labels', () => {
     expect(
       getTransactionLinkCounterpartDisplayLabel({
@@ -243,6 +271,44 @@ describe('transaction linking helpers', () => {
     ).toBe('Groceries / May 17');
   });
 
+  it('uses split category as the blank split-line title with parent context', () => {
+    const splitIncomeLine = line('income-bonus-line', 'income', 500, 'AUD', 'income', 'bonus');
+
+    expect(
+      getTransactionLinkEndpointDisplay({
+        transactionId: 'income',
+        lineId: 'income-bonus-line',
+        transactions,
+        lines: [...lines, splitIncomeLine],
+      }),
+    ).toEqual({
+      kind: 'split-line',
+      title: 'Bonus',
+      metadata: '',
+      dateLabel: 'May 17',
+      context: 'May 17',
+      label: 'Bonus · Refund / May 17',
+    });
+  });
+
+  it('returns structured parent linked endpoint display', () => {
+    expect(
+      getTransactionLinkEndpointDisplay({
+        transactionId: 'expense-aud',
+        lineId: null,
+        transactions,
+        lines,
+      }),
+    ).toEqual({
+      kind: 'parent',
+      title: 'Groceries',
+      metadata: '',
+      dateLabel: 'May 17',
+      context: 'May 17',
+      label: 'Groceries / May 17',
+    });
+  });
+
   it('does not fall back to the parent when a split-line link id cannot be resolved', () => {
     expect(
       getTransactionLinkCounterpartDisplayLabel({
@@ -252,6 +318,24 @@ describe('transaction linking helpers', () => {
         lines,
       }),
     ).toBe('');
+  });
+
+  it('returns missing endpoint display without guessing when a split line cannot be resolved', () => {
+    expect(
+      getTransactionLinkEndpointDisplay({
+        transactionId: 'expense-aud',
+        lineId: 'missing-line',
+        transactions,
+        lines,
+      }),
+    ).toEqual({
+      kind: 'missing',
+      title: '',
+      metadata: '',
+      dateLabel: '',
+      context: '',
+      label: '',
+    });
   });
 
   it('resolves linked-to labels from the current source or target endpoint', () => {
