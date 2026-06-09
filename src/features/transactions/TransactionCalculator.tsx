@@ -1,26 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import type { CalculatorKey } from '../../domain/calculator';
 import { colors, spacing, typography } from '../../theme/tokens';
 
-export type CalculatorKey =
-  | '0'
-  | '1'
-  | '2'
-  | '3'
-  | '4'
-  | '5'
-  | '6'
-  | '7'
-  | '8'
-  | '9'
-  | '.'
-  | '/'
-  | '*'
-  | '-'
-  | '+'
-  | '='
-  | 'backspace';
+export type { CalculatorKey } from '../../domain/calculator';
 
 const calculatorRows: CalculatorKey[][] = [
   ['7', '8', '9', '/'],

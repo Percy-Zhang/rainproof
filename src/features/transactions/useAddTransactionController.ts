@@ -15,7 +15,11 @@ import {
   resolveAddTransactionDefaultCategory,
 } from '../../domain/addTransactionDefaults';
 import { getAddTransactionBackAction } from '../../domain/addTransactionFlow';
-import { evaluateMoneyExpression } from '../../domain/calculator';
+import {
+  applyCalculatorAmountKey,
+  getInitialCalculatorAmountInputState,
+  type CalculatorKey,
+} from '../../domain/calculator';
 import { defaultCategories, getCategory } from '../../domain/categories';
 import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
 import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
@@ -53,7 +57,6 @@ import {
   type NativePickerMode,
   type TransactionPickerMode,
 } from './TransactionFormComponents';
-import type { CalculatorKey } from './TransactionCalculator';
 
 export type AddTransactionPage = 'amount' | 'details' | 'split';
 
@@ -100,8 +103,12 @@ export function useAddTransactionController({
   const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
   const [kind, setKind] = useState<TransactionKind>(initialDraft.kind);
   const [item, setItem] = useState(initialDraft.item);
-  const [amountExpression, setAmountExpression] = useState(initialDraft.amountExpression);
-  const [replaceAmountOnNextKey, setReplaceAmountOnNextKey] = useState(false);
+  const [initialAmountInputState] = useState(() =>
+    getInitialCalculatorAmountInputState(initialDraft.amountExpression),
+  );
+  const [amountInputState, setAmountInputState] = useState(initialAmountInputState);
+  const amountExpression = amountInputState.expression;
+  const replaceAmountOnNextKey = amountInputState.replaceOnNextEntry;
   const [date, setDate] = useState(initialDraft.date);
   const [time, setTime] = useState(initialDraft.time);
   const [fromAccountId, setFromAccountId] = useState(initialDraft.fromAccountId);
@@ -241,28 +248,23 @@ export function useAddTransactionController({
   function pressCalculatorKey(key: CalculatorKey) {
     setError('');
 
-    if (key === 'backspace') {
-      setReplaceAmountOnNextKey(false);
-      setAmountExpression((current) => current.slice(0, -1));
+    if (key !== '=') {
+      setAmountInputState((current) => applyCalculatorAmountKey(current, key));
       return;
     }
 
-    if (key === '=') {
-      try {
-        setAmountExpression(evaluateMoneyExpression(amountExpression));
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Could not calculate amount.');
-      }
-      return;
+    try {
+      setAmountInputState(applyCalculatorAmountKey(amountInputState, key));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Could not calculate amount.');
     }
+  }
 
-    if (replaceAmountOnNextKey) {
-      setAmountExpression(key);
-      setReplaceAmountOnNextKey(false);
-      return;
-    }
-
-    setAmountExpression((current) => `${current}${key}`);
+  function setReplaceAmountOnNextKey(replaceOnNextEntry: boolean) {
+    setAmountInputState((current) => ({
+      ...current,
+      replaceOnNextEntry,
+    }));
   }
 
   function handleNativePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
@@ -560,7 +562,6 @@ export function useAddTransactionController({
     replaceAmountOnNextKey,
     selectedCategory,
     selectPickerAccount,
-    setAmountExpression,
     setGroupId,
     setItem,
     setLabels,

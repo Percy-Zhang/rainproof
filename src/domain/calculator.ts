@@ -1,5 +1,29 @@
 type Operator = '+' | '-' | '*' | '/';
 
+export type CalculatorKey =
+  | '0'
+  | '1'
+  | '2'
+  | '3'
+  | '4'
+  | '5'
+  | '6'
+  | '7'
+  | '8'
+  | '9'
+  | '.'
+  | '/'
+  | '*'
+  | '-'
+  | '+'
+  | '='
+  | 'backspace';
+
+export type CalculatorAmountInputState = {
+  expression: string;
+  replaceOnNextEntry: boolean;
+};
+
 type Token =
   | { type: 'amount'; valueMinor: number }
   | { type: 'operator'; value: Operator };
@@ -10,6 +34,44 @@ const precedence: Record<Operator, number> = {
   '*': 2,
   '/': 2,
 };
+
+export function getInitialCalculatorAmountInputState(expression: string): CalculatorAmountInputState {
+  return {
+    expression,
+    replaceOnNextEntry: Boolean(expression.trim()),
+  };
+}
+
+export function applyCalculatorAmountKey(
+  state: CalculatorAmountInputState,
+  key: CalculatorKey,
+): CalculatorAmountInputState {
+  if (key === 'backspace') {
+    return {
+      expression: state.expression.slice(0, -1),
+      replaceOnNextEntry: false,
+    };
+  }
+
+  if (key === '=') {
+    return {
+      expression: evaluateMoneyExpression(state.expression),
+      replaceOnNextEntry: false,
+    };
+  }
+
+  if (state.replaceOnNextEntry && isAmountEntryKey(key)) {
+    return {
+      expression: key === '.' ? '0.' : key,
+      replaceOnNextEntry: false,
+    };
+  }
+
+  return {
+    expression: appendCalculatorKey(state.expression, key),
+    replaceOnNextEntry: false,
+  };
+}
 
 export function evaluateMoneyExpression(input: string): string {
   if (/[+\-*/]\s*$/.test(input)) {
@@ -131,4 +193,16 @@ function formatCalculatorAmount(amountMinor: number): string {
 
 function isOperator(value: string): value is Operator {
   return value === '+' || value === '-' || value === '*' || value === '/';
+}
+
+function isAmountEntryKey(key: CalculatorKey): boolean {
+  return key === '.' || /^\d$/.test(key);
+}
+
+function appendCalculatorKey(expression: string, key: Exclude<CalculatorKey, '=' | 'backspace'>): string {
+  if (/^\d$/.test(key) && expression === '0') {
+    return key;
+  }
+
+  return `${expression}${key}`;
 }

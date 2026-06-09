@@ -237,6 +237,7 @@ export function RecurringTransactionReviewScreen({
           onChangeText={setAmount}
           placeholder="0.00"
           keyboardType="decimal-pad"
+          selectTextOnFocus
         />
 
         <View style={styles.fieldGroup}>
