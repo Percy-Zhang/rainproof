@@ -1,5 +1,6 @@
 import {
   getRecentStatsReportRollupRows,
+  isStatsReportRowVisible,
   sortStatsReportRows,
   type StatsReport,
   type StatsReportLineRow,
@@ -32,7 +33,8 @@ export function getStatsDonutViewModel({
   selectedSubcategoryRollupId?: string | null;
   recentLimit?: number;
 }): StatsDonutViewModel {
-  const selectedCategoryRollup = getSelectedCategoryRollup(report, selectedCategoryRollupId);
+  const categoryRollups = report.categoryRollups.filter(isStatsReportRollupVisible);
+  const selectedCategoryRollup = getSelectedCategoryRollup(categoryRollups, selectedCategoryRollupId);
 
   if (mode === 'subcategory') {
     const subcategoryRollups = selectedCategoryRollup
@@ -72,7 +74,7 @@ export function getStatsDonutViewModel({
 
   return {
     mode,
-    rollups: report.categoryRollups,
+    rollups: categoryRollups,
     selectedCategoryRollup,
     selectedRollup: selectedCategoryRollup,
     recentRows: selectedCategoryRollup
@@ -106,7 +108,7 @@ export function getSubcategoryRollupsForCategory(
   categoryRollup: StatsReportRollup,
 ): StatsReportRollup[] {
   return report.subcategoryRollups
-    .filter((rollup) => rollup.categoryId === categoryRollup.categoryId)
+    .filter((rollup) => rollup.categoryId === categoryRollup.categoryId && isStatsReportRollupVisible(rollup))
     .map((rollup) => ({
       ...rollup,
       percentage: categoryRollup.netAmountMinor > 0
@@ -122,14 +124,14 @@ export function getStatsMatchRowDetailText(row: StatsReportLineRow): string {
 }
 
 function getSelectedCategoryRollup(
-  report: StatsReport,
+  categoryRollups: StatsReportRollup[],
   selectedCategoryRollupId?: string | null,
 ): StatsReportRollup | undefined {
   if (selectedCategoryRollupId === null) {
     return undefined;
   }
 
-  return report.categoryRollups.find((rollup) => rollup.id === selectedCategoryRollupId) ?? report.categoryRollups[0];
+  return categoryRollups.find((rollup) => rollup.id === selectedCategoryRollupId) ?? categoryRollups[0];
 }
 
 function getRecentStatsReportRows({
@@ -145,7 +147,11 @@ function getRecentStatsReportRows({
     ? report.rows.filter((row) => row.categoryId === categoryId)
     : report.rows;
 
-  return sortStatsReportRows(rows, 'date_newest').slice(0, limit);
+  return sortStatsReportRows(rows.filter(isStatsReportRowVisible), 'date_newest').slice(0, limit);
+}
+
+function isStatsReportRollupVisible(rollup: StatsReportRollup): boolean {
+  return rollup.reportKind !== 'expense' || rollup.netAmountMinor > 0;
 }
 
 function getRollupTotalNetAmountMinor(rollups: StatsReportRollup[]): number {

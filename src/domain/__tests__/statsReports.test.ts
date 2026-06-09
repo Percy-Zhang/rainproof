@@ -404,6 +404,16 @@ describe('stats report helpers', () => {
       ['split-food', 5000, 5000],
       ['split-home', 3000, 2000],
     ]);
+    expect(getStatsReportDrilldownRows({
+      report,
+      selection: { kind: 'category', categoryId: 'housing' },
+    })).toEqual([
+      expect.objectContaining({
+        lineId: 'split-home',
+        grossAmountMinor: 3000,
+        netAmountMinor: 2000,
+      }),
+    ]);
   });
 
   it('keeps transaction-level target links proportional when targetLineId is null', () => {
@@ -445,6 +455,115 @@ describe('stats report helpers', () => {
       ['split-food', 2500],
       ['split-home', 1500],
     ]);
+  });
+
+  it('hides fully offset parent transaction spending from recent and drilldown rows', () => {
+    const transactions = [
+      transaction('refund-income', 'income', 'Refund', '2026-05-20T11:00:00.000Z'),
+      transaction('one-expense', 'expense', 'Cafe', '2026-05-20T10:00:00.000Z'),
+    ];
+    const transactionLines = [
+      line({
+        id: 'refund-line',
+        transactionId: 'refund-income',
+        amountMinor: 2000,
+        categoryId: 'income',
+        subcategoryId: 'refund',
+      }),
+      line({
+        id: 'expense-line',
+        transactionId: 'one-expense',
+        amountMinor: -2000,
+        categoryId: 'food',
+        subcategoryId: 'restaurants',
+      }),
+    ];
+    const report = getExpenseReport({
+      transactions,
+      transactionLines,
+      transactionLinks: [
+        link({
+          sourceTransactionId: 'refund-income',
+          targetTransactionId: 'one-expense',
+          amountMinor: 2000,
+        }),
+      ],
+    });
+
+    expect(report.rows).toEqual([
+      expect.objectContaining({
+        lineId: 'expense-line',
+        grossAmountMinor: 2000,
+        netAmountMinor: 0,
+      }),
+    ]);
+    expect(getStatsReportDrilldownRows({
+      report,
+      selection: { kind: 'category', categoryId: 'food' },
+    })).toEqual([]);
+    expect(getStatsReportRollupRows({
+      report,
+      rollupKind: 'category',
+      rollupId: 'category:food',
+    })).toEqual([]);
+    expect(getRecentStatsReportRollupRows({
+      report,
+      rollupKind: 'category',
+      rollupId: 'category:food',
+    })).toEqual([]);
+  });
+
+  it('hides a fully offset split line while preserving its unlinked sibling', () => {
+    const transactions = [
+      transaction('refund-income', 'income', 'Refund', '2026-05-20T11:00:00.000Z'),
+      transaction('split-expense', 'expense', 'Woolworths', '2026-05-20T10:00:00.000Z'),
+    ];
+    const transactionLines = [
+      line({
+        id: 'refund-line',
+        transactionId: 'refund-income',
+        amountMinor: 3000,
+        categoryId: 'income',
+        subcategoryId: 'refund',
+      }),
+      line({
+        id: 'split-food',
+        transactionId: 'split-expense',
+        amountMinor: -5000,
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      }),
+      line({
+        id: 'split-home',
+        transactionId: 'split-expense',
+        amountMinor: -3000,
+        categoryId: 'housing',
+        subcategoryId: 'maintenance-repairs',
+      }),
+    ];
+    const report = getExpenseReport({
+      transactions,
+      transactionLines,
+      transactionLinks: [
+        link({
+          amountMinor: 3000,
+          targetLineId: 'split-home',
+        }),
+      ],
+    });
+
+    expect(report.rows.map((row) => [row.lineId, row.netAmountMinor])).toEqual([
+      ['split-food', 5000],
+      ['split-home', 0],
+    ]);
+    expect(getStatsReportDrilldownRows({
+      report,
+      selection: { kind: 'category', categoryId: 'housing' },
+    })).toEqual([]);
+    expect(getStatsReportDrilldownRows({
+      report,
+      selection: { kind: 'category', categoryId: 'food' },
+    }).map((row) => row.lineId)).toEqual(['split-food']);
   });
 
   it('excludes only selected and allocated income amounts from income line reports', () => {

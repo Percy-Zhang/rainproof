@@ -175,6 +175,43 @@ describe('stats chart helpers', () => {
     ]);
   });
 
+  it('omits zero-effective spending rollups and recent rows', () => {
+    const sourceReport = report();
+    sourceReport.rows.push(
+      row({
+        lineId: 'offset-line',
+        transactionId: 'offset-expense',
+        transactionDatetime: '2026-05-21T10:00:00.000Z',
+        categoryId: 'other',
+        categoryName: 'Other',
+        grossAmountMinor: 1500,
+        netAmountMinor: 0,
+      }),
+    );
+    sourceReport.categoryRollups.push(
+      rollup({
+        id: 'category:other',
+        categoryId: 'other',
+        label: 'Other',
+        grossAmountMinor: 1500,
+        netAmountMinor: 0,
+        percentage: 0,
+        lineCount: 1,
+        lineIds: ['offset-line'],
+      }),
+    );
+
+    const view = getStatsDonutViewModel({
+      report: sourceReport,
+      mode: 'category',
+      selectedCategoryRollupId: null,
+    });
+
+    expect(view.rollups.map((item) => item.id)).toEqual(['category:food', 'category:housing']);
+    expect(view.recentRows.map((item) => item.lineId)).not.toContain('offset-line');
+    expect(view.totalNetAmountMinor).toBe(10000);
+  });
+
   it('converts a selected category to subcategory slices with relative percentages', () => {
     const sourceReport = report();
     const categoryRollup = sourceReport.categoryRollups[0];

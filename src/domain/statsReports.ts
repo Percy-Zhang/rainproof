@@ -221,6 +221,10 @@ export function getStatsReportDrilldownRows({
   sort?: StatsReportSort;
 }): StatsReportLineRow[] {
   const matchingRows = report.rows.filter((row) => {
+    if (!isStatsReportRowVisible(row)) {
+      return false;
+    }
+
     if (selection.kind === 'category') {
       return row.categoryId === selection.categoryId;
     }
@@ -267,7 +271,7 @@ export function getStatsReportRollupRows({
 
   const lineIds = new Set(rollup.lineIds);
   return sortStatsReportRows(
-    report.rows.filter((row) => lineIds.has(row.lineId)),
+    report.rows.filter((row) => lineIds.has(row.lineId) && isStatsReportRowVisible(row)),
     sort,
   );
 }
@@ -287,6 +291,10 @@ export function sortStatsReportRows(
   sort: StatsReportSort = 'date_newest',
 ): StatsReportLineRow[] {
   return [...rows].sort((left, right) => compareStatsReportRows(left, right, sort));
+}
+
+export function isStatsReportRowVisible(row: StatsReportLineRow): boolean {
+  return row.reportKind !== 'expense' || row.netAmountMinor > 0;
 }
 
 function buildRollups(rows: StatsReportLineRow[], kind: StatsReportRollupKind): StatsReportRollup[] {
