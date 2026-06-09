@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (amount_minor > 0),
-  CHECK (period IN ('monthly')),
+  CHECK (period IN ('weekly', 'monthly', 'yearly', 'rolling_7', 'rolling_30', 'rolling_365')),
   CHECK (scope_type IN ('overall', 'category', 'subcategory', 'include', 'exclude')),
   CHECK (
     (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL AND scope_items_json = '[]') OR
@@ -291,6 +291,24 @@ const migrations: Migration[] = [
       await ensureTransactionTemplateLineKindColumn(db);
     },
   },
+  {
+    version: 15,
+    migrate: async (db) => {
+      await rebuildBudgetsForCalendarPeriods(db);
+    },
+  },
+  {
+    version: 16,
+    migrate: async (db) => {
+      await rebuildBudgetsForRollingPeriods(db);
+    },
+  },
+  {
+    version: 17,
+    migrate: async (db) => {
+      await rebuildBudgetsForSupportedPeriods(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -494,6 +512,140 @@ PRAGMA foreign_keys = ON;
 ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
 `);
   await normalizeBudgetSortOrder(db);
+}
+
+async function rebuildBudgetsForCalendarPeriods(db: MigrationDatabase): Promise<void> {
+  const rows = await db.getAllAsync<BudgetScopeMigrationRow>(
+    `SELECT id, name, amount_minor, currency_code, period, scope_type, category_id,
+            subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+     FROM budgets
+     ORDER BY sort_order ASC, created_at ASC, id ASC`,
+  );
+
+  await db.execAsync(`
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS budgets_calendar_next;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_calendar_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+`);
+
+  for (const [index, row] of rows.entries()) {
+    const period = isCalendarBudgetPeriod(row.period) ? row.period : 'monthly';
+    await db.runAsync(
+      `INSERT INTO budgets_calendar_next (
+        id, name, amount_minor, currency_code, period, scope_type, category_id,
+        subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.id,
+      row.name,
+      row.amount_minor,
+      row.currency_code,
+      period,
+      row.scope_type,
+      row.category_id,
+      row.subcategory_id,
+      row.scope_items_json ?? '[]',
+      Number.isInteger(row.sort_order) ? row.sort_order : index,
+      row.is_active === 1 ? 1 : 0,
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
+  await db.execAsync(`
+DROP TABLE budgets;
+ALTER TABLE budgets_calendar_next RENAME TO budgets;
+PRAGMA foreign_keys = ON;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+`);
+}
+
+async function rebuildBudgetsForRollingPeriods(db: MigrationDatabase): Promise<void> {
+  await rebuildBudgetsForSupportedPeriods(db, 'budgets_rolling_next');
+}
+
+async function rebuildBudgetsForSupportedPeriods(
+  db: MigrationDatabase,
+  nextTableName = 'budgets_supported_next',
+): Promise<void> {
+  const rows = await db.getAllAsync<BudgetScopeMigrationRow>(
+    `SELECT id, name, amount_minor, currency_code, period, scope_type, category_id,
+            subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+     FROM budgets
+     ORDER BY sort_order ASC, created_at ASC, id ASC`,
+  );
+
+  await db.execAsync(`
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS ${nextTableName};
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, `CREATE TABLE ${nextTableName}`).replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+`);
+
+  const activeScopeKeys = new Set<string>();
+  for (const [index, row] of rows.entries()) {
+    const scopeKey = `${row.currency_code}\u0000${row.scope_type}\u0000${row.scope_items_json ?? '[]'}`;
+    let period = normalizeSupportedBudgetPeriod(row.period);
+    let isActive = row.is_active === 1;
+
+    if (isActive) {
+      const availablePeriod = [
+        period,
+        ...SUPPORTED_BUDGET_PERIODS.filter((candidate) => candidate !== period),
+      ].find((candidate) => !activeScopeKeys.has(`${candidate}\u0000${scopeKey}`));
+
+      if (availablePeriod) {
+        period = availablePeriod;
+        activeScopeKeys.add(`${period}\u0000${scopeKey}`);
+      } else {
+        isActive = false;
+      }
+    }
+
+    await db.runAsync(
+      `INSERT INTO ${nextTableName} (
+        id, name, amount_minor, currency_code, period, scope_type, category_id,
+        subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.id,
+      row.name,
+      row.amount_minor,
+      row.currency_code,
+      period,
+      row.scope_type,
+      row.category_id,
+      row.subcategory_id,
+      row.scope_items_json ?? '[]',
+      Number.isInteger(row.sort_order) ? row.sort_order : index,
+      isActive ? 1 : 0,
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
+  await db.execAsync(`
+DROP TABLE budgets;
+ALTER TABLE ${nextTableName} RENAME TO budgets;
+PRAGMA foreign_keys = ON;
+${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+`);
+}
+
+const SUPPORTED_BUDGET_PERIODS = [
+  'weekly',
+  'monthly',
+  'yearly',
+  'rolling_7',
+  'rolling_30',
+  'rolling_365',
+] as const;
+
+function isCalendarBudgetPeriod(value: string): boolean {
+  return value === 'weekly' || value === 'monthly' || value === 'yearly';
+}
+
+function normalizeSupportedBudgetPeriod(value: string): string {
+  return SUPPORTED_BUDGET_PERIODS.some((period) => period === value) ? value : 'monthly';
 }
 
 function getMigratedBudgetScope(row: BudgetScopeMigrationRow): {

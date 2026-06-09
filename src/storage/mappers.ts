@@ -7,6 +7,7 @@ import type {
   Account,
   AccountType,
   Budget,
+  BudgetPeriod,
   BudgetScopeItem,
   BudgetScopeType,
   RainyDayFund,
@@ -91,7 +92,7 @@ export type BudgetRow = {
   name: string;
   amount_minor: number;
   currency_code: string;
-  period: 'monthly';
+  period: BudgetPeriod;
   scope_type: BudgetScopeType;
   category_id: string | null;
   subcategory_id: string | null;

@@ -100,7 +100,13 @@ export type SubcategoryDefinition = {
   icon: string;
 };
 
-export type BudgetPeriod = 'monthly';
+export type BudgetPeriod =
+  | 'weekly'
+  | 'monthly'
+  | 'yearly'
+  | 'rolling_7'
+  | 'rolling_30'
+  | 'rolling_365';
 
 export type BudgetScopeType = 'overall' | 'category' | 'subcategory' | 'include' | 'exclude';
 

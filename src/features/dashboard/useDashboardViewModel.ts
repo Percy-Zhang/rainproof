@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import {
-  getBudgetMonthlyRange,
   getBudgetUsageDisplayRows,
-  getBudgetUsageFromStatsReport,
+  getBudgetUsagesForPeriods,
   getDashboardBudgetSummaryData,
   sortBudgetUsagesByDisplayOrder,
   type BudgetUsageDisplayRow,
@@ -32,7 +31,6 @@ import {
   type CreditCardCurrencySummary,
 } from '../../domain/creditCards';
 import { getDateRangeForPreset } from '../../domain/dates';
-import { getStatsReport } from '../../domain/statsReports';
 import type {
   Account,
   AccountBalance,
@@ -198,21 +196,13 @@ function getDashboardBudgetProgressData(
     return { activeBudgetCount: 0, rows: [] };
   }
 
-  const range = getBudgetMonthlyRange();
-  const currencies = Array.from(new Set(activeBudgets.map((budget) => budget.currencyCode)));
-  const usages = currencies.flatMap((currencyCode) => {
-    const report = getStatsReport({
-      reportKind: 'expense',
-      transactions: snapshot.transactions,
-      transactionLines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      accounts: snapshot.accounts,
-      categories,
-      range,
-      currencyCode,
-    });
-
-    return getBudgetUsageFromStatsReport({ budgets: activeBudgets, report });
+  const usages = getBudgetUsagesForPeriods({
+    accounts: snapshot.accounts,
+    budgets: activeBudgets,
+    categories,
+    transactionLines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    transactions: snapshot.transactions,
   });
   const summary = getDashboardBudgetSummaryData(usages, 3);
   const orderedUsages = sortBudgetUsagesByDisplayOrder(

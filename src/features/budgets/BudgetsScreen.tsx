@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import DraggableFlatList, {
   ScaleDecorator,
@@ -9,14 +9,16 @@ import DraggableFlatList, {
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { ActionButton, Card, ProgressBar } from '../../components/ui';
 import {
-  getBudgetMonthlyRange,
+  formatBudgetPeriodRange,
+  getBudgetPeriodOffsetLabel,
+  getBudgetPeriodRange,
   getBudgetUsageDisplayRows,
-  getBudgetUsageFromStatsReport,
+  getBudgetUsagesForPeriods,
   sortBudgetUsageDisplayRowsByDisplayOrder,
   type BudgetUsageDisplayRow,
 } from '../../domain/budgets';
+import { defaultCategories } from '../../domain/categories';
 import { formatMoney } from '../../domain/money';
-import { getStatsReport } from '../../domain/statsReports';
 import type { AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
@@ -33,18 +35,22 @@ export function BudgetsScreen({
   onEditBudget,
   onUpdateBudgetOrder,
 }: BudgetsScreenProps) {
+  const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [periodOffset, setPeriodOffset] = useState(0);
   const budgetRows = useMemo(
-    () => getBudgetUsageRowsForSnapshot(snapshot),
-    [snapshot],
+    () => getBudgetUsageRowsForSnapshot(snapshot, anchorDate, periodOffset),
+    [anchorDate, periodOffset, snapshot],
   );
 
   function renderBudgetRow({ item, drag, isActive }: RenderItemParams<BudgetUsageDisplayRow>) {
     return (
       <BudgetUsageCard
         row={item}
+        anchorDate={anchorDate}
         dragging={isActive}
         onDrag={drag}
         onPress={() => onEditBudget(item.id)}
+        periodOffset={periodOffset}
       />
     );
   }
@@ -56,14 +62,25 @@ export function BudgetsScreen({
         keyExtractor={(row) => row.id}
         renderItem={renderBudgetRow}
         ListHeaderComponent={(
-          <View style={styles.summaryRow}>
-            <View style={styles.summaryText}>
-              <Text style={styles.heading}>Monthly budgets</Text>
-              <Text style={styles.subtle}>Monthly limits using net spending for the current calendar month.</Text>
+          <View style={styles.header}>
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryText}>
+                <Text style={styles.heading}>Budgets</Text>
+                <Text style={styles.subtle}>Limits using net spending for each budget range.</Text>
+              </View>
+              <ActionButton onPress={onAddBudget} testID="add-budget">
+                Add
+              </ActionButton>
             </View>
-            <ActionButton onPress={onAddBudget} testID="add-budget">
-              Add
-            </ActionButton>
+            <BudgetPeriodNavigator
+              offset={periodOffset}
+              onNext={() => setPeriodOffset((current) => current + 1)}
+              onPrevious={() => setPeriodOffset((current) => current - 1)}
+              onReset={() => {
+                setAnchorDate(new Date());
+                setPeriodOffset(0);
+              }}
+            />
           </View>
         )}
         ListEmptyComponent={(
@@ -73,7 +90,7 @@ export function BudgetsScreen({
             </View>
             <Text style={styles.emptyTitle}>No active budgets yet</Text>
             <Text style={styles.emptyText}>
-              Add an overall, category, or subcategory monthly budget to track spending against this month.
+              Add an overall, included, or excluded category budget with a calendar or rolling period.
             </Text>
             <ActionButton variant="secondary" onPress={onAddBudget}>
               Add first budget
@@ -93,18 +110,24 @@ export function BudgetsScreen({
 }
 
 function BudgetUsageCard({
+  anchorDate,
   dragging,
   onDrag,
   row,
   onPress,
+  periodOffset,
 }: {
+  anchorDate: Date;
   dragging: boolean;
   onDrag: () => void;
   row: BudgetUsageDisplayRow;
   onPress: () => void;
+  periodOffset: number;
 }) {
   const status = getStatusCopy(row);
   const progressColor = getBudgetStatusColor(row.status);
+  const range = getBudgetPeriodRange(row.budget.period, anchorDate, periodOffset);
+  const periodLabel = getBudgetPeriodOffsetLabel(row.budget.period, periodOffset);
 
   return (
     <ScaleDecorator>
@@ -131,6 +154,10 @@ function BudgetUsageCard({
           </View>
         </View>
 
+        <Text style={styles.periodText}>
+          {periodLabel}{' \u00B7 '}{formatBudgetPeriodRange(range)}
+        </Text>
+
         <View style={styles.amountGrid}>
           <AmountBlock label="Used" value={formatMoney(row.spentMinor, row.budget.currencyCode)} />
           <AmountBlock label={status.remainingLabel} value={formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode)} tone={row.remainingMinor < 0 ? 'danger' : 'default'} />
@@ -138,7 +165,7 @@ function BudgetUsageCard({
         </View>
 
         <ProgressBar percentage={row.percentageUsed} color={progressColor} />
-        <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used this month</Text>
+        <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used in this period</Text>
       </Pressable>
     </ScaleDecorator>
   );
@@ -163,26 +190,76 @@ function AmountBlock({
   );
 }
 
-function getBudgetUsageRowsForSnapshot(snapshot: AppSnapshot): BudgetUsageDisplayRow[] {
+function getBudgetUsageRowsForSnapshot(
+  snapshot: AppSnapshot,
+  anchorDate: Date,
+  periodOffset: number,
+): BudgetUsageDisplayRow[] {
   const activeBudgets = snapshot.budgets.filter((budget) => budget.isActive);
-  const range = getBudgetMonthlyRange();
-  const currencies = Array.from(new Set(activeBudgets.map((budget) => budget.currencyCode)));
-  const usages = currencies.flatMap((currencyCode) => {
-    const report = getStatsReport({
-      reportKind: 'expense',
-      transactions: snapshot.transactions,
-      transactionLines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      accounts: snapshot.accounts,
-      categories: snapshot.categories,
-      range,
-      currencyCode,
-    });
-
-    return getBudgetUsageFromStatsReport({ budgets: activeBudgets, report });
+  const usages = getBudgetUsagesForPeriods({
+    accounts: snapshot.accounts,
+    anchorDate,
+    budgets: activeBudgets,
+    categories: snapshot.categories ?? defaultCategories,
+    periodOffset,
+    transactionLines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    transactions: snapshot.transactions,
   });
 
   return sortBudgetUsageDisplayRowsByDisplayOrder(getBudgetUsageDisplayRows(usages, snapshot.categories));
+}
+
+function BudgetPeriodNavigator({
+  offset,
+  onNext,
+  onPrevious,
+  onReset,
+}: {
+  offset: number;
+  onNext: () => void;
+  onPrevious: () => void;
+  onReset: () => void;
+}) {
+  const label =
+    offset === 0
+      ? 'Current ranges'
+      : offset === -1
+        ? 'Previous ranges'
+        : offset === 1
+          ? 'Next ranges'
+          : offset < 0
+            ? `${Math.abs(offset)} steps back`
+            : `${offset} steps ahead`;
+
+  return (
+    <View style={styles.periodNavigator}>
+      <Pressable
+        accessibilityLabel="Previous budget ranges"
+        onPress={onPrevious}
+        style={({ pressed }) => [styles.periodNavButton, pressed && styles.pressed]}
+        testID="budget-period-previous"
+      >
+        <Ionicons name="chevron-back" size={20} color={colors.primaryDark} />
+      </Pressable>
+      <View style={styles.periodNavigatorText}>
+        <Text style={styles.periodNavigatorLabel}>{label}</Text>
+        {offset !== 0 ? (
+          <Pressable accessibilityRole="button" onPress={onReset} testID="budget-period-current">
+            <Text style={styles.currentPeriodAction}>Current</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <Pressable
+        accessibilityLabel="Next budget ranges"
+        onPress={onNext}
+        style={({ pressed }) => [styles.periodNavButton, pressed && styles.pressed]}
+        testID="budget-period-next"
+      >
+        <Ionicons name="chevron-forward" size={20} color={colors.primaryDark} />
+      </Pressable>
+    </View>
+  );
 }
 
 function getStatusCopy(row: BudgetUsageDisplayRow): { label: string; remainingLabel: string } {
@@ -217,6 +294,9 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing.xl,
   },
+  header: {
+    gap: spacing.md,
+  },
   summaryRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -237,6 +317,38 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     lineHeight: 18,
+  },
+  periodNavigator: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 52,
+    paddingHorizontal: spacing.sm,
+  },
+  periodNavButton: {
+    alignItems: 'center',
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
+  periodNavigatorText: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 2,
+  },
+  periodNavigatorLabel: {
+    color: colors.ink,
+    fontSize: typography.body,
+    fontWeight: '900',
+  },
+  currentPeriodAction: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '800',
   },
   budgetCard: {
     backgroundColor: colors.surface,
@@ -315,6 +427,11 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   progressText: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
+  },
+  periodText: {
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',

@@ -1,18 +1,25 @@
 import {
+  budgetPeriodOptions,
   calculateBudgetPercentUsed,
   calculateBudgetRemaining,
+  formatBudgetPeriodRange,
   getBudgetCurrencyOptions,
   getBudgetMonthlyRange,
+  getBudgetPeriodCurrentLabel,
+  getBudgetPeriodOffsetLabel,
+  getBudgetPeriodRange,
   getBudgetScopeDetail,
   getBudgetScopeLabel,
   getBudgetStatus,
   getBudgetUsageDisplayRows,
   getBudgetUsageFromStatsReport,
+  getBudgetUsagesForPeriods,
   getDashboardBudgetSummaryData,
   sortBudgetUsageDisplayRowsByDisplayOrder,
   sortBudgetUsagesByDisplayOrder,
 } from '../budgets';
 import { getStatsReport } from '../statsReports';
+import { defaultCategories } from '../categories';
 import type { Account, Budget, Transaction, TransactionLine, TransactionLink } from '../types';
 
 const now = '2026-05-15T12:00:00.000Z';
@@ -33,6 +40,225 @@ describe('budget helpers', () => {
       startIso: new Date(2026, 4, 1, 0, 0, 0, 0).toISOString(),
       endIso: new Date(2026, 5, 1, 0, 0, 0, 0).toISOString(),
     });
+  });
+
+  it('exposes only the supported calendar and rolling period options', () => {
+    expect(budgetPeriodOptions.map((option) => option.value)).toEqual([
+      'weekly',
+      'monthly',
+      'yearly',
+      'rolling_7',
+      'rolling_30',
+      'rolling_365',
+    ]);
+    expect(budgetPeriodOptions.map((option) => option.label)).not.toContain('Quarterly');
+    expect(budgetPeriodOptions.map((option) => option.label)).not.toContain('Rolling 90 days');
+  });
+
+  it('builds weekly, monthly, and yearly calendar windows', () => {
+    const date = new Date(2026, 5, 10, 9, 30);
+
+    expect(getBudgetPeriodRange('weekly', date)).toEqual({
+      startIso: new Date(2026, 5, 8, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 15, 0, 0, 0, 0).toISOString(),
+    });
+    expect(getBudgetPeriodRange('monthly', date)).toEqual({
+      startIso: new Date(2026, 5, 1, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 6, 1, 0, 0, 0, 0).toISOString(),
+    });
+    expect(getBudgetPeriodRange('yearly', date)).toEqual({
+      startIso: new Date(2026, 0, 1, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2027, 0, 1, 0, 0, 0, 0).toISOString(),
+    });
+  });
+
+  it('builds rolling 7, 30, and 365 day windows ending on the anchor date', () => {
+    const date = new Date(2026, 5, 9, 9, 30);
+
+    expect(getBudgetPeriodRange('rolling_7', date)).toEqual({
+      startIso: new Date(2026, 5, 3, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 10, 0, 0, 0, 0).toISOString(),
+    });
+    expect(getBudgetPeriodRange('rolling_30', date)).toEqual({
+      startIso: new Date(2026, 4, 11, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 10, 0, 0, 0, 0).toISOString(),
+    });
+    expect(getBudgetPeriodRange('rolling_365', date)).toEqual({
+      startIso: new Date(2025, 5, 10, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 10, 0, 0, 0, 0).toISOString(),
+    });
+  });
+
+  it('navigates budget periods and formats clear labels', () => {
+    const date = new Date(2026, 5, 10, 9, 30);
+    const previousWeek = getBudgetPeriodRange('weekly', date, -1);
+    const nextYear = getBudgetPeriodRange('yearly', date, 1);
+
+    expect(previousWeek).toEqual({
+      startIso: new Date(2026, 5, 1, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 8, 0, 0, 0, 0).toISOString(),
+    });
+    expect(nextYear).toEqual({
+      startIso: new Date(2027, 0, 1, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2028, 0, 1, 0, 0, 0, 0).toISOString(),
+    });
+    expect(getBudgetPeriodCurrentLabel('weekly')).toBe('This week');
+    expect(getBudgetPeriodCurrentLabel('monthly')).toBe('This month');
+    expect(getBudgetPeriodCurrentLabel('yearly')).toBe('This year');
+    expect(getBudgetPeriodOffsetLabel('monthly', -1)).toBe('Previous month');
+    expect(getBudgetPeriodOffsetLabel('yearly', 2)).toBe('2 years ahead');
+    expect(formatBudgetPeriodRange(previousWeek)).toBe('1-7 Jun 2026');
+  });
+
+  it('moves rolling period anchors one day per navigation step', () => {
+    const date = new Date(2026, 5, 9, 9, 30);
+    const previousRollingWindow = getBudgetPeriodRange('rolling_7', date, -1);
+    const nextRollingWindow = getBudgetPeriodRange('rolling_30', date, 1);
+
+    expect(previousRollingWindow).toEqual({
+      startIso: new Date(2026, 5, 2, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 9, 0, 0, 0, 0).toISOString(),
+    });
+    expect(nextRollingWindow).toEqual({
+      startIso: new Date(2026, 4, 12, 0, 0, 0, 0).toISOString(),
+      endIso: new Date(2026, 5, 11, 0, 0, 0, 0).toISOString(),
+    });
+    expect(getBudgetPeriodCurrentLabel('rolling_7')).toBe('Rolling 7 days');
+    expect(getBudgetPeriodOffsetLabel('rolling_30', -1)).toBe('1 day back');
+    expect(getBudgetPeriodOffsetLabel('rolling_365', 2)).toBe('2 days ahead');
+    expect(formatBudgetPeriodRange(previousRollingWindow)).toBe('2-8 Jun 2026');
+  });
+
+  it('calculates current and previous usage using each budget calendar period', () => {
+    const anchorDate = new Date(2026, 5, 10, 9, 30);
+    const transactions = [
+      makeTransaction('current_week', 'expense', 'Current week', '2026-06-09T12:00:00.000Z'),
+      makeTransaction('previous_week', 'expense', 'Previous week', '2026-06-02T12:00:00.000Z'),
+      makeTransaction('previous_month', 'expense', 'Previous month', '2026-05-20T12:00:00.000Z'),
+    ];
+    const lines = [
+      makeLine('current_week_line', 'current_week', 'checking', -1000, 'AUD', 'food', 'groceries'),
+      makeLine('previous_week_line', 'previous_week', 'checking', -2000, 'AUD', 'food', 'groceries'),
+      makeLine('previous_month_line', 'previous_month', 'checking', -4000, 'AUD', 'food', 'groceries'),
+    ];
+    const budgets = [
+      makeBudget('weekly', 'Weekly food', 10000, 'category', 'food', null, 'AUD', 0, undefined, 'weekly'),
+      makeBudget('monthly', 'Monthly food', 20000, 'category', 'food'),
+    ];
+
+    const currentUsages = getBudgetUsagesForPeriods({
+      accounts,
+      anchorDate,
+      budgets,
+      categories: defaultCategories,
+      transactionLines: lines,
+      transactionLinks: [],
+      transactions,
+    });
+    const previousUsages = getBudgetUsagesForPeriods({
+      accounts,
+      anchorDate,
+      budgets,
+      categories: defaultCategories,
+      periodOffset: -1,
+      transactionLines: lines,
+      transactionLinks: [],
+      transactions,
+    });
+
+    expect(currentUsages.map((usage) => [usage.budget.id, usage.spentMinor])).toEqual([
+      ['weekly', 1000],
+      ['monthly', 3000],
+    ]);
+    expect(previousUsages.map((usage) => [usage.budget.id, usage.spentMinor])).toEqual([
+      ['weekly', 2000],
+      ['monthly', 4000],
+    ]);
+  });
+
+  it('calculates rolling usage by anchor date while preserving scopes and mixed split spending', () => {
+    const anchorDate = new Date(2026, 5, 9, 9, 30);
+    const currentFood = makeTransaction('current_food', 'expense', 'Current food', '2026-06-09T12:00:00.000Z');
+    const mixedIncome = makeTransaction('mixed_income', 'income', 'Salary after tax', '2026-06-08T12:00:00.000Z');
+    const transport = makeTransaction('transport', 'expense', 'Fuel', '2026-05-20T12:00:00.000Z');
+    const outside = makeTransaction('outside', 'expense', 'Older groceries', '2026-05-10T12:00:00.000Z');
+    const lines = [
+      makeLine('current_food_line', currentFood.id, 'checking', -1000, 'AUD', 'food', 'groceries'),
+      makeLine('mixed_income_line', mixedIncome.id, 'checking', 230000, 'AUD', 'income', 'salary'),
+      makeLine('mixed_tax_line', mixedIncome.id, 'checking', -6000, 'AUD', 'food', 'groceries'),
+      makeLine('transport_line', transport.id, 'checking', -2000, 'AUD', 'transport', 'fuel'),
+      makeLine('outside_line', outside.id, 'checking', -4000, 'AUD', 'food', 'groceries'),
+    ];
+    const budgets = [
+      makeBudget('rolling_food', 'Rolling food', 20000, 'include', 'food', null, 'AUD', 0, [
+        { categoryId: 'food', subcategoryId: null },
+      ], 'rolling_7'),
+      makeBudget('rolling_not_food', 'Rolling non-food', 20000, 'exclude', 'food', null, 'AUD', 1, [
+        { categoryId: 'food', subcategoryId: null },
+      ], 'rolling_30'),
+    ];
+
+    const currentUsages = getBudgetUsagesForPeriods({
+      accounts,
+      anchorDate,
+      budgets,
+      categories: defaultCategories,
+      transactionLines: lines,
+      transactionLinks: [],
+      transactions: [currentFood, mixedIncome, transport, outside],
+    });
+    const previousUsages = getBudgetUsagesForPeriods({
+      accounts,
+      anchorDate,
+      budgets,
+      categories: defaultCategories,
+      periodOffset: -1,
+      transactionLines: lines,
+      transactionLinks: [],
+      transactions: [currentFood, mixedIncome, transport, outside],
+    });
+
+    expect(currentUsages.map((usage) => [usage.budget.id, usage.spentMinor])).toEqual([
+      ['rolling_food', 7000],
+      ['rolling_not_food', 2000],
+    ]);
+    expect(previousUsages.map((usage) => [usage.budget.id, usage.spentMinor])).toEqual([
+      ['rolling_food', 6000],
+      ['rolling_not_food', 2000],
+    ]);
+  });
+
+  it('uses today as the default anchor for current Dashboard rolling usage', () => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date(2026, 5, 9, 12, 0));
+
+    try {
+      const firstIncluded = makeTransaction('first_included', 'expense', 'First included', '2026-06-03T12:00:00.000Z');
+      const beforeWindow = makeTransaction('before_window', 'expense', 'Before window', '2026-06-02T12:00:00.000Z');
+      const usages = getBudgetUsagesForPeriods({
+        accounts,
+        budgets: [
+          makeBudget('rolling_week', 'Rolling week', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_7'),
+        ],
+        categories: defaultCategories,
+        transactionLines: [
+          makeLine('first_included_line', firstIncluded.id, 'checking', -1000, 'AUD', 'food', 'groceries'),
+          makeLine('before_window_line', beforeWindow.id, 'checking', -5000, 'AUD', 'food', 'groceries'),
+        ],
+        transactionLinks: [],
+        transactions: [firstIncluded, beforeWindow],
+      });
+
+      expect(usages).toEqual([
+        expect.objectContaining({
+          budget: expect.objectContaining({ id: 'rolling_week' }),
+          matchingLineIds: ['first_included_line'],
+          spentMinor: 1000,
+        }),
+      ]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('calculates overall, category, and subcategory usage from net expense report rows', () => {
@@ -312,6 +538,11 @@ describe('budget helpers', () => {
     ]);
 
     expect(getBudgetScopeLabel(makeBudget('overall', 'Overall', 10000, 'overall'))).toBe('Overall monthly spending');
+    expect(
+      getBudgetScopeLabel(
+        makeBudget('rolling', 'Rolling', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_30'),
+      ),
+    ).toBe('Overall rolling 30-day spending');
     expect(getBudgetScopeDetail(categoryBudget)).toBe('Category budget');
     expect(rows).toEqual([
       expect.objectContaining({
@@ -424,13 +655,14 @@ function makeBudget(
   currencyCode = 'AUD',
   sortOrder = 0,
   scopeItems?: Budget['scopeItems'],
+  period: Budget['period'] = 'monthly',
 ): Budget {
   return {
     id,
     name,
     amountMinor,
     currencyCode,
-    period: 'monthly',
+    period,
     scopeType,
     categoryId,
     subcategoryId,

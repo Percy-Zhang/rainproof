@@ -5,6 +5,14 @@ import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { getDashboardRecurringSummary } from '../domain/dashboardRecurring';
 import { AccountFormScreen } from '../features/accounts/AccountFormScreen';
 import { BudgetFormScreen } from '../features/budgets/BudgetFormScreen';
+import { BudgetPeriodSelectScreen } from '../features/budgets/BudgetPeriodSelectScreen';
+import {
+  createBudgetPeriodSelectionRequestId,
+  useBudgetPeriodSelectionRequests,
+} from '../features/budgets/BudgetPeriodSelectionContext';
+import type {
+  BudgetPeriodSelectLaunchParams,
+} from '../features/budgets/budgetPeriodSelectionModel';
 import { BudgetScopeSelectScreen } from '../features/budgets/BudgetScopeSelectScreen';
 import {
   createBudgetScopeSelectionRequestId,
@@ -36,7 +44,7 @@ import { AddTransactionScreen } from '../features/transactions/AddTransactionScr
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
 import { spacing } from '../theme/tokens';
-import type { AccountBalance, Budget, BudgetScopeItem, RecurringItem } from '../domain/types';
+import type { AccountBalance, Budget, BudgetPeriod, BudgetScopeItem, RecurringItem } from '../domain/types';
 import {
   ComposerRouteScaffold,
   PREPARING_RAINPROOF_MESSAGE,
@@ -57,6 +65,11 @@ type OpenBudgetScopeSelect = (
   onConfirm: (scopeItems: BudgetScopeItem[]) => void,
 ) => void;
 
+type OpenBudgetPeriodSelect = (
+  params: BudgetPeriodSelectLaunchParams,
+  onSelect: (period: BudgetPeriod) => void,
+) => void;
+
 function useOpenCategorySelect(navigation: RootStackNavigation): OpenCategorySelect {
   const { registerCategorySelectionRequest } = useCategorySelectionRequests();
 
@@ -75,6 +88,16 @@ function useOpenBudgetScopeSelect(navigation: RootStackNavigation): OpenBudgetSc
     registerBudgetScopeSelectionRequest(requestId, onConfirm);
     navigation.navigate('BudgetScopeSelect', { ...params, requestId });
   }, [navigation, registerBudgetScopeSelectionRequest]);
+}
+
+function useOpenBudgetPeriodSelect(navigation: RootStackNavigation): OpenBudgetPeriodSelect {
+  const { registerBudgetPeriodSelectionRequest } = useBudgetPeriodSelectionRequests();
+
+  return useCallback((params, onSelect) => {
+    const requestId = createBudgetPeriodSelectionRequestId();
+    registerBudgetPeriodSelectionRequest(requestId, onSelect);
+    navigation.navigate('BudgetPeriodSelect', { ...params, requestId });
+  }, [navigation, registerBudgetPeriodSelectionRequest]);
 }
 
 export function AddAccountRouteScreen() {
@@ -278,6 +301,7 @@ export function AddBudgetRouteScreen() {
   const navigation = useRootStackNavigation();
   const { snapshot, actions } = useRainproofDataContext();
   const openBudgetScopeSelect = useOpenBudgetScopeSelect(navigation);
+  const openBudgetPeriodSelect = useOpenBudgetPeriodSelect(navigation);
 
   if (!snapshot) {
     return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
@@ -289,6 +313,7 @@ export function AddBudgetRouteScreen() {
         mode="add"
         snapshot={snapshot}
         onAddBudget={actions.addBudget}
+        onOpenBudgetPeriodSelect={openBudgetPeriodSelect}
         onOpenBudgetScopeSelect={openBudgetScopeSelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}
@@ -303,6 +328,7 @@ export function EditBudgetRouteScreen() {
   const { snapshot, actions } = useRainproofDataContext();
   const budget = findRouteItemById(snapshot?.budgets, route.params.budgetId);
   const openBudgetScopeSelect = useOpenBudgetScopeSelect(navigation);
+  const openBudgetPeriodSelect = useOpenBudgetPeriodSelect(navigation);
 
   if (!snapshot) {
     return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
@@ -320,6 +346,7 @@ export function EditBudgetRouteScreen() {
         budget={budget}
         onUpdateBudget={actions.updateBudget}
         onArchiveBudget={actions.archiveBudget}
+        onOpenBudgetPeriodSelect={openBudgetPeriodSelect}
         onOpenBudgetScopeSelect={openBudgetScopeSelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}
@@ -465,6 +492,44 @@ export function EditTransactionTemplateRouteScreen() {
         onOpenCategorySelect={openCategorySelect}
         onCancel={() => navigation.goBack()}
         onDone={() => navigation.goBack()}
+      />
+    </ComposerRouteScaffold>
+  );
+}
+
+export function BudgetPeriodSelectRouteScreen() {
+  const navigation = useRootStackNavigation();
+  const route = useRootStackRoute<'BudgetPeriodSelect'>();
+  const {
+    hasBudgetPeriodSelectionRequest,
+    resolveBudgetPeriodSelectionRequest,
+    unregisterBudgetPeriodSelectionRequest,
+  } = useBudgetPeriodSelectionRequests();
+  const requestId = route.params.requestId;
+  const requestExists = hasBudgetPeriodSelectionRequest(requestId);
+
+  useEffect(() => {
+    if (!requestExists) {
+      navigation.goBack();
+    }
+
+    return () => unregisterBudgetPeriodSelectionRequest(requestId);
+  }, [navigation, requestExists, requestId, unregisterBudgetPeriodSelectionRequest]);
+
+  if (!requestExists) {
+    return <RouteMessageShell message="Budget period selection expired." />;
+  }
+
+  return (
+    <ComposerRouteScaffold screenKey="budgetPeriodSelect">
+      <BudgetPeriodSelectScreen
+        selectedPeriod={route.params.selectedPeriod}
+        onBack={() => navigation.goBack()}
+        onSelect={(period) => {
+          if (resolveBudgetPeriodSelectionRequest(requestId, period)) {
+            navigation.goBack();
+          }
+        }}
       />
     </ComposerRouteScaffold>
   );

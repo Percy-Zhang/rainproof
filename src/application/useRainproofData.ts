@@ -8,10 +8,10 @@ import {
   getUpcomingBills,
   groupBalancesByCurrency,
 } from '../domain/aggregates';
-import { getBudgetMonthlyRange, getBudgetUsageFromStatsReport } from '../domain/budgets';
+import { getBudgetUsagesForPeriods } from '../domain/budgets';
+import { defaultCategories } from '../domain/categories';
 import { getEffectiveDisplayCurrency } from '../domain/currency';
 import { getDateRangeForPreset } from '../domain/dates';
-import { getStatsReport } from '../domain/statsReports';
 import type {
   AccountBalance,
   AppSnapshot,
@@ -215,20 +215,13 @@ export function useRainproofData(): RainproofDataState {
       range: monthRange,
       currencyCode: currentCurrency,
     });
-    const budgetMonthRange = getBudgetMonthlyRange();
-    const budgetExpenseReport = getStatsReport({
-      reportKind: 'expense',
-      transactions: snapshot.transactions,
+    const budgetUsage = getBudgetUsagesForPeriods({
+      accounts: snapshot.accounts,
+      budgets: snapshot.budgets.filter((budget) => budget.currencyCode === currentCurrency),
+      categories: snapshot.categories ?? defaultCategories,
       transactionLines: snapshot.transactionLines,
       transactionLinks: snapshot.transactionLinks,
-      accounts: snapshot.accounts,
-      categories: snapshot.categories,
-      range: budgetMonthRange,
-      currencyCode: currentCurrency,
-    });
-    const budgetUsage = getBudgetUsageFromStatsReport({
-      budgets: snapshot.budgets,
-      report: budgetExpenseReport,
+      transactions: snapshot.transactions,
     });
     const upcomingBills = getUpcomingBills(snapshot.recurringItems);
     const cashFlow = getCashFlowSummary({

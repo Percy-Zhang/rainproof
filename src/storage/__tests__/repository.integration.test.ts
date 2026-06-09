@@ -772,6 +772,79 @@ describe('SQLite finance repository integration', () => {
     });
   });
 
+  it('persists and updates calendar and rolling budget periods', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      await repository.addBudget({
+        name: 'Weekly spending',
+        amountMinor: 25000,
+        currencyCode: 'AUD',
+        period: 'weekly',
+        scopeType: 'overall',
+      });
+      await repository.addBudget({
+        name: 'Yearly spending',
+        amountMinor: 300000,
+        currencyCode: 'AUD',
+        period: 'yearly',
+        scopeType: 'overall',
+      });
+      await repository.addBudget({
+        name: 'Rolling week',
+        amountMinor: 30000,
+        currencyCode: 'AUD',
+        period: 'rolling_7',
+        scopeType: 'overall',
+      });
+      await repository.addBudget({
+        name: 'Rolling month',
+        amountMinor: 100000,
+        currencyCode: 'AUD',
+        period: 'rolling_30',
+        scopeType: 'overall',
+      });
+      await repository.addBudget({
+        name: 'Rolling year',
+        amountMinor: 1200000,
+        currencyCode: 'AUD',
+        period: 'rolling_365',
+        scopeType: 'overall',
+      });
+
+      let budgets = (await repository.getSnapshot()).budgets;
+      expect(budgets.map((budget) => budget.period)).toEqual([
+        'weekly',
+        'yearly',
+        'rolling_7',
+        'rolling_30',
+        'rolling_365',
+      ]);
+
+      const weekly = budgets.find((budget) => budget.period === 'weekly')!;
+      await repository.updateBudget({
+        id: weekly.id,
+        name: 'Monthly spending',
+        amountMinor: 100000,
+        currencyCode: 'AUD',
+        period: 'monthly',
+        scopeType: 'overall',
+      });
+
+      budgets = (await repository.getSnapshot()).budgets;
+      expect(budgets.find((budget) => budget.id === weekly.id)).toEqual(
+        expect.objectContaining({
+          name: 'Monthly spending',
+          amountMinor: 100000,
+          period: 'monthly',
+          sortOrder: 0,
+        }),
+      );
+      expect(budgets.find((budget) => budget.period === 'yearly')?.sortOrder).toBe(1);
+      expect(budgets.find((budget) => budget.period === 'rolling_7')?.sortOrder).toBe(2);
+      expect(budgets.find((budget) => budget.period === 'rolling_30')?.sortOrder).toBe(3);
+      expect(budgets.find((budget) => budget.period === 'rolling_365')?.sortOrder).toBe(4);
+    });
+  });
+
   it('persists multi-category budget scopes', async () => {
     await withInitializedRepository(async ({ repository }) => {
       await repository.addBudget({
@@ -2851,6 +2924,96 @@ describe('SQLite finance repository integration', () => {
           scopeItems: [{ categoryId: 'food', subcategoryId: null }],
           isActive: true,
         }),
+      ]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('normalizes removed budget periods to monthly and accepts rolling 365', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.db.execAsync(`
+        CREATE TABLE budgets (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency_code TEXT NOT NULL,
+          period TEXT NOT NULL,
+          scope_type TEXT NOT NULL,
+          category_id TEXT,
+          subcategory_id TEXT,
+          scope_items_json TEXT NOT NULL DEFAULT '[]',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (period IN ('weekly', 'monthly', 'quarterly', 'yearly', 'rolling_7', 'rolling_30', 'rolling_90'))
+        );
+
+        INSERT INTO budgets (
+          id, name, amount_minor, currency_code, period, scope_type, category_id,
+          subcategory_id, scope_items_json, sort_order, is_active, created_at, updated_at
+        ) VALUES (
+          'monthly_budget', 'Monthly spending', 100000, 'AUD', 'monthly', 'overall',
+          NULL, NULL, '[]', 2, 1,
+          '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
+        ), (
+          'calendar_budget', 'Quarterly food', 300000, 'AUD', 'quarterly', 'include',
+          'food', NULL, '[{"categoryId":"food","subcategoryId":null}]', 3, 1,
+          '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
+        ), (
+          'rolling_budget', 'Rolling 90 spending', 90000, 'AUD', 'rolling_90', 'overall',
+          NULL, NULL, '[]', 4, 1,
+          '2026-05-01T00:00:00.000Z', '2026-05-02T00:00:00.000Z'
+        );
+
+        PRAGMA user_version = 16;
+      `);
+
+      await fixture.repository.initialize('AUD');
+
+      const snapshot = await fixture.repository.getSnapshot();
+      expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      expect(snapshot.budgets).toEqual([
+        expect.objectContaining({
+          id: 'monthly_budget',
+          period: 'monthly',
+          scopeType: 'overall',
+          sortOrder: 0,
+        }),
+        expect.objectContaining({
+          id: 'calendar_budget',
+          name: 'Quarterly food',
+          amountMinor: 300000,
+          currencyCode: 'AUD',
+          period: 'monthly',
+          scopeType: 'include',
+          scopeItems: [{ categoryId: 'food', subcategoryId: null }],
+          sortOrder: 1,
+          isActive: true,
+        }),
+        expect.objectContaining({
+          id: 'rolling_budget',
+          name: 'Rolling 90 spending',
+          period: 'weekly',
+          scopeType: 'overall',
+          sortOrder: 2,
+        }),
+      ]);
+
+      await fixture.repository.addBudget({
+        name: 'Rolling year',
+        amountMinor: 1200000,
+        currencyCode: 'AUD',
+        period: 'rolling_365',
+        scopeType: 'overall',
+      });
+      expect((await fixture.repository.getSnapshot()).budgets.map((budget) => budget.period)).toEqual([
+        'monthly',
+        'monthly',
+        'weekly',
+        'rolling_365',
       ]);
     } finally {
       fixture.cleanup();

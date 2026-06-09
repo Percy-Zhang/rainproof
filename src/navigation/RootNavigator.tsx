@@ -11,6 +11,7 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import { BudgetScopeSelectionRequestProvider } from '../features/budgets/BudgetScopeSelectionContext';
+import { BudgetPeriodSelectionRequestProvider } from '../features/budgets/BudgetPeriodSelectionContext';
 import { CategorySelectionRequestProvider } from '../features/categorySelection/CategorySelectionContext';
 import { CategorySettingsDraftProvider } from '../features/settings/CategorySettingsDraftContext';
 import { colors, spacing, typography } from '../theme/tokens';
@@ -41,6 +42,7 @@ import {
   DashboardAddCardsRouteScreen,
   DashboardEditRouteScreen,
   AddTransactionTemplateRouteScreen,
+  BudgetPeriodSelectRouteScreen,
   BudgetScopeSelectRouteScreen,
   CategorySelectRouteScreen,
   CreateRecurringTransactionRouteScreen,
@@ -58,8 +60,9 @@ export function RootNavigator() {
   return (
     <CategorySettingsDraftProvider>
       <CategorySelectionRequestProvider>
-        <BudgetScopeSelectionRequestProvider>
-          <RootStack.Navigator
+        <BudgetPeriodSelectionRequestProvider>
+          <BudgetScopeSelectionRequestProvider>
+            <RootStack.Navigator
             initialRouteName="MainDrawer"
             screenOptions={{
               headerShown: false,
@@ -123,6 +126,11 @@ export function RootNavigator() {
               options={{ headerShown: false }}
             />
             <RootStack.Screen
+              name="BudgetPeriodSelect"
+              component={BudgetPeriodSelectRouteScreen}
+              options={{ headerShown: false }}
+            />
+            <RootStack.Screen
               name="BudgetScopeSelect"
               component={BudgetScopeSelectRouteScreen}
               options={{ headerShown: false }}
@@ -157,8 +165,9 @@ export function RootNavigator() {
               component={SubcategoryEditRouteScreen}
               options={{ headerShown: false }}
             />
-          </RootStack.Navigator>
-        </BudgetScopeSelectionRequestProvider>
+            </RootStack.Navigator>
+          </BudgetScopeSelectionRequestProvider>
+        </BudgetPeriodSelectionRequestProvider>
       </CategorySelectionRequestProvider>
     </CategorySettingsDraftProvider>
   );

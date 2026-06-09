@@ -33,8 +33,8 @@ export function BudgetProgressDashboardCard({
             <Text style={dashboardCardStyles.cardTitle}>{getDashboardCardDefinition('budgetProgress').title}</Text>
             <Text style={dashboardCardStyles.smallMuted}>
               {budgetProgress.activeBudgetCount === 1
-                ? '1 active monthly budget'
-                : `${budgetProgress.activeBudgetCount} active monthly budgets`}
+                ? '1 active budget'
+                : `${budgetProgress.activeBudgetCount} active budgets`}
             </Text>
           </View>
           <Text style={dashboardCardStyles.headerActionText}>View</Text>

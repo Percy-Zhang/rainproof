@@ -17,6 +17,8 @@ import {
 } from '../../domain/categories';
 import {
   getBudgetCurrencyOptions,
+  getBudgetPeriodDescription,
+  getBudgetPeriodLabel,
   getBudgetScopeItems,
   getBudgetScopeLabel,
   normalizeBudgetScopeItems,
@@ -25,6 +27,7 @@ import { parseMoneyInput } from '../../domain/money';
 import type {
   AppSnapshot,
   Budget,
+  BudgetPeriod,
   BudgetScopeItem,
   BudgetScopeType,
   CategoryDefinition,
@@ -36,6 +39,7 @@ import {
   getBudgetScopeFormSummary,
   type BudgetScopeSelectLaunchParams,
 } from './budgetScopeSelectionModel';
+import type { BudgetPeriodSelectLaunchParams } from './budgetPeriodSelectionModel';
 import { colors } from '../../theme/tokens';
 
 type BudgetFormScreenProps =
@@ -46,6 +50,10 @@ type BudgetFormScreenProps =
       onOpenBudgetScopeSelect: (
         params: BudgetScopeSelectLaunchParams,
         onConfirm: (scopeItems: BudgetScopeItem[]) => void,
+      ) => void;
+      onOpenBudgetPeriodSelect: (
+        params: BudgetPeriodSelectLaunchParams,
+        onSelect: (period: BudgetPeriod) => void,
       ) => void;
       onCancel: () => void;
       onDone: () => void;
@@ -59,6 +67,10 @@ type BudgetFormScreenProps =
       onOpenBudgetScopeSelect: (
         params: BudgetScopeSelectLaunchParams,
         onConfirm: (scopeItems: BudgetScopeItem[]) => void,
+      ) => void;
+      onOpenBudgetPeriodSelect: (
+        params: BudgetPeriodSelectLaunchParams,
+        onSelect: (period: BudgetPeriod) => void,
       ) => void;
       onCancel: () => void;
       onDone: () => void;
@@ -90,6 +102,7 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
   const [name, setName] = useState(editingBudget?.name ?? '');
   const [amount, setAmount] = useState(formatOptionalMoneyInput(editingBudget?.amountMinor));
   const [currencyCode, setCurrencyCode] = useState(editingBudget?.currencyCode ?? currencyOptions[0]?.code ?? '');
+  const [period, setPeriod] = useState<BudgetPeriod>(editingBudget?.period ?? 'monthly');
   const [scopeMode, setScopeMode] = useState<BudgetScopeMode>(getInitialBudgetScopeMode(editingBudget));
   const [scopeItems, setScopeItems] = useState<BudgetScopeItem[]>(() =>
     getInitialBudgetScopeItems(editingBudget, firstCategory),
@@ -123,6 +136,13 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
         selectedItems: normalizeBudgetScopeItems(scopeItems),
       },
       (confirmedItems) => setScopeItems(normalizeBudgetScopeItems(confirmedItems)),
+    );
+  }
+
+  function openBudgetPeriodSelect() {
+    props.onOpenBudgetPeriodSelect(
+      { selectedPeriod: period },
+      (selectedPeriod) => setPeriod(selectedPeriod),
     );
   }
 
@@ -174,7 +194,7 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
       name: name.trim() || getFallbackBudgetName(scopeMode, scopeDraft, categories),
       amountMinor,
       currencyCode,
-      period: 'monthly',
+      period,
       scopeType: scopeMode,
       categoryId: scopeMode === 'overall' ? null : primaryScopeItem?.categoryId ?? null,
       subcategoryId: scopeMode === 'overall' ? null : primaryScopeItem?.subcategoryId ?? null,
@@ -198,7 +218,7 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
           placeholder={getFallbackBudgetName(scopeMode, scopeDraft, categories)}
         />
         <TextField
-          label="Monthly limit"
+          label={`${getBudgetPeriodLabel(period)} limit`}
           value={amount}
           onChangeText={setAmount}
           placeholder="0.00"
@@ -211,6 +231,16 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
           onChange={setCurrencyCode}
           testID="budget-currency-dropdown"
         />
+
+        <FormSection label="Budget period">
+          <CategorySelectionField
+            color={colors.primary}
+            icon="calendar-outline"
+            label="Period"
+            onPress={openBudgetPeriodSelect}
+            value={`${getBudgetPeriodLabel(period)} · ${getBudgetPeriodDescription(period)}`}
+          />
+        </FormSection>
 
         <FormSection label="Scope">
           <FormChipRow>
@@ -225,7 +255,6 @@ export function BudgetFormScreen(props: BudgetFormScreenProps) {
               </Chip>
             ))}
           </FormChipRow>
-          <FormHelperText>Budgets are monthly calendar limits in v1.</FormHelperText>
         </FormSection>
 
         {scopeMode !== 'overall' ? (

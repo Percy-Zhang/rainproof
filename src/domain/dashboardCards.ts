@@ -64,7 +64,7 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
   {
     id: 'budgetProgress',
     title: 'Budget progress',
-    description: 'Monthly budget progress when active budgets exist.',
+    description: 'Current budget progress when active budgets exist.',
     previewText: 'Highest-risk budgets with used, limit, remaining, and progress.',
     defaultVisible: true,
     defaultOrder: 5,

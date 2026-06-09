@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 17;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS budgets (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (amount_minor > 0),
-  CHECK (period IN ('monthly')),
+  CHECK (period IN ('weekly', 'monthly', 'yearly', 'rolling_7', 'rolling_30', 'rolling_365')),
   CHECK (scope_type IN ('overall', 'category', 'subcategory', 'include', 'exclude')),
   CHECK (
     (scope_type = 'overall' AND category_id IS NULL AND subcategory_id IS NULL AND scope_items_json = '[]') OR
