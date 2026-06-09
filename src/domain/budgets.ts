@@ -53,6 +53,19 @@ export type BudgetUsageDisplayRow = {
   status: BudgetUsageStatus;
 };
 
+export type BudgetHistoryPoint = {
+  id: string;
+  offset: number;
+  shortLabel: string;
+  rangeLabel: string;
+  range: DateRange;
+  limitMinor: number;
+  spentMinor: number;
+  remainingMinor: number;
+  percentageUsed: number;
+  status: BudgetUsageStatus;
+};
+
 export type BudgetCurrencyOptionsInput = {
   accounts: Account[];
   currentBudgetCurrencyCode?: CurrencyCode | null;
@@ -415,6 +428,58 @@ export function getBudgetUsagesForPeriods({
     });
 }
 
+export function getBudgetHistoryForBudget({
+  accounts,
+  anchorDate = new Date(),
+  budget,
+  categories,
+  endOffset = 0,
+  pointCount = 6,
+  transactionLines,
+  transactionLinks,
+  transactions,
+}: {
+  accounts: Account[];
+  anchorDate?: Date;
+  budget: Budget;
+  categories: CategoryDefinition[];
+  endOffset?: number;
+  pointCount?: number;
+  transactionLines: TransactionLine[];
+  transactionLinks: TransactionLink[];
+  transactions: Transaction[];
+}): BudgetHistoryPoint[] {
+  const count = Math.max(1, Math.floor(pointCount));
+  const firstOffset = endOffset - count + 1;
+
+  return Array.from({ length: count }, (_, index) => firstOffset + index).map((offset) => {
+    const range = getBudgetPeriodRange(budget.period, anchorDate, offset);
+    const usage = getBudgetUsagesForPeriods({
+      accounts,
+      anchorDate,
+      budgets: [budget],
+      categories,
+      periodOffset: offset,
+      transactionLines,
+      transactionLinks,
+      transactions,
+    })[0] ?? getBudgetUsageForRows(budget, []);
+
+    return {
+      id: `${budget.id}:${offset}`,
+      offset,
+      shortLabel: getBudgetHistoryShortLabel(budget.period, range),
+      rangeLabel: formatBudgetPeriodRange(range),
+      range,
+      limitMinor: budget.amountMinor,
+      spentMinor: usage.spentMinor,
+      remainingMinor: usage.remainingMinor,
+      percentageUsed: usage.percentageUsed,
+      status: usage.status,
+    };
+  });
+}
+
 export function getBudgetUsageForRows(budget: Budget, rows: StatsReportLineRow[]): BudgetUsage {
   const matchingRows = rows.filter((row) => doesBudgetMatchRow(budget, row));
   const spentMinor = matchingRows.reduce((sum, row) => sum + row.netAmountMinor, 0);
@@ -514,6 +579,24 @@ function getOverallBudgetScopeLabel(period: BudgetPeriod): string {
 
 function pluralizeDay(value: number): string {
   return value === 1 ? 'day' : 'days';
+}
+
+function getBudgetHistoryShortLabel(period: BudgetPeriod, range: DateRange): string {
+  const start = new Date(range.startIso);
+  const end = new Date(range.endIso);
+  end.setDate(end.getDate() - 1);
+  const monthLabels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  if (period === 'yearly') {
+    return String(start.getFullYear());
+  }
+
+  if (period === 'monthly') {
+    return monthLabels[start.getMonth()];
+  }
+
+  const labelDate = isRollingBudgetPeriod(period) ? end : start;
+  return `${labelDate.getDate()} ${monthLabels[labelDate.getMonth()]}`;
 }
 
 export function getBudgetScopeDetail(

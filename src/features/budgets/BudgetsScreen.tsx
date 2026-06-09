@@ -10,17 +10,20 @@ import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { ActionButton, Card, ProgressBar } from '../../components/ui';
 import {
   formatBudgetPeriodRange,
+  getBudgetHistoryForBudget,
   getBudgetPeriodOffsetLabel,
   getBudgetPeriodRange,
   getBudgetUsageDisplayRows,
   getBudgetUsagesForPeriods,
   sortBudgetUsageDisplayRowsByDisplayOrder,
+  type BudgetHistoryPoint,
   type BudgetUsageDisplayRow,
 } from '../../domain/budgets';
 import { defaultCategories } from '../../domain/categories';
 import { formatMoney } from '../../domain/money';
 import type { AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { BudgetHistoryChart } from './BudgetHistoryChart';
 
 type BudgetsScreenProps = {
   snapshot: AppSnapshot;
@@ -36,19 +39,41 @@ export function BudgetsScreen({
   onUpdateBudgetOrder,
 }: BudgetsScreenProps) {
   const [anchorDate, setAnchorDate] = useState(() => new Date());
+  const [expandedBudgetId, setExpandedBudgetId] = useState<string | null>(null);
   const [periodOffset, setPeriodOffset] = useState(0);
   const budgetRows = useMemo(
     () => getBudgetUsageRowsForSnapshot(snapshot, anchorDate, periodOffset),
     [anchorDate, periodOffset, snapshot],
   );
+  const expandedHistory = useMemo(() => {
+    const budget = snapshot.budgets.find((candidate) => candidate.id === expandedBudgetId && candidate.isActive);
+
+    return budget
+      ? getBudgetHistoryForBudget({
+          accounts: snapshot.accounts,
+          anchorDate,
+          budget,
+          categories: snapshot.categories ?? defaultCategories,
+          endOffset: periodOffset,
+          transactionLines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          transactions: snapshot.transactions,
+        })
+      : [];
+  }, [anchorDate, expandedBudgetId, periodOffset, snapshot]);
 
   function renderBudgetRow({ item, drag, isActive }: RenderItemParams<BudgetUsageDisplayRow>) {
+    const isHistoryExpanded = item.id === expandedBudgetId;
+
     return (
       <BudgetUsageCard
         row={item}
         anchorDate={anchorDate}
         dragging={isActive}
+        historyPoints={isHistoryExpanded ? expandedHistory : []}
+        isHistoryExpanded={isHistoryExpanded}
         onDrag={drag}
+        onToggleHistory={() => setExpandedBudgetId((current) => current === item.id ? null : item.id)}
         onPress={() => onEditBudget(item.id)}
         periodOffset={periodOffset}
       />
@@ -112,14 +137,20 @@ export function BudgetsScreen({
 function BudgetUsageCard({
   anchorDate,
   dragging,
+  historyPoints,
+  isHistoryExpanded,
   onDrag,
   row,
+  onToggleHistory,
   onPress,
   periodOffset,
 }: {
   anchorDate: Date;
   dragging: boolean;
+  historyPoints: BudgetHistoryPoint[];
+  isHistoryExpanded: boolean;
   onDrag: () => void;
+  onToggleHistory: () => void;
   row: BudgetUsageDisplayRow;
   onPress: () => void;
   periodOffset: number;
@@ -131,42 +162,70 @@ function BudgetUsageCard({
 
   return (
     <ScaleDecorator>
-      <Pressable
-        accessibilityHint="Long press to reorder."
-        accessibilityRole="button"
-        delayLongPress={150}
-        onLongPress={onDrag}
-        onPress={onPress}
-        style={({ pressed }) => [styles.budgetCard, dragging && styles.draggingCard, pressed && styles.pressed]}
-        testID={`budget-row-${row.id}`}
-      >
-        <View style={styles.budgetHeader}>
-          <CategoryIconBadge color={row.color} icon={row.icon} size="md" />
-          <View style={styles.budgetTitleWrap}>
-            <Text numberOfLines={1} style={styles.budgetName}>{row.budget.name}</Text>
-            <Text numberOfLines={1} style={styles.scopeText}>
-              {row.scopeLabel}{' \u00B7 '}{row.scopeDetail}
-            </Text>
+      <View style={[styles.budgetCard, dragging && styles.draggingCard]} testID={`budget-row-${row.id}`}>
+        <Pressable
+          accessibilityHint="Long press to reorder."
+          accessibilityRole="button"
+          delayLongPress={150}
+          onLongPress={onDrag}
+          onPress={onPress}
+          style={({ pressed }) => [styles.budgetContent, pressed && styles.pressed]}
+        >
+          <View style={styles.budgetHeader}>
+            <CategoryIconBadge color={row.color} icon={row.icon} size="md" />
+            <View style={styles.budgetTitleWrap}>
+              <Text numberOfLines={1} style={styles.budgetName}>{row.budget.name}</Text>
+              <Text numberOfLines={1} style={styles.scopeText}>
+                {row.scopeLabel}{' \u00B7 '}{row.scopeDetail}
+              </Text>
+            </View>
+            <View style={styles.statusWrap}>
+              <Text style={[styles.statusPill, { color: progressColor }]}>{status.label}</Text>
+              <Ionicons name="reorder-three-outline" size={20} color={colors.muted} />
+            </View>
           </View>
-          <View style={styles.statusWrap}>
-            <Text style={[styles.statusPill, { color: progressColor }]}>{status.label}</Text>
-            <Ionicons name="reorder-three-outline" size={20} color={colors.muted} />
+
+          <Text style={styles.periodText}>
+            {periodLabel}{' \u00B7 '}{formatBudgetPeriodRange(range)}
+          </Text>
+
+          <View style={styles.amountGrid}>
+            <AmountBlock label="Used" value={formatMoney(row.spentMinor, row.budget.currencyCode)} />
+            <AmountBlock label={status.remainingLabel} value={formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode)} tone={row.remainingMinor < 0 ? 'danger' : 'default'} />
+            <AmountBlock label="Limit" value={formatMoney(row.budget.amountMinor, row.budget.currencyCode)} align="right" />
           </View>
-        </View>
 
-        <Text style={styles.periodText}>
-          {periodLabel}{' \u00B7 '}{formatBudgetPeriodRange(range)}
-        </Text>
+          <ProgressBar percentage={row.percentageUsed} color={progressColor} />
+          <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used in this period</Text>
+        </Pressable>
 
-        <View style={styles.amountGrid}>
-          <AmountBlock label="Used" value={formatMoney(row.spentMinor, row.budget.currencyCode)} />
-          <AmountBlock label={status.remainingLabel} value={formatMoney(Math.abs(row.remainingMinor), row.budget.currencyCode)} tone={row.remainingMinor < 0 ? 'danger' : 'default'} />
-          <AmountBlock label="Limit" value={formatMoney(row.budget.amountMinor, row.budget.currencyCode)} align="right" />
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: isHistoryExpanded }}
+          onPress={onToggleHistory}
+          style={({ pressed }) => [styles.historyToggle, pressed && styles.pressed]}
+          testID={`budget-history-toggle-${row.id}`}
+        >
+          <View style={styles.historyToggleLabel}>
+            <Ionicons name="bar-chart-outline" size={17} color={colors.primaryDark} />
+            <Text style={styles.historyToggleText}>History</Text>
+          </View>
+          <Ionicons
+            name={isHistoryExpanded ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={colors.primaryDark}
+          />
+        </Pressable>
 
-        <ProgressBar percentage={row.percentageUsed} color={progressColor} />
-        <Text style={styles.progressText}>{Math.min(row.percentageUsed, 999)}% used in this period</Text>
-      </Pressable>
+        {isHistoryExpanded ? (
+          <BudgetHistoryChart
+            accentColor={row.color}
+            currencyCode={row.budget.currencyCode}
+            key={`${row.id}:${periodOffset}`}
+            points={historyPoints}
+          />
+        ) : null}
+      </View>
     </ScaleDecorator>
   );
 }
@@ -362,6 +421,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 12,
   },
+  budgetContent: {
+    gap: spacing.md,
+  },
   draggingCard: {
     elevation: 8,
     opacity: 0.95,
@@ -398,6 +460,25 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     flexShrink: 0,
     gap: 2,
+  },
+  historyToggle: {
+    alignItems: 'center',
+    borderTopColor: colors.faint,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 40,
+    paddingTop: spacing.sm,
+  },
+  historyToggleLabel: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  historyToggleText: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '900',
   },
   amountGrid: {
     flexDirection: 'row',

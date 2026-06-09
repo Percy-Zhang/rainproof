@@ -4,6 +4,7 @@ import {
   calculateBudgetRemaining,
   formatBudgetPeriodRange,
   getBudgetCurrencyOptions,
+  getBudgetHistoryForBudget,
   getBudgetMonthlyRange,
   getBudgetPeriodCurrentLabel,
   getBudgetPeriodOffsetLabel,
@@ -225,6 +226,136 @@ describe('budget helpers', () => {
     expect(previousUsages.map((usage) => [usage.budget.id, usage.spentMinor])).toEqual([
       ['rolling_food', 6000],
       ['rolling_not_food', 2000],
+    ]);
+  });
+
+  it('builds compact weekly, monthly, and yearly history buckets ending at the selected period', () => {
+    const anchorDate = new Date(2026, 5, 10, 9, 30);
+    const baseInput = {
+      accounts,
+      anchorDate,
+      categories: defaultCategories,
+      pointCount: 3,
+      transactionLines: [],
+      transactionLinks: [],
+      transactions: [],
+    };
+
+    const weekly = getBudgetHistoryForBudget({
+      ...baseInput,
+      budget: makeBudget('weekly_history', 'Weekly', 10000, 'overall', null, null, 'AUD', 0, undefined, 'weekly'),
+    });
+    const monthly = getBudgetHistoryForBudget({
+      ...baseInput,
+      budget: makeBudget('monthly_history', 'Monthly', 10000, 'overall'),
+    });
+    const yearly = getBudgetHistoryForBudget({
+      ...baseInput,
+      budget: makeBudget('yearly_history', 'Yearly', 10000, 'overall', null, null, 'AUD', 0, undefined, 'yearly'),
+    });
+
+    expect(weekly.map((point) => [point.offset, point.shortLabel, point.rangeLabel])).toEqual([
+      [-2, '25 May', '25-31 May 2026'],
+      [-1, '1 Jun', '1-7 Jun 2026'],
+      [0, '8 Jun', '8-14 Jun 2026'],
+    ]);
+    expect(monthly.map((point) => [point.offset, point.shortLabel, point.rangeLabel])).toEqual([
+      [-2, 'Apr', '1-30 Apr 2026'],
+      [-1, 'May', '1-31 May 2026'],
+      [0, 'Jun', '1-30 Jun 2026'],
+    ]);
+    expect(yearly.map((point) => [point.offset, point.shortLabel])).toEqual([
+      [-2, '2024'],
+      [-1, '2025'],
+      [0, '2026'],
+    ]);
+  });
+
+  it('builds rolling history snapshots by anchor day for all rolling periods', () => {
+    const anchorDate = new Date(2026, 5, 9, 9, 30);
+    const baseInput = {
+      accounts,
+      anchorDate,
+      categories: defaultCategories,
+      pointCount: 3,
+      transactionLines: [],
+      transactionLinks: [],
+      transactions: [],
+    };
+
+    for (const period of ['rolling_7', 'rolling_30', 'rolling_365'] as const) {
+      const history = getBudgetHistoryForBudget({
+        ...baseInput,
+        budget: makeBudget(period, period, 10000, 'overall', null, null, 'AUD', 0, undefined, period),
+      });
+
+      expect(history.map((point) => [point.offset, point.shortLabel])).toEqual([
+        [-2, '7 Jun'],
+        [-1, '8 Jun'],
+        [0, '9 Jun'],
+      ]);
+      expect(new Date(history[2].range.endIso)).toEqual(new Date(2026, 5, 10));
+    }
+
+    const rolling365 = getBudgetHistoryForBudget({
+      ...baseInput,
+      budget: makeBudget('rolling_year', 'Rolling year', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_365'),
+    });
+    expect(new Date(rolling365[2].range.startIso)).toEqual(new Date(2025, 5, 10));
+  });
+
+  it('includes limit, remaining, over-budget, scope, and mixed-line data in budget history', () => {
+    const april = makeTransaction('april', 'expense', 'April groceries', '2026-04-15T12:00:00.000Z');
+    const mayMixed = makeTransaction('may_mixed', 'income', 'May pay after tax', '2026-05-15T12:00:00.000Z');
+    const june = makeTransaction('june', 'expense', 'June groceries', '2026-06-05T12:00:00.000Z');
+    const ignoredHousing = makeTransaction('housing', 'expense', 'June rent', '2026-06-06T12:00:00.000Z');
+    const history = getBudgetHistoryForBudget({
+      accounts,
+      anchorDate: new Date(2026, 5, 10, 9, 30),
+      budget: makeBudget('food_history', 'Food history', 10000, 'include', 'food', null, 'AUD', 0, [
+        { categoryId: 'food', subcategoryId: null },
+      ]),
+      categories: defaultCategories,
+      pointCount: 3,
+      transactionLines: [
+        makeLine('april_food', april.id, 'checking', -5000, 'AUD', 'food', 'groceries'),
+        makeLine('may_income', mayMixed.id, 'checking', 23000, 'AUD', 'income', 'salary'),
+        makeLine('may_food', mayMixed.id, 'checking', -12000, 'AUD', 'food', 'groceries'),
+        makeLine('june_food', june.id, 'checking', -8000, 'AUD', 'food', 'groceries'),
+        makeLine('june_housing', ignoredHousing.id, 'checking', -9000, 'AUD', 'housing', 'rent'),
+      ],
+      transactionLinks: [],
+      transactions: [april, mayMixed, june, ignoredHousing],
+    });
+
+    expect(history.map((point) => ({
+      limitMinor: point.limitMinor,
+      percentageUsed: point.percentageUsed,
+      remainingMinor: point.remainingMinor,
+      spentMinor: point.spentMinor,
+      status: point.status,
+    }))).toEqual([
+      {
+        limitMinor: 10000,
+        percentageUsed: 50,
+        remainingMinor: 5000,
+        spentMinor: 5000,
+        status: 'under_budget',
+      },
+      {
+        limitMinor: 10000,
+        percentageUsed: 120,
+        remainingMinor: -2000,
+        spentMinor: 12000,
+        status: 'over_budget',
+      },
+      {
+        limitMinor: 10000,
+        percentageUsed: 80,
+        remainingMinor: 2000,
+        spentMinor: 8000,
+        status: 'near_limit',
+      },
     ]);
   });
 
