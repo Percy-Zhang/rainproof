@@ -1,6 +1,7 @@
 import {
   buildAddTransactionPrefillFromTemplate,
   getActiveTransactionTemplates,
+  getTransactionTemplateSplitMode,
   validateTransactionTemplateInput,
 } from '../transactionTemplates';
 import type { Account, TransactionTemplate } from '../types';
@@ -176,6 +177,7 @@ describe('transaction template helpers', () => {
 
     expect(prefill).toEqual({
       kind: 'income',
+      splitMode: 'standard',
       title: 'Salary',
       amountExpression: '1250.00',
       date: '2026-05-21',
@@ -225,12 +227,145 @@ describe('transaction template helpers', () => {
     expect(prefill).toEqual(expect.objectContaining({
       amountExpression: '30.00',
       categoryId: 'food',
+      splitMode: 'standard',
       subcategoryId: 'groceries',
       splitLines: [
         { id: 'line-food', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
         { id: 'line-home', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
       ],
     }));
+  });
+
+  it('validates mixed split templates and preserves line kinds in Add Transaction prefill', () => {
+    const validated = validateTransactionTemplateInput(
+      {
+        name: 'Net pay',
+        kind: 'income',
+        splitMode: 'mixed',
+        title: 'Salary',
+        accountId: 'everyday',
+        amountMinor: 170000,
+        currencyCode: 'AUD',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        splitLines: [
+          {
+            kind: 'income',
+            amountMinor: 230000,
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Salary',
+          },
+          {
+            kind: 'expense',
+            amountMinor: 60000,
+            categoryId: 'tax',
+            subcategoryId: 'withholding',
+            note: 'Tax',
+          },
+        ],
+      },
+      accounts,
+    );
+
+    expect(validated).toEqual(expect.objectContaining({
+      splitMode: 'mixed',
+      splitLines: [
+        expect.objectContaining({ kind: 'income', amountMinor: 230000 }),
+        expect.objectContaining({ kind: 'expense', amountMinor: 60000 }),
+      ],
+    }));
+
+    const mixedTemplate = template({
+      kind: 'income',
+      title: 'Salary',
+      amountMinor: 170000,
+      categoryId: 'income',
+      subcategoryId: 'salary',
+      splitLines: validated.splitLines.map((line, index) => ({
+        id: `mixed-line-${index + 1}`,
+        templateId: 'template-1',
+        ...line,
+        note: line.note ?? '',
+        sortOrder: index,
+        createdAt: nowIso,
+      })),
+    });
+    const prefill = buildAddTransactionPrefillFromTemplate({
+      accounts,
+      template: mixedTemplate,
+      now: new Date(2026, 4, 21, 9, 15, 0, 0),
+    });
+
+    expect(getTransactionTemplateSplitMode(mixedTemplate)).toBe('mixed');
+    expect(prefill).toEqual(expect.objectContaining({
+      kind: 'income',
+      splitMode: 'mixed',
+      amountExpression: '1700.00',
+      date: '2026-05-21',
+      time: '09:15',
+      splitLines: [
+        expect.objectContaining({ kind: 'income', amount: '2300.00', note: 'Salary' }),
+        expect.objectContaining({ kind: 'expense', amount: '600.00', note: 'Tax' }),
+      ],
+    }));
+  });
+
+  it('validates mixed net-expense templates and rejects invalid mixed totals or missing line kinds', () => {
+    expect(validateTransactionTemplateInput(
+      {
+        name: 'Net expense',
+        kind: 'expense',
+        splitMode: 'mixed',
+        title: 'Purchase',
+        accountId: 'everyday',
+        amountMinor: 30000,
+        currencyCode: 'AUD',
+        splitLines: [
+          { kind: 'income', amountMinor: 20000, categoryId: 'income', subcategoryId: 'refund' },
+          { kind: 'expense', amountMinor: 50000, categoryId: 'food', subcategoryId: 'groceries' },
+        ],
+      },
+      accounts,
+    )).toEqual(expect.objectContaining({ splitMode: 'mixed' }));
+
+    expect(() =>
+      validateTransactionTemplateInput(
+        {
+          name: 'Bad mixed total',
+          kind: 'income',
+          splitMode: 'mixed',
+          title: 'Salary',
+          accountId: 'everyday',
+          amountMinor: 160000,
+          currencyCode: 'AUD',
+          splitLines: [
+            { kind: 'income', amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' },
+            { kind: 'expense', amountMinor: 60000, categoryId: 'tax', subcategoryId: 'withholding' },
+          ],
+        },
+        accounts,
+      ),
+    ).toThrow('Mixed split lines must net to the template amount.');
+
+    expect(() =>
+      validateTransactionTemplateInput(
+        {
+          name: 'Missing mixed kind',
+          kind: 'income',
+          splitMode: 'mixed',
+          title: 'Salary',
+          accountId: 'everyday',
+          amountMinor: 170000,
+          currencyCode: 'AUD',
+          splitLines: [
+            { amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' },
+            { kind: 'expense', amountMinor: 60000, categoryId: 'tax', subcategoryId: 'withholding' },
+          ],
+        },
+        accounts,
+      ),
+    ).toThrow('Choose income or expense for every mixed split line.');
   });
 
   it('keeps active templates sorted and excludes archived templates', () => {

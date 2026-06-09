@@ -160,7 +160,7 @@ export function getStatsReportLineRows({
     const transaction = transactionById.get(line.transactionId);
     if (
       !transaction ||
-      transaction.kind !== reportKind ||
+      transaction.kind === 'transfer' ||
       !isWithinDateRange(transaction.datetime, range) ||
       normalizeCurrencyCode(line.currencyCode) !== normalizedCurrencyCode ||
       (accountFilter && !accountFilter.has(line.accountId)) ||

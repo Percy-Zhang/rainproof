@@ -159,6 +159,7 @@ export type RecurringTransactionHistory = {
 };
 
 export type TransactionTemplateKind = Extract<TransactionKind, 'expense' | 'income'>;
+export type TransactionTemplateSplitMode = 'standard' | 'mixed';
 
 export type TransactionTemplate = {
   id: string;
@@ -180,6 +181,7 @@ export type TransactionTemplate = {
 export type TransactionTemplateLine = {
   id: string;
   templateId: string;
+  kind?: TransactionTemplateKind;
   amountMinor: number;
   categoryId: string;
   subcategoryId: string;
@@ -411,6 +413,7 @@ export type NewRecurringBillInput = NewRecurringItemInput;
 export type NewTransactionTemplateInput = {
   name: string;
   kind: TransactionTemplateKind;
+  splitMode?: TransactionTemplateSplitMode;
   title: string;
   accountId: string;
   amountMinor?: number | null;
@@ -423,6 +426,7 @@ export type NewTransactionTemplateInput = {
 };
 
 export type NewTransactionTemplateLineInput = {
+  kind?: TransactionTemplateKind;
   amountMinor: number;
   categoryId: string;
   subcategoryId: string;

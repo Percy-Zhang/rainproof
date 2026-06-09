@@ -304,6 +304,55 @@ describe('stats report helpers', () => {
     ]);
   });
 
+  it('counts mixed split lines by line sign instead of parent transaction kind', () => {
+    const transactions = [
+      transaction('mixed-pay', 'income', 'Pay with tax', '2026-05-20T10:00:00.000Z'),
+      transaction('transfer', 'transfer', 'Move money', '2026-05-20T11:00:00.000Z'),
+    ];
+    const transactionLines = [
+      line({
+        id: 'mixed-salary',
+        transactionId: 'mixed-pay',
+        amountMinor: 230000,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Salary',
+      }),
+      line({
+        id: 'mixed-tax',
+        transactionId: 'mixed-pay',
+        amountMinor: -60000,
+        categoryId: 'tax',
+        subcategoryId: 'withholding',
+        note: 'Tax',
+      }),
+      line({
+        id: 'transfer-out',
+        transactionId: 'transfer',
+        amountMinor: -999999,
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      }),
+    ];
+
+    const expenseReport = getExpenseReport({ transactions, transactionLines });
+    const incomeReport = getIncomeReport({ transactions, transactionLines });
+
+    expect(ids(expenseReport.rows)).toEqual(['mixed-tax']);
+    expect(expenseReport.rows[0]).toEqual(
+      expect.objectContaining({
+        reportKind: 'expense',
+        transactionId: 'mixed-pay',
+        lineId: 'mixed-tax',
+        grossAmountMinor: 60000,
+        netAmountMinor: 60000,
+        isSplitTransaction: true,
+      }),
+    );
+    expect(ids(incomeReport.rows)).toEqual(['mixed-salary']);
+    expect(incomeReport.totalGrossAmountMinor).toBe(230000);
+  });
+
   it('excludes transfers, transactions outside the period, and other currencies', () => {
     const report = getExpenseReport();
 

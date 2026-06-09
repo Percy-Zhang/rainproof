@@ -99,6 +99,48 @@ describe('dashboard financial card helpers', () => {
     ]);
   });
 
+  it('includes negative mixed split lines in top spending without combining currencies', () => {
+    const transactions = [
+      transaction({ id: 'aud_mixed_income', kind: 'income' }),
+      transaction({ id: 'usd_mixed_income', kind: 'income' }),
+    ];
+    const lines = [
+      line({
+        id: 'aud_salary',
+        transactionId: 'aud_mixed_income',
+        amountMinor: 230000,
+        currencyCode: 'AUD',
+        categoryId: 'income',
+      }),
+      line({
+        id: 'aud_tax',
+        transactionId: 'aud_mixed_income',
+        amountMinor: -60000,
+        currencyCode: 'AUD',
+        categoryId: 'tax',
+      }),
+      line({
+        id: 'usd_tax',
+        transactionId: 'usd_mixed_income',
+        accountId: 'usd_1',
+        amountMinor: -5000,
+        currencyCode: 'USD',
+        categoryId: 'tax',
+      }),
+    ];
+
+    expect(getDashboardTopSpendingByCurrency({ transactions, lines, range })).toEqual([
+      {
+        currencyCode: 'AUD',
+        rows: [{ categoryId: 'tax', currencyCode: 'AUD', amountMinor: 60000 }],
+      },
+      {
+        currencyCode: 'USD',
+        rows: [{ categoryId: 'tax', currencyCode: 'USD', amountMinor: 5000 }],
+      },
+    ]);
+  });
+
   it('returns empty grouped stats only when selected accounts have no relevant data', () => {
     const transactions = [transaction({ id: 'aud_income', kind: 'income' })];
     const lines = [

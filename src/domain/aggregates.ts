@@ -120,7 +120,7 @@ export function getSpendingByCategory({
 }): SpendingByCategory[] {
   const visibleTransactions = new Set(
     transactions
-      .filter((transaction) => transaction.kind === 'expense' && isWithinDateRange(transaction.datetime, range))
+      .filter((transaction) => transaction.kind !== 'transfer' && isWithinDateRange(transaction.datetime, range))
       .map((transaction) => transaction.id),
   );
   const accountFilter = accountIds?.length ? new Set(accountIds) : null;

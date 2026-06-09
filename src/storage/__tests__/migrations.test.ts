@@ -101,6 +101,7 @@ const currentTransactionTemplateColumns = [
 const currentTransactionTemplateLineColumns = [
   'id',
   'template_id',
+  'kind',
   'amount_minor',
   'category_id',
   'subcategory_id',
@@ -189,7 +190,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
@@ -214,7 +215,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([11, 12, 13]);
+    expect(db.versionWrites).toEqual([11, 12, 13, 14]);
     expect(db.getColumnNames('budgets')).toEqual(expect.arrayContaining(['sort_order']));
   });
 
@@ -232,7 +233,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([12, 13]);
+    expect(db.versionWrites).toEqual([12, 13, 14]);
     expect(
       db.execStatements.some((statement) => statement.includes('CREATE TABLE budgets_scope_next')),
     ).toBe(true);
@@ -252,11 +253,33 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([13]);
+    expect(db.versionWrites).toEqual([13, 14]);
     expect(
       db.execStatements.some((statement) =>
         statement.includes('CREATE TABLE IF NOT EXISTS recurring_transaction_history')),
     ).toBe(true);
+  });
+
+  it('adds mixed split template line kind when migrating from the previous schema', async () => {
+    const db = new FakeMigrationDatabase(13, {
+      accounts: currentAccountColumns,
+      transactions: currentTransactionColumns,
+      transaction_lines: currentTransactionLineColumns,
+      budgets: currentBudgetColumns,
+      recurring_items: currentRecurringItemColumns,
+      transaction_templates: currentTransactionTemplateColumns,
+      transaction_template_lines: currentTransactionTemplateLineColumns.filter(
+        (columnName) => columnName !== 'kind',
+      ),
+    });
+
+    await runMigrations(db.asMigrationDatabase());
+
+    expect(db.userVersion).toBe(SCHEMA_VERSION);
+    expect(db.versionWrites).toEqual([14]);
+    expect(db.getColumnNames('transaction_template_lines')).toEqual(
+      expect.arrayContaining(['kind']),
+    );
   });
 
   it('keeps a current database version stable when the current columns exist', async () => {

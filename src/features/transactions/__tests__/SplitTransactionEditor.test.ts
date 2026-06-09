@@ -37,6 +37,30 @@ describe('SplitTransactionEditor', () => {
     expect(onAddLine).toHaveBeenCalledTimes(1);
     expect(onRemoveLine).toHaveBeenCalledWith('line-1');
   });
+
+  it('exposes mixed split mode and line-kind controls when enabled', () => {
+    const onChangeSplitMode = jest.fn();
+    const onChangeLineKind = jest.fn();
+    const screen = renderEditor({
+      parentKind: 'income',
+      splitMode: 'mixed',
+      lines: [
+        line({ id: 'line-1', kind: 'income', amount: '23.00', categoryId: 'income', subcategoryId: 'salary' }),
+        line({ id: 'line-2', kind: 'expense', amount: '6.00' }),
+      ],
+      totalMinor: 1700,
+      onChangeSplitMode,
+      onChangeLineKind,
+    });
+
+    fireEvent.press(screen.getByTestId('split-mode-standard'));
+    fireEvent.press(screen.getByTestId('split-line-1-kind-expense'));
+
+    expect(onChangeSplitMode).toHaveBeenCalledWith('standard');
+    expect(onChangeLineKind).toHaveBeenCalledWith('line-1', 'expense');
+    expect(screen.getByText('Parent net')).toBeTruthy();
+    expect(screen.getByText('Difference')).toBeTruthy();
+  });
 });
 
 function renderEditor(overrides: Partial<React.ComponentProps<typeof SplitTransactionEditor>> = {}) {

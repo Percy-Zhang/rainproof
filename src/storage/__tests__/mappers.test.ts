@@ -162,6 +162,7 @@ describe('storage mappers', () => {
     const line = mapTransactionTemplateLine({
       id: 'template-line-1',
       template_id: 'template-1',
+      kind: null,
       amount_minor: 1250,
       category_id: 'food',
       subcategory_id: 'groceries',

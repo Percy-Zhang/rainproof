@@ -22,9 +22,15 @@ import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/
 import {
   createSplitTransactionFormLine,
   formatMinorInput,
+  getMixedSplitTransactionFormSummary,
+  getSplitLineCategoryKind,
   getSplitTransactionFormSummary,
   type SplitTransactionFormLine,
 } from '../../domain/splitTransactionForm';
+import type {
+  SplitTransactionLineKind,
+  SplitTransactionMode,
+} from '../../domain/splitTransactions';
 import {
   getTransferAmountCurrencyCode,
   isOutsideAccountId,
@@ -106,6 +112,7 @@ export function useAddTransactionController({
   const [labels, setLabels] = useState(initialDraft.labels);
   const [groupId, setGroupId] = useState(initialDraft.groupId);
   const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>(initialDraft.splitLines);
+  const [splitMode, setSplitMode] = useState<SplitTransactionMode>(initialDraft.splitMode ?? 'standard');
   const [error, setError] = useState('');
   const transactionDraft: AddTransactionDraft = {
     amountExpression,
@@ -118,6 +125,7 @@ export function useAddTransactionController({
     labels,
     notes,
     splitLines,
+    splitMode,
     subcategoryId,
     time,
     toAccountId,
@@ -136,10 +144,11 @@ export function useAddTransactionController({
     sourceAccountId: fromAccountId,
   });
   const splitTotalMinor = Math.abs(previewAmountMinor);
-  const splitSummary = useMemo(
-    () => getSplitTransactionFormSummary(splitTotalMinor, splitLines),
-    [splitLines, splitTotalMinor],
-  );
+  const splitSummary = useMemo(() => (
+    splitMode === 'mixed' && kind !== 'transfer'
+      ? getMixedSplitTransactionFormSummary({ kind, totalMinor: splitTotalMinor, lines: splitLines })
+      : getSplitTransactionFormSummary(splitTotalMinor, splitLines)
+  ), [kind, splitLines, splitMode, splitTotalMinor]);
   const amountCurrencyCode =
     kind === 'transfer'
       ? getTransferAmountCurrencyCode({ accounts: snapshot.accounts, sourceAccountId: fromAccountId, targetAccountId: toAccountId })
@@ -212,6 +221,7 @@ export function useAddTransactionController({
     setKind(nextKind);
     if (nextKind === 'transfer' || nextKind !== kind) {
       setSplitLines([]);
+      setSplitMode('standard');
       if (page === 'split') {
         setPage('amount');
       }
@@ -343,6 +353,36 @@ export function useAddTransactionController({
 
   function addSplitLine() {
     setSplitLines((current) => {
+      if (splitMode === 'mixed' && kind !== 'transfer') {
+        const summary = getMixedSplitTransactionFormSummary({
+          kind,
+          totalMinor: splitTotalMinor,
+          lines: current,
+        });
+        const lineKind: SplitTransactionLineKind =
+          summary.differenceMinor > 0
+            ? 'income'
+            : summary.differenceMinor < 0
+              ? 'expense'
+              : kind;
+        const defaultCategorySelection = resolveAddTransactionDefaultCategory({
+          categories,
+          defaults: addTransactionDefaults,
+          kind: lineKind,
+        });
+
+        return [
+          ...current,
+          createSplitTransactionFormLine({
+            id: createSplitLineId(),
+            kind: lineKind,
+            amount: summary.differenceMinor !== 0 ? formatMinorInput(Math.abs(summary.differenceMinor)) : '',
+            categoryId: defaultCategorySelection.categoryId,
+            subcategoryId: defaultCategorySelection.subcategoryId ?? '',
+          }),
+        ];
+      }
+
       const remainingMinor = getSplitTransactionFormSummary(splitTotalMinor, current).remainingMinor;
       return [
         ...current,
@@ -360,11 +400,56 @@ export function useAddTransactionController({
     setSplitLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
   }
 
+  function changeSplitMode(nextMode: SplitTransactionMode) {
+    if (kind === 'transfer') {
+      return;
+    }
+
+    setSplitMode(nextMode);
+    if (nextMode === 'mixed') {
+      setSplitLines((current) =>
+        current.map((line) => ({
+          ...line,
+          kind: line.kind ?? kind,
+        })),
+      );
+    }
+    setError('');
+  }
+
+  function changeSplitLineKind(lineId: string, lineKind: SplitTransactionLineKind) {
+    const defaultCategorySelection = resolveAddTransactionDefaultCategory({
+      categories,
+      defaults: addTransactionDefaults,
+      kind: lineKind,
+    });
+    updateSplitLine(lineId, {
+      kind: lineKind,
+      categoryId: defaultCategorySelection.categoryId,
+      subcategoryId: defaultCategorySelection.subcategoryId ?? '',
+    });
+  }
+
   function removeSplitLine(lineId: string) {
-    const nextLines = splitLines.filter((line) => line.id !== lineId);
-    if (nextLines.length === 1) {
+    let nextLines = splitLines.filter((line) => line.id !== lineId);
+    if (nextLines.length === 1 && kind !== 'transfer') {
+      const remainingLine = nextLines[0];
+      if (splitMode === 'mixed' && remainingLine.kind && remainingLine.kind !== kind) {
+        const defaultCategorySelection = resolveAddTransactionDefaultCategory({
+          categories,
+          defaults: addTransactionDefaults,
+          kind,
+        });
+        nextLines = [{
+          ...remainingLine,
+          kind,
+          categoryId: defaultCategorySelection.categoryId,
+          subcategoryId: defaultCategorySelection.subcategoryId ?? '',
+        }];
+      }
       setCategoryId(nextLines[0].categoryId);
       setSubcategoryId(nextLines[0].subcategoryId);
+      setSplitMode('standard');
     }
     setSplitLines(nextLines);
   }
@@ -396,9 +481,14 @@ export function useAddTransactionController({
     }
 
     const line = splitLines.find((candidate) => candidate.id === lineId);
+    const categoryKind = getSplitLineCategoryKind({
+      line,
+      parentKind: kind,
+      splitMode,
+    });
     onOpenCategorySelect(
       {
-        kind,
+        kind: categoryKind,
         selectedCategoryId: line?.categoryId ?? categoryId,
         selectedSubcategoryId: line?.subcategoryId ?? subcategoryId,
         selectionMode: 'subcategory',
@@ -440,6 +530,8 @@ export function useAddTransactionController({
     categories,
     categoryId,
     changeKind,
+    changeSplitLineKind,
+    changeSplitMode,
     closePicker,
     date,
     error,
@@ -479,6 +571,7 @@ export function useAddTransactionController({
     setReplaceAmountOnNextKey,
     showCurrencyCodes,
     splitLines,
+    splitMode,
     splitSummary,
     splitTotalMinor,
     subcategoryId,

@@ -25,10 +25,16 @@ import {
 } from '../../domain/categories';
 import {
   formatMinorInput,
+  getMixedSplitTransactionFormSummary,
+  getMixedSplitTransactionValidationMessage,
   getSplitTransactionFormSummary,
   getSplitTransactionValidationMessage,
   type SplitTransactionFormLine,
 } from '../../domain/splitTransactionForm';
+import type {
+  SplitTransactionLineKind,
+  SplitTransactionMode,
+} from '../../domain/splitTransactions';
 import { getFilteredTransactionItemNameSuggestions } from '../../domain/transactionItemSuggestions';
 import { formatMoney } from '../../domain/money';
 import type { CategoryDefinition, CurrencyCode } from '../../domain/types';
@@ -40,9 +46,13 @@ type SplitTransactionEditorProps = {
   currencyCode: CurrencyCode;
   itemNameSuggestions?: string[];
   lines: SplitTransactionFormLine[];
+  parentKind?: SplitTransactionLineKind;
   showCurrencyCodes: boolean;
+  splitMode?: SplitTransactionMode;
   totalMinor: number;
   onAddLine: () => void;
+  onChangeLineKind?: (lineId: string, kind: SplitTransactionLineKind) => void;
+  onChangeSplitMode?: (mode: SplitTransactionMode) => void;
   onPickCategory: (lineId: string) => void;
   onRemoveLine: (lineId: string) => void;
   onUpdateLine: (lineId: string, patch: Partial<SplitTransactionFormLine>) => void;
@@ -247,30 +257,90 @@ export function SplitTransactionEditor({
   currencyCode,
   itemNameSuggestions = [],
   lines,
+  parentKind,
   showCurrencyCodes,
+  splitMode = 'standard',
   totalMinor,
   onAddLine,
+  onChangeLineKind,
+  onChangeSplitMode,
   onPickCategory,
   onRemoveLine,
   onUpdateLine,
 }: SplitTransactionEditorProps) {
-  const summary = getSplitTransactionFormSummary(totalMinor, lines);
-  const validationMessage = getSplitTransactionValidationMessage(totalMinor, lines);
+  const supportsMixedSplit = !!parentKind && !!onChangeSplitMode && !!onChangeLineKind;
+  const mixedSummary =
+    splitMode === 'mixed' && parentKind
+      ? getMixedSplitTransactionFormSummary({ kind: parentKind, totalMinor, lines })
+      : null;
+  const standardSummary = mixedSummary ? null : getSplitTransactionFormSummary(totalMinor, lines);
+  const validationMessage =
+    mixedSummary && parentKind
+      ? getMixedSplitTransactionValidationMessage({ kind: parentKind, totalMinor, lines })
+      : getSplitTransactionValidationMessage(totalMinor, lines);
 
   return (
     <View style={styles.stack}>
-      <View style={styles.summaryGrid}>
-        <SummaryCell label="Total" value={formatMoney(totalMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} />
-        <SummaryCell
-          label="Allocated"
-          value={formatMoney(summary.allocatedMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })}
-        />
-        <SummaryCell
-          label={summary.remainingMinor === 0 ? 'Remaining' : summary.remainingMinor > 0 ? 'Left' : 'Over'}
-          value={formatMoney(Math.abs(summary.remainingMinor), currencyCode, { showCurrencyCode: showCurrencyCodes })}
-          tone={summary.remainingMinor === 0 ? 'balanced' : 'warning'}
-        />
-      </View>
+      {supportsMixedSplit ? (
+        <View style={styles.modeToggle} testID="split-mode-toggle">
+          {(['standard', 'mixed'] as const).map((mode) => {
+            const selected = splitMode === mode;
+            return (
+              <Pressable
+                key={mode}
+                accessibilityRole="button"
+                accessibilityState={{ selected }}
+                onPress={() => onChangeSplitMode(mode)}
+                style={({ pressed }) => [
+                  styles.modeOption,
+                  selected && styles.modeOptionSelected,
+                  pressed && styles.pressed,
+                ]}
+                testID={`split-mode-${mode}`}
+              >
+                <Text style={[styles.modeOptionText, selected && styles.modeOptionTextSelected]}>
+                  {mode === 'standard' ? 'Standard split' : 'Mixed split'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {mixedSummary && parentKind ? (
+        <View style={styles.summaryGrid}>
+          <SummaryCell
+            label="Parent net"
+            value={formatSignedAmount(mixedSummary.parentSignedMinor, currencyCode, showCurrencyCodes)}
+          />
+          <SummaryCell
+            label="Income"
+            value={formatSignedAmount(mixedSummary.incomeMinor, currencyCode, showCurrencyCodes)}
+          />
+          <SummaryCell
+            label="Expense"
+            value={formatSignedAmount(-mixedSummary.expenseMinor, currencyCode, showCurrencyCodes)}
+          />
+          <SummaryCell
+            label="Difference"
+            value={formatSignedAmount(mixedSummary.differenceMinor, currencyCode, showCurrencyCodes)}
+            tone={mixedSummary.differenceMinor === 0 && mixedSummary.isBalanced ? 'balanced' : 'warning'}
+          />
+        </View>
+      ) : standardSummary ? (
+        <View style={styles.summaryGrid}>
+          <SummaryCell label="Total" value={formatMoney(totalMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} />
+          <SummaryCell
+            label="Allocated"
+            value={formatMoney(standardSummary.allocatedMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })}
+          />
+          <SummaryCell
+            label={standardSummary.remainingMinor === 0 ? 'Remaining' : standardSummary.remainingMinor > 0 ? 'Left' : 'Over'}
+            value={formatMoney(Math.abs(standardSummary.remainingMinor), currencyCode, { showCurrencyCode: showCurrencyCodes })}
+            tone={standardSummary.remainingMinor === 0 ? 'balanced' : 'warning'}
+          />
+        </View>
+      ) : null}
 
       <FormError message={validationMessage && lines.length >= 2 ? validationMessage : ''} />
 
@@ -290,6 +360,31 @@ export function SplitTransactionEditor({
                 <Ionicons name="trash-outline" size={18} color={colors.danger} />
               </Pressable>
             </View>
+            {splitMode === 'mixed' && parentKind && onChangeLineKind ? (
+              <View style={styles.lineKindToggle}>
+                {(['income', 'expense'] as const).map((lineKind) => {
+                  const selected = (line.kind ?? parentKind) === lineKind;
+                  return (
+                    <Pressable
+                      key={lineKind}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      onPress={() => onChangeLineKind(line.id, lineKind)}
+                      style={({ pressed }) => [
+                        styles.lineKindOption,
+                        selected && styles.lineKindOptionSelected,
+                        pressed && styles.pressed,
+                      ]}
+                      testID={`split-line-${index + 1}-kind-${lineKind}`}
+                    >
+                      <Text style={[styles.lineKindText, selected && styles.lineKindTextSelected]}>
+                        {lineKind === 'income' ? 'Income' : 'Expense'}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : null}
             <RevealableSplitField>
               {({ onBlur, onFocus }) => (
                 <InlineField
@@ -342,6 +437,15 @@ export function SplitTransactionEditor({
       </Pressable>
     </View>
   );
+}
+
+function formatSignedAmount(
+  amountMinor: number,
+  currencyCode: CurrencyCode,
+  showCurrencyCode: boolean,
+): string {
+  const prefix = amountMinor > 0 ? '+' : amountMinor < 0 ? '-' : '';
+  return `${prefix}${formatMoney(Math.abs(amountMinor), currencyCode, { showCurrencyCode })}`;
 }
 
 function RevealableSplitField({
@@ -406,6 +510,33 @@ const styles = StyleSheet.create({
   stack: {
     gap: spacing.sm,
   },
+  modeToggle: {
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    padding: 3,
+  },
+  modeOption: {
+    alignItems: 'center',
+    borderRadius: 6,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 40,
+    paddingHorizontal: spacing.sm,
+  },
+  modeOptionSelected: {
+    backgroundColor: colors.primaryDark,
+  },
+  modeOptionText: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  modeOptionTextSelected: {
+    color: colors.surface,
+  },
   summaryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -453,6 +584,33 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: typography.body,
     fontWeight: '900',
+  },
+  lineKindToggle: {
+    backgroundColor: colors.background,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    padding: 3,
+  },
+  lineKindOption: {
+    alignItems: 'center',
+    borderRadius: 6,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 38,
+    paddingHorizontal: spacing.sm,
+  },
+  lineKindOptionSelected: {
+    backgroundColor: colors.surface,
+  },
+  lineKindText: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  lineKindTextSelected: {
+    color: colors.primaryDark,
   },
   removeButton: {
     alignItems: 'center',

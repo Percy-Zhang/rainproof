@@ -74,6 +74,7 @@ describe('Add Transaction initial draft', () => {
       dashboardAccountIds: ['dashboard'],
       initialTemplate: {
         kind: 'income',
+        splitMode: 'standard',
         title: 'Salary',
         amountExpression: '1200.00',
         date: '2026-05-31',
@@ -122,6 +123,7 @@ describe('Add Transaction initial draft', () => {
     const draft = createAddTransactionInitialDraft({
       initialTemplate: {
         kind: 'expense',
+        splitMode: 'standard',
         title: 'Groceries',
         amountExpression: '30.00',
         date: '2026-05-31',
@@ -143,12 +145,57 @@ describe('Add Transaction initial draft', () => {
       { id: 'food-line', amount: '10.00', categoryId: 'food', subcategoryId: 'groceries', note: '' },
       { id: 'home-line', amount: '20.00', categoryId: 'housing', subcategoryId: 'rent', note: 'Rent' },
     ]);
+    expect(draft.splitMode).toBe('standard');
+  });
+
+  it('uses mixed template mode and line kinds in the initial Add Transaction draft', () => {
+    const draft = createAddTransactionInitialDraft({
+      initialTemplate: {
+        kind: 'income',
+        splitMode: 'mixed',
+        title: 'Salary',
+        amountExpression: '1700.00',
+        date: '2026-05-31',
+        time: '08:30',
+        accountId: 'template',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        notes: '',
+        splitLines: [
+          {
+            id: 'salary-line',
+            kind: 'income',
+            amount: '2300.00',
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Salary',
+          },
+          {
+            id: 'tax-line',
+            kind: 'expense',
+            amount: '600.00',
+            categoryId: 'tax',
+            subcategoryId: 'withholding',
+            note: 'Tax',
+          },
+        ],
+      },
+      now: new Date(2026, 4, 30, 10, 0, 0, 0),
+      snapshot: snapshot(),
+    });
+
+    expect(draft.splitMode).toBe('mixed');
+    expect(draft.splitLines).toEqual([
+      expect.objectContaining({ id: 'salary-line', kind: 'income', amount: '2300.00' }),
+      expect.objectContaining({ id: 'tax-line', kind: 'expense', amount: '600.00' }),
+    ]);
   });
 
   it('saves template-prefilled split lines with blank item names falling back to the parent item', () => {
     const initialDraft = createAddTransactionInitialDraft({
       initialTemplate: {
         kind: 'expense',
+        splitMode: 'standard',
         title: 'Groceries',
         amountExpression: '30.00',
         date: '2026-05-31',
@@ -315,6 +362,96 @@ describe('Add Transaction initial draft', () => {
       expect.objectContaining({ amountMinor: 1000, categoryId: 'income', subcategoryId: 'salary', note: 'Split income' }),
       expect.objectContaining({ amountMinor: 2000, categoryId: 'income', subcategoryId: 'bonus', note: 'Bonus' }),
     ]);
+  });
+
+  it('builds a mixed net-income transaction from positive line inputs and line kinds', () => {
+    const input = buildAddTransactionInput({
+      accounts: [account('everyday')],
+      draft: {
+        amountExpression: '1700.00',
+        categoryId: 'income',
+        date: '2026-05-30',
+        fromAccountId: 'everyday',
+        groupId: '',
+        item: 'Pay',
+        kind: 'income',
+        labels: '',
+        notes: '',
+        splitMode: 'mixed',
+        splitLines: [
+          {
+            id: 'salary-line',
+            kind: 'income',
+            amount: '2300.00',
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Salary',
+          },
+          {
+            id: 'tax-line',
+            kind: 'expense',
+            amount: '600.00',
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: 'Tax',
+          },
+        ],
+        subcategoryId: 'salary',
+        time: '10:00',
+        toAccountId: 'outside',
+      },
+    });
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({ id: 'salary-line', amountMinor: 230000, note: 'Salary' }),
+      expect.objectContaining({ id: 'tax-line', amountMinor: -60000, note: 'Tax' }),
+    ]);
+    expect(input.lines.reduce((sum, line) => sum + line.amountMinor, 0)).toBe(170000);
+  });
+
+  it('builds a mixed net-expense transaction and rejects mismatched signed totals', () => {
+    const draft = {
+      amountExpression: '300.00',
+      categoryId: 'food',
+      date: '2026-05-30',
+      fromAccountId: 'everyday',
+      groupId: '',
+      item: 'Net expense',
+      kind: 'expense' as const,
+      labels: '',
+      notes: '',
+      splitMode: 'mixed' as const,
+      splitLines: [
+        {
+          id: 'refund-line',
+          kind: 'income' as const,
+          amount: '200.00',
+          categoryId: 'income',
+          subcategoryId: 'refund',
+          note: 'Refund',
+        },
+        {
+          id: 'expense-line',
+          kind: 'expense' as const,
+          amount: '500.00',
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+          note: 'Purchase',
+        },
+      ],
+      subcategoryId: 'groceries',
+      time: '10:00',
+      toAccountId: 'outside',
+    };
+
+    expect(buildAddTransactionInput({ accounts: [account('everyday')], draft }).lines.map((line) => line.amountMinor)).toEqual([
+      20000,
+      -50000,
+    ]);
+    expect(canBuildAddTransactionInput({
+      accounts: [account('everyday')],
+      draft: { ...draft, amountExpression: '299.99' },
+    })).toBe(false);
   });
 
   it('validates invalid amount, account, category, and split totals', () => {

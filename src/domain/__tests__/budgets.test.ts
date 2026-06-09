@@ -85,6 +85,33 @@ describe('budget helpers', () => {
     ]);
   });
 
+  it('counts only negative mixed split lines in expense budget usage', () => {
+    const mixedIncome = makeTransaction('mixed_income', 'income', 'Pay with tax');
+    const lines = [
+      makeLine('mixed_salary', mixedIncome.id, 'checking', 230000, 'AUD', 'income', 'salary'),
+      makeLine('mixed_tax', mixedIncome.id, 'checking', -60000, 'AUD', 'food', 'groceries'),
+    ];
+    const report = getExpenseReport({
+      transactions: [mixedIncome],
+      lines,
+    });
+
+    const usages = getBudgetUsageFromStatsReport({
+      budgets: [
+        makeBudget('overall', 'Overall', 100000, 'overall'),
+        makeBudget('food', 'Food', 100000, 'category', 'food'),
+        makeBudget('income', 'Income', 100000, 'category', 'income'),
+      ],
+      report,
+    });
+
+    expect(usages).toEqual([
+      expect.objectContaining({ budget: expect.objectContaining({ id: 'overall' }), spentMinor: 60000 }),
+      expect.objectContaining({ budget: expect.objectContaining({ id: 'food' }), spentMinor: 60000 }),
+      expect.objectContaining({ budget: expect.objectContaining({ id: 'income' }), spentMinor: 0 }),
+    ]);
+  });
+
   it('calculates include and exclude category scopes from expense report rows', () => {
     const splitExpense = makeTransaction('split_expense', 'expense', 'Split shop');
     const fuelExpense = makeTransaction('fuel_expense', 'expense', 'Fuel');

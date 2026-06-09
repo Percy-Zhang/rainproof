@@ -82,6 +82,8 @@ export function EditTransactionScreen({
     canSave,
     categories,
     changeKind,
+    changeSplitLineKind,
+    changeSplitMode,
     closePicker,
     confirmDelete,
     deleteCurrentTransaction,
@@ -152,7 +154,13 @@ export function EditTransactionScreen({
             <Text style={styles.backButtonText}>{page === 'split' ? 'Edit' : 'Back'}</Text>
           </Pressable>
         </View>
-        <Text style={styles.title}>{page === 'split' ? `Split ${draft?.kind ?? 'transaction'}` : 'Edit transaction'}</Text>
+        <Text style={styles.title}>
+          {page === 'split'
+            ? draft?.splitMode === 'mixed'
+              ? 'Mixed split'
+              : `Split ${draft?.kind ?? 'transaction'}`
+            : 'Edit transaction'}
+        </Text>
         <View style={styles.headerActions}>
           {draft && draft.kind !== 'transfer' ? (
             <Pressable
@@ -189,9 +197,13 @@ export function EditTransactionScreen({
             currencyCode={amountCurrencyCode}
             lines={getEditableSplitLines(draft)}
             itemNameSuggestions={itemHistory}
+            parentKind={draft.kind === 'transfer' ? undefined : draft.kind}
             showCurrencyCodes={showCurrencyCodes}
+            splitMode={draft.splitMode ?? 'standard'}
             totalMinor={getSplitTotalMinor(draft)}
             onAddLine={addSplitLine}
+            onChangeLineKind={changeSplitLineKind}
+            onChangeSplitMode={changeSplitMode}
             onPickCategory={(lineId) => {
               openSplitLineCategorySelect(lineId);
             }}

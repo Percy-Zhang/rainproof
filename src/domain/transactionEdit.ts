@@ -7,13 +7,20 @@ import {
 import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
-import { createSplitTransactionFormLine } from './splitTransactionForm';
+import {
+  buildMixedSplitLinesFromForm,
+  createSplitTransactionFormLine,
+} from './splitTransactionForm';
 import {
   buildSplitTransactionLines,
+  getSplitLineKindFromAmount,
+  isMixedSplitTransactionLines,
   isSplitTransaction,
   sumSplitTransactionLinesMinor,
   validateSplitTransactionLines,
   type SplitTransactionDraftLine,
+  type SplitTransactionLineKind,
+  type SplitTransactionMode,
 } from './splitTransactions';
 import type {
   Account,
@@ -48,10 +55,12 @@ export type TransactionEditDraft = {
   sourceLineId?: string;
   targetLineId?: string;
   splitLines?: TransactionEditSplitLineDraft[];
+  splitMode?: SplitTransactionMode;
 };
 
 export type TransactionEditSplitLineDraft = {
   id: string;
+  kind?: SplitTransactionLineKind;
   amount: string;
   categoryId: string;
   subcategoryId: string;
@@ -108,7 +117,8 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
   }
 
   if (isSplitTransaction(transaction, lines)) {
-    validateSplitTransactionLines({ kind: transaction.kind, lines });
+    const splitMode: SplitTransactionMode = isMixedSplitTransactionLines(lines) ? 'mixed' : 'standard';
+    validateSplitTransactionLines({ kind: transaction.kind, lines, mode: splitMode });
     const firstLine = lines[0];
     const categoryId = normalizeCategoryId(firstLine.categoryId || defaultCategory.id, snapshot.categories);
 
@@ -131,7 +141,10 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
       notes: transaction.notes,
       labels: transaction.labels.join(', '),
       groupId: transaction.groupId,
-      splitLines: lines.map((line) => toTransactionEditSplitLineDraft(line, snapshot.categories)),
+      splitLines: lines.map((line) =>
+        toTransactionEditSplitLineDraft(line, snapshot.categories, splitMode === 'mixed'),
+      ),
+      splitMode,
     };
   }
 
@@ -203,6 +216,8 @@ export function buildTransactionUpdateInput(
   }
 
   if ((draft.splitLines?.length ?? 0) >= 2) {
+    const splitLines = draft.splitLines ?? [];
+    const parentKind = draft.kind as SplitTransactionLineKind;
     return {
       id: draft.id,
       kind: draft.kind,
@@ -211,14 +226,27 @@ export function buildTransactionUpdateInput(
       notes: draft.notes,
       labels,
       groupId: draft.groupId,
-      lines: buildSplitTransactionLines({
-        kind: draft.kind,
-        accountId: account.id,
-        currencyCode: account.currencyCode,
-        parentTitle: draft.title,
-        totalMinor: amountMinor,
-        splitLines: (draft.splitLines ?? []).map(toSplitTransactionDraftLine),
-      }),
+      lines:
+        draft.splitMode === 'mixed'
+          ? buildMixedSplitLinesFromForm({
+              kind: parentKind,
+              accountId: account.id,
+              currencyCode: account.currencyCode,
+              parentTitle: draft.title,
+              totalMinor: amountMinor,
+              lines: splitLines.map((line) => ({
+                ...line,
+                kind: line.kind ?? parentKind,
+              })),
+            })
+          : buildSplitTransactionLines({
+              kind: draft.kind,
+              accountId: account.id,
+              currencyCode: account.currencyCode,
+              parentTitle: draft.title,
+              totalMinor: amountMinor,
+              splitLines: splitLines.map(toSplitTransactionDraftLine),
+            }),
     };
   }
 
@@ -271,12 +299,14 @@ export function getEditableTransactionEditSplitLines(
   return [
     createSplitTransactionFormLine({
       id: current.lineId ?? `${current.id}-split-1`,
+      kind: current.kind === 'transfer' ? undefined : current.kind,
       amount: current.amount,
       categoryId: current.categoryId,
       subcategoryId: current.subcategoryId,
     }),
     createSplitTransactionFormLine({
       id: `${current.id}-split-2`,
+      kind: current.kind === 'transfer' ? undefined : current.kind,
       categoryId: current.categoryId,
       subcategoryId: current.subcategoryId,
     }),
@@ -458,6 +488,7 @@ function toSplitTransactionDraftLine(line: TransactionEditSplitLineDraft): Split
 function toTransactionEditSplitLineDraft(
   line: TransactionLine,
   categories: AppSnapshot['categories'],
+  includeKind = false,
 ): TransactionEditSplitLineDraft {
   const categoryId = normalizeCategoryId(line.categoryId, categories);
 
@@ -467,6 +498,9 @@ function toTransactionEditSplitLineDraft(
     categoryId,
     subcategoryId: normalizeSubcategoryId(categoryId, line.subcategoryId, categories),
     note: line.note,
+    ...(includeKind
+      ? { kind: getSplitLineKindFromAmount(line.amountMinor) ?? undefined }
+      : {}),
   };
 }
 

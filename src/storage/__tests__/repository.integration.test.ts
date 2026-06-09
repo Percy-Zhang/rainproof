@@ -478,6 +478,7 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
   transaction_template_lines: [
     'id',
     'template_id',
+    'kind',
     'amount_minor',
     'category_id',
     'subcategory_id',
@@ -1221,6 +1222,100 @@ describe('SQLite finance repository integration', () => {
           ],
         }),
       );
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
+    });
+  });
+
+  it('persists and updates mixed split templates without creating ledger activity', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+
+      await repository.addTransactionTemplate({
+        name: 'Net pay',
+        kind: 'income',
+        splitMode: 'mixed',
+        title: 'Salary',
+        accountId: everyday.id,
+        amountMinor: 170000,
+        currencyCode: 'AUD',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        notes: '',
+        splitLines: [
+          {
+            kind: 'income',
+            amountMinor: 230000,
+            categoryId: 'income',
+            subcategoryId: 'salary',
+            note: 'Salary',
+          },
+          {
+            kind: 'expense',
+            amountMinor: 60000,
+            categoryId: 'tax',
+            subcategoryId: 'withholding',
+            note: 'Tax',
+          },
+        ],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const template = snapshot.transactionTemplates[0];
+      expect(template).toEqual(expect.objectContaining({
+        name: 'Net pay',
+        kind: 'income',
+        amountMinor: 170000,
+        splitLines: [
+          expect.objectContaining({ kind: 'income', amountMinor: 230000, note: 'Salary' }),
+          expect.objectContaining({ kind: 'expense', amountMinor: 60000, note: 'Tax' }),
+        ],
+      }));
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
+
+      await repository.updateTransactionTemplate({
+        id: template.id,
+        name: 'Net expense',
+        kind: 'expense',
+        splitMode: 'mixed',
+        title: 'Purchase',
+        accountId: everyday.id,
+        amountMinor: 30000,
+        currencyCode: 'AUD',
+        categoryId: 'food-dining',
+        subcategoryId: 'groceries',
+        notes: '',
+        splitLines: [
+          {
+            kind: 'income',
+            amountMinor: 20000,
+            categoryId: 'income',
+            subcategoryId: 'refund',
+            note: 'Refund',
+          },
+          {
+            kind: 'expense',
+            amountMinor: 50000,
+            categoryId: 'food-dining',
+            subcategoryId: 'groceries',
+            note: 'Purchase',
+          },
+        ],
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactionTemplates[0]).toEqual(expect.objectContaining({
+        name: 'Net expense',
+        kind: 'expense',
+        amountMinor: 30000,
+        splitLines: [
+          expect.objectContaining({ kind: 'income', amountMinor: 20000, note: 'Refund' }),
+          expect.objectContaining({ kind: 'expense', amountMinor: 50000, note: 'Purchase' }),
+        ],
+      }));
       expect(snapshot.transactions).toEqual([]);
       expect(snapshot.transactionLines).toEqual([]);
       expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });

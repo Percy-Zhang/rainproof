@@ -95,7 +95,7 @@ export function getDashboardTopSpendingByCurrency({
     lines,
     range,
     transactions,
-    includeKinds: new Set(['expense']),
+    includeKinds: new Set(['expense', 'income']),
     onlyNegativeLines: true,
   });
   const safeLimit = Math.max(1, Math.trunc(perCurrencyLimit));

@@ -13,8 +13,14 @@ import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/
 import {
   createSplitTransactionFormLine,
   formatMinorInput,
+  getMixedSplitTransactionFormSummary,
+  getSplitLineCategoryKind,
   getSplitTransactionFormSummary,
 } from '../../domain/splitTransactionForm';
+import type {
+  SplitTransactionLineKind,
+  SplitTransactionMode,
+} from '../../domain/splitTransactions';
 import {
   buildTransactionUpdateInput,
   canBuildTransactionUpdateInput,
@@ -196,6 +202,35 @@ export function useEditTransactionController({
 
       const splitLines = getEditableTransactionEditSplitLines(current);
       const totalMinor = getTransactionEditDraftTotalMinor(current);
+      if (current.splitMode === 'mixed' && current.kind !== 'transfer') {
+        const summary = getMixedSplitTransactionFormSummary({
+          kind: current.kind,
+          totalMinor,
+          lines: splitLines,
+        });
+        const lineKind: SplitTransactionLineKind =
+          summary.differenceMinor > 0
+            ? 'income'
+            : summary.differenceMinor < 0
+              ? 'expense'
+              : current.kind;
+        const defaultCategory = getDefaultCategoryForKind(lineKind, categories);
+
+        return {
+          ...current,
+          splitLines: [
+            ...splitLines,
+            createSplitTransactionFormLine({
+              id: `${current.id}-split-${splitLines.length + 1}-${Date.now()}`,
+              kind: lineKind,
+              amount: summary.differenceMinor !== 0 ? formatMinorInput(Math.abs(summary.differenceMinor)) : '',
+              categoryId: defaultCategory.id,
+              subcategoryId: getDefaultSubcategoryId(defaultCategory),
+            }),
+          ],
+        };
+      }
+
       const remainingMinor = getSplitTransactionFormSummary(totalMinor, splitLines).remainingMinor;
 
       return {
@@ -224,20 +259,68 @@ export function useEditTransactionController({
     );
   }
 
+  function changeSplitMode(splitMode: SplitTransactionMode) {
+    setDraft((current) => {
+      if (!current || current.kind === 'transfer') {
+        return current;
+      }
+
+      const parentKind = current.kind;
+      return {
+        ...current,
+        splitMode,
+        splitLines:
+          splitMode === 'mixed'
+            ? getEditableTransactionEditSplitLines(current).map((line) => ({
+                ...line,
+                kind: line.kind ?? parentKind,
+              }))
+            : getEditableTransactionEditSplitLines(current),
+      };
+    });
+    setError('');
+  }
+
+  function changeSplitLineKind(lineId: string, lineKind: SplitTransactionLineKind) {
+    const defaultCategory = getDefaultCategoryForKind(lineKind, categories);
+    updateSplitLine(lineId, {
+      kind: lineKind,
+      categoryId: defaultCategory.id,
+      subcategoryId: getDefaultSubcategoryId(defaultCategory),
+    });
+  }
+
   function removeSplitLine(lineId: string) {
     setDraft((current) => {
       if (!current) {
         return current;
       }
 
-      const splitLines = getEditableTransactionEditSplitLines(current).filter((line) => line.id !== lineId);
-      const remainingLine = splitLines.length === 1 ? splitLines[0] : undefined;
+      let splitLines = getEditableTransactionEditSplitLines(current).filter((line) => line.id !== lineId);
+      let remainingLine = splitLines.length === 1 ? splitLines[0] : undefined;
+      if (
+        remainingLine &&
+        current.kind !== 'transfer' &&
+        current.splitMode === 'mixed' &&
+        remainingLine.kind &&
+        remainingLine.kind !== current.kind
+      ) {
+        const defaultCategory = getDefaultCategoryForKind(current.kind, categories);
+        remainingLine = {
+          ...remainingLine,
+          kind: current.kind,
+          categoryId: defaultCategory.id,
+          subcategoryId: getDefaultSubcategoryId(defaultCategory),
+        };
+        splitLines = [remainingLine];
+      }
 
       return {
         ...current,
         categoryId: remainingLine?.categoryId ?? current.categoryId,
         subcategoryId: remainingLine?.subcategoryId ?? current.subcategoryId,
         splitLines: splitLines.length ? splitLines : undefined,
+        splitMode: splitLines.length >= 2 ? current.splitMode : 'standard',
       };
     });
   }
@@ -259,6 +342,7 @@ export function useEditTransactionController({
             categoryId: kind === 'transfer' ? '' : defaultCategory.id,
             subcategoryId: kind === 'transfer' ? '' : getDefaultSubcategoryId(defaultCategory),
             splitLines: kind !== 'transfer' && kind === current.kind ? current.splitLines : undefined,
+            splitMode: kind !== 'transfer' && kind === current.kind ? current.splitMode : 'standard',
           }
         : current,
     );
@@ -363,9 +447,14 @@ export function useEditTransactionController({
     }
 
     const line = getEditableTransactionEditSplitLines(draft).find((candidate) => candidate.id === lineId);
+    const categoryKind = getSplitLineCategoryKind({
+      line,
+      parentKind: draft.kind,
+      splitMode: draft.splitMode ?? 'standard',
+    });
     onOpenCategorySelect(
       {
-        kind: draft.kind,
+        kind: categoryKind,
         selectedCategoryId: line?.categoryId ?? draft.categoryId,
         selectedSubcategoryId: line?.subcategoryId ?? draft.subcategoryId,
         selectionMode: 'subcategory',
@@ -398,6 +487,8 @@ export function useEditTransactionController({
     canSave,
     categories,
     changeKind,
+    changeSplitLineKind,
+    changeSplitMode,
     closePicker,
     confirmDelete,
     deleteCurrentTransaction,

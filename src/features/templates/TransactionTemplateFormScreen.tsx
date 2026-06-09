@@ -31,11 +31,18 @@ import { formatMoney, parseMoneyInput } from '../../domain/money';
 import {
   createSplitTransactionFormLine,
   formatMinorInput,
+  getMixedSplitTransactionFormSummary,
+  getSplitLineCategoryKind,
   getSplitTransactionFormSummary,
   type SplitTransactionFormLine,
 } from '../../domain/splitTransactionForm';
+import type {
+  SplitTransactionLineKind,
+  SplitTransactionMode,
+} from '../../domain/splitTransactions';
 import {
   getTemplateCurrencyCodeForAccount,
+  getTransactionTemplateSplitMode,
   validateTransactionTemplateInput,
 } from '../../domain/transactionTemplates';
 import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
@@ -116,11 +123,15 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
     (editingTemplate?.splitLines ?? []).map((line) =>
       createSplitTransactionFormLine({
         id: line.id,
+        kind: line.kind,
         amount: formatMinorInput(line.amountMinor),
         categoryId: line.categoryId,
         subcategoryId: line.subcategoryId,
         note: line.note,
       })),
+  );
+  const [splitMode, setSplitMode] = useState<SplitTransactionMode>(
+    editingTemplate ? getTransactionTemplateSplitMode(editingTemplate) : 'standard',
   );
   const [confirmArchive, setConfirmArchive] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -151,7 +162,10 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   const nameSuggestions = useAutocompleteOptions(itemNameSuggestionValues, name);
   const titleSuggestions = useAutocompleteOptions(itemNameSuggestionValues, title);
   const splitTotalMinor = getTemplateAmountMinor(amount);
-  const splitSummary = getSplitTransactionFormSummary(splitTotalMinor, splitLines);
+  const splitSummary =
+    splitMode === 'mixed'
+      ? getMixedSplitTransactionFormSummary({ kind, totalMinor: splitTotalMinor, lines: splitLines })
+      : getSplitTransactionFormSummary(splitTotalMinor, splitLines);
 
   useFocusEffect(
     useCallback(() => {
@@ -173,6 +187,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
     setCategoryId(null);
     setSubcategoryId(null);
     setSplitLines([]);
+    setSplitMode('standard');
     setConfirmArchive(false);
     setConfirmDelete(false);
     setError('');
@@ -244,6 +259,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
     return {
       name,
       kind,
+      splitMode,
       title,
       accountId,
       amountMinor: parseOptionalTemplateAmount(amount),
@@ -252,6 +268,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
       subcategoryId,
       notes,
       splitLines: splitLines.map((line) => ({
+        ...(splitMode === 'mixed' ? { kind: line.kind ?? kind } : {}),
         amountMinor: Math.abs(parseMoneyInput(line.amount)),
         categoryId: line.categoryId,
         subcategoryId: line.subcategoryId,
@@ -295,11 +312,18 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
     setSubcategoryId(null);
   }
 
-  function getSplitBaseCategorySelection() {
-    const category = categoryId ? getCategory(categoryId, categories) : getDefaultCategoryForKind(kind, categories);
+  function getSplitBaseCategorySelection(lineKind: SplitTransactionLineKind = kind) {
+    const selectedCategory = categoryId ? getCategory(categoryId, categories) : undefined;
+    const category =
+      selectedCategory?.type === lineKind
+        ? selectedCategory
+        : getDefaultCategoryForKind(lineKind, categories);
     return {
       categoryId: category.id,
-      subcategoryId: subcategoryId ?? getDefaultSubcategoryId(category),
+      subcategoryId:
+        category.id === selectedCategory?.id
+          ? subcategoryId ?? getDefaultSubcategoryId(category)
+          : getDefaultSubcategoryId(category),
     };
   }
 
@@ -321,6 +345,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
         subcategoryId: selection.subcategoryId,
       }),
     ]);
+    setSplitMode('standard');
     setError('');
   }
 
@@ -338,21 +363,65 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
       setSubcategoryId(splitLines[0].subcategoryId);
     }
     setSplitLines([]);
+    setSplitMode('standard');
     setError('');
   }
 
   function addSplitLine() {
-    const selection = getSplitBaseCategorySelection();
-    const remainingMinor = getSplitTransactionFormSummary(getTemplateAmountMinor(amount), splitLines).remainingMinor;
+    let lineKind: SplitTransactionLineKind = kind;
+    let remainingMinor: number;
+    if (splitMode === 'mixed') {
+      const summary = getMixedSplitTransactionFormSummary({
+        kind,
+        totalMinor: getTemplateAmountMinor(amount),
+        lines: splitLines,
+      });
+      lineKind =
+        summary.differenceMinor > 0
+          ? 'income'
+          : summary.differenceMinor < 0
+            ? 'expense'
+            : kind;
+      remainingMinor = Math.abs(summary.differenceMinor);
+    } else {
+      remainingMinor = getSplitTransactionFormSummary(
+        getTemplateAmountMinor(amount),
+        splitLines,
+      ).remainingMinor;
+    }
+    const selection = getSplitBaseCategorySelection(lineKind);
     setSplitLines((current) => [
       ...current,
       createSplitTransactionFormLine({
         id: createTemplateSplitLineId(),
+        kind: splitMode === 'mixed' ? lineKind : undefined,
         amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
         categoryId: selection.categoryId,
         subcategoryId: selection.subcategoryId,
       }),
     ]);
+  }
+
+  function changeSplitMode(nextMode: SplitTransactionMode) {
+    setSplitMode(nextMode);
+    if (nextMode === 'mixed') {
+      setSplitLines((current) =>
+        current.map((line) => ({
+          ...line,
+          kind: line.kind ?? kind,
+        })),
+      );
+    }
+    setError('');
+  }
+
+  function changeSplitLineKind(lineId: string, lineKind: SplitTransactionLineKind) {
+    const selection = getSplitBaseCategorySelection(lineKind);
+    updateSplitLine(lineId, {
+      kind: lineKind,
+      categoryId: selection.categoryId,
+      subcategoryId: selection.subcategoryId,
+    });
   }
 
   function updateSplitLine(lineId: string, patch: Partial<SplitTransactionFormLine>) {
@@ -365,6 +434,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
       setCategoryId(nextLines[0].categoryId);
       setSubcategoryId(nextLines[0].subcategoryId);
       setSplitLines([]);
+      setSplitMode('standard');
       setPage('form');
       return;
     }
@@ -373,11 +443,16 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   }
 
   function openSplitLineCategorySelect(lineId: string) {
-    const selection = getSplitBaseCategorySelection();
     const line = splitLines.find((candidate) => candidate.id === lineId);
+    const lineKind = getSplitLineCategoryKind({
+      line,
+      parentKind: kind,
+      splitMode,
+    });
+    const selection = getSplitBaseCategorySelection(lineKind);
     props.onOpenCategorySelect(
       {
-        kind,
+        kind: lineKind,
         selectedCategoryId: line?.categoryId ?? selection.categoryId,
         selectedSubcategoryId: line?.subcategoryId ?? selection.subcategoryId,
         selectionMode: 'subcategory',
@@ -420,7 +495,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
   if (page === 'split') {
     return (
       <FormScreenShell
-        title={`Split ${kind} template`}
+        title={splitMode === 'mixed' ? 'Mixed split template' : `Split ${kind} template`}
         onBack={() => setPage('form')}
         onSave={() => setPage('form')}
         saveLabel="Done"
@@ -432,9 +507,13 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
             currencyCode={currencyCode}
             itemNameSuggestions={itemNameSuggestionValues}
             lines={splitLines}
+            parentKind={kind}
             showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
+            splitMode={splitMode}
             totalMinor={splitTotalMinor}
             onAddLine={addSplitLine}
+            onChangeLineKind={changeSplitLineKind}
+            onChangeSplitMode={changeSplitMode}
             onPickCategory={openSplitLineCategorySelect}
             onRemoveLine={removeSplitLine}
             onUpdateLine={updateSplitLine}
@@ -518,7 +597,8 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
           <SplitTemplateSummaryRow
             kind={kind}
             lineCount={splitLines.length}
-            splitSummary={splitSummary}
+            isBalanced={splitSummary.isBalanced}
+            splitMode={splitMode}
             totalMinor={splitTotalMinor}
             currencyCode={currencyCode}
             showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
@@ -546,6 +626,7 @@ export function TransactionTemplateFormScreen(props: TransactionTemplateFormScre
             kind={kind}
             name={name}
             splitLineCount={splitLines.length}
+            splitMode={splitMode}
             subcategoryId={subcategoryId}
             title={title}
           />
@@ -584,6 +665,7 @@ function TemplatePreview({
   kind,
   name,
   splitLineCount,
+  splitMode,
   subcategoryId,
   title,
 }: {
@@ -594,6 +676,7 @@ function TemplatePreview({
   kind: TransactionTemplateKind;
   name: string;
   splitLineCount: number;
+  splitMode: SplitTransactionMode;
   subcategoryId: string | null;
   title: string;
 }) {
@@ -601,13 +684,19 @@ function TemplatePreview({
   const icon = getCategorySelectionIcon(categoryId, subcategoryId, categories, kind);
   const label = title.trim() || name.trim() || 'New transaction';
   const amountLabel = amount.trim() ? `${currencyCode} ${amount.trim()}` : 'Amount set when adding';
+  const kindLabel =
+    splitLineCount >= 2
+      ? splitMode === 'mixed'
+        ? 'Mixed split'
+        : `Split ${capitalize(kind)}`
+      : capitalize(kind);
 
   return (
     <FormPreviewRow
       color={color}
       icon={icon}
       title={label}
-      detail={`${splitLineCount >= 2 ? `Split ${capitalize(kind)}` : capitalize(kind)} / ${amountLabel}`}
+      detail={`${kindLabel} / ${amountLabel}`}
     />
   );
 }
@@ -661,24 +750,31 @@ function TemplateAccountRow({
 function SplitTemplateSummaryRow({
   currencyCode,
   kind,
+  isBalanced,
   lineCount,
   onPress,
   showCurrencyCodes,
-  splitSummary,
+  splitMode,
   totalMinor,
 }: {
   currencyCode: string;
   kind: TransactionTemplateKind;
+  isBalanced: boolean;
   lineCount: number;
   onPress: () => void;
   showCurrencyCodes: boolean;
-  splitSummary: ReturnType<typeof getSplitTransactionFormSummary>;
+  splitMode: SplitTransactionMode;
   totalMinor: number;
 }) {
   const hasSplitLines = lineCount >= 2;
   const detail = hasSplitLines
-    ? `${lineCount} lines / ${splitSummary.isBalanced ? 'Ready' : 'Needs total'} / ${formatMoney(totalMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })}`
+    ? `${lineCount} lines / ${isBalanced ? 'Ready' : 'Needs total'} / ${formatMoney(totalMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })}`
     : `Create a split ${kind} template`;
+  const title = hasSplitLines
+    ? splitMode === 'mixed'
+      ? 'Mixed split template'
+      : `Split ${kind} template`
+    : 'Normal template';
 
   return (
     <Pressable
@@ -691,9 +787,7 @@ function SplitTemplateSummaryRow({
         <Ionicons name="git-branch-outline" size={18} color={colors.primaryDark} />
       </View>
       <View style={styles.selectorText}>
-        <Text numberOfLines={1} style={styles.selectorTitle}>
-          {hasSplitLines ? `Split ${kind} template` : 'Normal template'}
-        </Text>
+        <Text numberOfLines={1} style={styles.selectorTitle}>{title}</Text>
         <Text numberOfLines={1} style={styles.selectorDetail}>{detail}</Text>
       </View>
       <Ionicons name="chevron-forward" size={18} color={colors.muted} />

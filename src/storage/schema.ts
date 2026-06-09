@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -173,12 +173,14 @@ ON transaction_templates(is_active, name);
 CREATE TABLE IF NOT EXISTS transaction_template_lines (
   id TEXT PRIMARY KEY NOT NULL,
   template_id TEXT NOT NULL REFERENCES transaction_templates(id) ON DELETE CASCADE,
+  kind TEXT,
   amount_minor INTEGER NOT NULL,
   category_id TEXT NOT NULL DEFAULT '',
   subcategory_id TEXT NOT NULL DEFAULT '',
   note TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
+  CHECK (kind IS NULL OR kind IN ('expense', 'income')),
   CHECK (amount_minor > 0),
   CHECK (category_id <> ''),
   CHECK (subcategory_id <> '')

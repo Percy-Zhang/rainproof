@@ -156,12 +156,14 @@ const TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS transaction_template_lines (
   id TEXT PRIMARY KEY NOT NULL,
   template_id TEXT NOT NULL REFERENCES transaction_templates(id) ON DELETE CASCADE,
+  kind TEXT,
   amount_minor INTEGER NOT NULL,
   category_id TEXT NOT NULL DEFAULT '',
   subcategory_id TEXT NOT NULL DEFAULT '',
   note TEXT NOT NULL DEFAULT '',
   sort_order INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
+  CHECK (kind IS NULL OR kind IN ('expense', 'income')),
   CHECK (amount_minor > 0),
   CHECK (category_id <> ''),
   CHECK (subcategory_id <> '')
@@ -283,6 +285,12 @@ const migrations: Migration[] = [
       await db.execAsync(RECURRING_TRANSACTION_HISTORY_SCHEMA_SQL);
     },
   },
+  {
+    version: 14,
+    migrate: async (db) => {
+      await ensureTransactionTemplateLineKindColumn(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -317,6 +325,7 @@ async function ensureCurrentSchemaCompatibility(db: MigrationDatabase): Promise<
   await ensureRecurringItemsSchema(db);
   await ensureTransactionTemplatesSchema(db);
   await ensureTransactionTemplateLinesSchema(db);
+  await ensureTransactionTemplateLineKindColumn(db);
   await db.execAsync(PLANNING_AND_RAINY_DAY_SCHEMA_SQL);
 }
 
@@ -645,6 +654,15 @@ async function ensureTransactionTemplatesSchema(db: MigrationDatabase): Promise<
 
 async function ensureTransactionTemplateLinesSchema(db: MigrationDatabase): Promise<void> {
   await db.execAsync(TRANSACTION_TEMPLATE_LINES_SCHEMA_SQL);
+}
+
+async function ensureTransactionTemplateLineKindColumn(db: MigrationDatabase): Promise<void> {
+  await ensureColumn(
+    db,
+    'transaction_template_lines',
+    'kind',
+    "TEXT CHECK (kind IS NULL OR kind IN ('expense', 'income'))",
+  );
 }
 
 async function ensureBudgetSortOrderColumn(db: MigrationDatabase): Promise<void> {

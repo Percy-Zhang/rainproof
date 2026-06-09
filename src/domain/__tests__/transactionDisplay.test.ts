@@ -172,6 +172,27 @@ describe('transaction display helpers', () => {
     );
   });
 
+  it('returns mixed split metadata with both income and expense lines', () => {
+    const splitEntry = entry({
+      transaction: { ...baseTransaction, kind: 'income' },
+      lines: [
+        { ...baseLine, id: 'salary-line', amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' },
+        { ...baseLine, id: 'tax-line', amountMinor: -60000, categoryId: 'tax', subcategoryId: 'withholding' },
+      ],
+      amountMinor: 170000,
+    });
+
+    expect(getTransactionSplitDisplayMetadata(splitEntry)).toEqual(
+      expect.objectContaining({
+        isSplit: true,
+        splitLineCount: 2,
+        splitLines: splitEntry.lines,
+        primaryCategoryId: 'income',
+        primarySubcategoryId: 'salary',
+      }),
+    );
+  });
+
   it('uses subcategory name as the split child row title', () => {
     expect(
       getSplitLineChildDisplayText(

@@ -1,4 +1,5 @@
 import {
+  buildMixedSplitTransactionLines,
   buildSplitTransactionLines,
   isSplitTransaction,
   sumSplitTransactionLinesMinor,
@@ -64,6 +65,21 @@ describe('split transaction helpers', () => {
     expect(sumSplitTransactionLinesMinor('income', [line({ amountMinor: 1234 }), line({ amountMinor: 1 })])).toBe(1235);
   });
 
+  it('sums mixed split lines to the parent net movement', () => {
+    expect(
+      sumSplitTransactionLinesMinor('income', [
+        line({ amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' }),
+        line({ amountMinor: -60000, categoryId: 'tax', subcategoryId: 'withholding' }),
+      ]),
+    ).toBe(170000);
+    expect(
+      sumSplitTransactionLinesMinor('expense', [
+        line({ amountMinor: 20000, categoryId: 'income', subcategoryId: 'refund' }),
+        line({ amountMinor: -50000, categoryId: 'food', subcategoryId: 'groceries' }),
+      ]),
+    ).toBe(30000);
+  });
+
   it('validates split totals exactly in minor units', () => {
     expect(() =>
       validateSplitTransactionLines({
@@ -82,6 +98,75 @@ describe('split transaction helpers', () => {
         totalMinor: 4599,
       }),
     ).toThrow('Split line amounts must equal the transaction total.');
+  });
+
+  it('keeps standard split validation sign-specific by default', () => {
+    expect(() =>
+      validateSplitTransactionLines({
+        kind: 'income',
+        lines: [
+          line({ id: 'salary', amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' }),
+          line({ id: 'tax', amountMinor: -60000, categoryId: 'tax', subcategoryId: 'withholding' }),
+        ],
+        totalMinor: 170000,
+      }),
+    ).toThrow('Income split line amounts must be positive.');
+  });
+
+  it('validates mixed net-income split totals using signed line amounts', () => {
+    expect(() =>
+      validateSplitTransactionLines({
+        kind: 'income',
+        mode: 'mixed',
+        lines: [
+          line({ id: 'salary', amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' }),
+          line({ id: 'tax', amountMinor: -60000, categoryId: 'tax', subcategoryId: 'withholding' }),
+        ],
+        totalMinor: 170000,
+      }),
+    ).not.toThrow();
+  });
+
+  it('validates mixed net-expense split totals using signed line amounts', () => {
+    expect(() =>
+      validateSplitTransactionLines({
+        kind: 'expense',
+        mode: 'mixed',
+        lines: [
+          line({ id: 'refund', amountMinor: 20000, categoryId: 'income', subcategoryId: 'refund' }),
+          line({ id: 'spending', amountMinor: -50000, categoryId: 'food', subcategoryId: 'groceries' }),
+        ],
+        totalMinor: 30000,
+      }),
+    ).not.toThrow();
+  });
+
+  it('rejects mixed splits when signed lines do not net to the parent total', () => {
+    expect(() =>
+      validateSplitTransactionLines({
+        kind: 'income',
+        mode: 'mixed',
+        lines: [
+          line({ id: 'salary', amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary' }),
+          line({ id: 'tax', amountMinor: -60000, categoryId: 'tax', subcategoryId: 'withholding' }),
+        ],
+        totalMinor: 160000,
+      }),
+    ).toThrow('Mixed split lines must net to the transaction total.');
+  });
+
+  it('rejects zero mixed split line amounts', () => {
+    expect(() =>
+      validateSplitTransactionLines({
+        kind: 'income',
+        mode: 'mixed',
+        lines: [
+          line({ id: 'salary', amountMinor: 170000, categoryId: 'income', subcategoryId: 'salary' }),
+          line({ id: 'tax', amountMinor: 0, categoryId: 'tax', subcategoryId: 'withholding' }),
+        ],
+        totalMinor: 170000,
+      }),
+    ).toThrow('Split line amounts must be greater than zero.');
   });
 
   it('rejects split lines across mixed accounts', () => {
@@ -185,5 +270,49 @@ describe('split transaction helpers', () => {
         subcategoryId: 'bonus',
       }),
     ]);
+  });
+
+  it('builds signed mixed net-income transaction lines from draft split lines', () => {
+    expect(
+      buildMixedSplitTransactionLines({
+        kind: 'income',
+        accountId: 'account-1',
+        currencyCode: 'aud',
+        parentTitle: 'Pay',
+        totalMinor: 170000,
+        splitLines: [
+          { kind: 'income', amountMinor: 230000, categoryId: 'income', subcategoryId: 'salary', note: 'Salary' },
+          { kind: 'expense', amountMinor: 60000, categoryId: 'tax', subcategoryId: 'withholding' },
+        ],
+      }),
+    ).toEqual([
+      expect.objectContaining({
+        amountMinor: 230000,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Salary',
+      }),
+      expect.objectContaining({
+        amountMinor: -60000,
+        categoryId: 'tax',
+        subcategoryId: 'withholding',
+        note: 'Pay',
+      }),
+    ]);
+  });
+
+  it('builds signed mixed net-expense transaction lines from draft split lines', () => {
+    expect(
+      buildMixedSplitTransactionLines({
+        kind: 'expense',
+        accountId: 'account-1',
+        currencyCode: 'aud',
+        totalMinor: 30000,
+        splitLines: [
+          { kind: 'income', amountMinor: 20000, categoryId: 'income', subcategoryId: 'refund' },
+          { kind: 'expense', amountMinor: 50000, categoryId: 'food', subcategoryId: 'groceries' },
+        ],
+      }).map((builtLine) => builtLine.amountMinor),
+    ).toEqual([20000, -50000]);
   });
 });

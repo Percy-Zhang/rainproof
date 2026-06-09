@@ -12,7 +12,10 @@ import {
   getSubcategoryName,
 } from '../../domain/categories';
 import { formatMoney } from '../../domain/money';
-import { getActiveTransactionTemplates } from '../../domain/transactionTemplates';
+import {
+  getActiveTransactionTemplates,
+  getTransactionTemplateSplitMode,
+} from '../../domain/transactionTemplates';
 import type { Account, AppSnapshot, CategoryDefinition, TransactionTemplate } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 
@@ -187,7 +190,13 @@ function capitalize(value: string): string {
 
 function getTemplateKindLabel(template: TransactionTemplate): string {
   const kindLabel = capitalize(template.kind);
-  return template.splitLines.length ? `Split ${kindLabel}` : kindLabel;
+  if (!template.splitLines.length) {
+    return kindLabel;
+  }
+
+  return getTransactionTemplateSplitMode(template) === 'mixed'
+    ? 'Mixed split'
+    : `Split ${kindLabel}`;
 }
 
 const styles = StyleSheet.create({

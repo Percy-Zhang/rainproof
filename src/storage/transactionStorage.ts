@@ -279,6 +279,7 @@ function validateTransactionLinesForStorage(
         subcategoryId: line.subcategoryId ?? '',
         note: line.note,
       })),
+      mode: 'auto',
     });
   }
 }

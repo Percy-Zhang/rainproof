@@ -158,10 +158,11 @@ async function replaceTransactionTemplateLines(
   for (const [index, line] of lines.entries()) {
     await db.runAsync(
       `INSERT INTO transaction_template_lines (
-        id, template_id, amount_minor, category_id, subcategory_id, note, sort_order, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        id, template_id, kind, amount_minor, category_id, subcategory_id, note, sort_order, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       createLocalId('template_line'),
       templateId,
+      line.kind ?? null,
       line.amountMinor,
       line.categoryId,
       line.subcategoryId,

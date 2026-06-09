@@ -148,6 +148,7 @@ export type TransactionTemplateRow = {
 export type TransactionTemplateLineRow = {
   id: string;
   template_id: string;
+  kind: TransactionTemplateKind | null;
   amount_minor: number;
   category_id: string;
   subcategory_id: string;
@@ -317,6 +318,7 @@ export function mapTransactionTemplateLine(row: TransactionTemplateLineRow): Tra
   return {
     id: row.id,
     templateId: row.template_id,
+    ...(row.kind ? { kind: row.kind } : {}),
     amountMinor: row.amount_minor,
     categoryId: row.category_id,
     subcategoryId: row.subcategory_id,

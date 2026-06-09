@@ -73,6 +73,8 @@ export function AddTransactionScreen({
     categories,
     categoryId,
     changeKind,
+    changeSplitLineKind,
+    changeSplitMode,
     closePicker,
     date,
     error,
@@ -111,6 +113,7 @@ export function AddTransactionScreen({
     setReplaceAmountOnNextKey,
     showCurrencyCodes,
     splitLines,
+    splitMode,
     splitSummary,
     splitTotalMinor,
     subcategoryId,
@@ -211,7 +214,7 @@ export function AddTransactionScreen({
               <Ionicons name="git-branch-outline" size={18} color={colors.primaryDark} />
               <Text style={styles.optionsButtonText}>
                 {splitLines.length >= 2
-                  ? `Split · ${splitLines.length} lines · ${splitSummary.isBalanced ? 'Ready' : 'Needs total'}`
+                  ? `${splitMode === 'mixed' ? 'Mixed split' : 'Split'} · ${splitLines.length} lines · ${splitSummary.isBalanced ? 'Ready' : 'Needs total'}`
                   : `Split ${kind}`}
               </Text>
             </Pressable>
@@ -231,15 +234,19 @@ export function AddTransactionScreen({
         </View>
       ) : page === 'split' ? (
         <SplitTransactionEditorScrollContainer testID="add-transaction-split-page">
-          <Text style={styles.detailsTitle}>Split {kind}</Text>
+          <Text style={styles.detailsTitle}>{splitMode === 'mixed' ? 'Mixed split' : `Split ${kind}`}</Text>
           <SplitTransactionEditor
             categories={categories}
             currencyCode={fromAccount?.currencyCode ?? amountCurrencyCode}
             lines={splitLines}
             itemNameSuggestions={itemHistory}
+            parentKind={kind === 'transfer' ? undefined : kind}
             showCurrencyCodes={showCurrencyCodes}
+            splitMode={splitMode}
             totalMinor={splitTotalMinor}
             onAddLine={addSplitLine}
+            onChangeLineKind={changeSplitLineKind}
+            onChangeSplitMode={changeSplitMode}
             onPickCategory={(lineId) => {
               openSplitLineCategorySelect(lineId);
             }}

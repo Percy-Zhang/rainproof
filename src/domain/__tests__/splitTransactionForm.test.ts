@@ -1,6 +1,10 @@
 import {
+  buildMixedSplitLinesFromForm,
   buildSplitLinesFromForm,
   createSplitTransactionFormLine,
+  getMixedSplitTransactionFormSummary,
+  getMixedSplitTransactionValidationMessage,
+  getSplitLineCategoryKind,
   getSplitTransactionFormSummary,
   getSplitTransactionValidationMessage,
   removeSplitTransactionFormLine,
@@ -200,6 +204,105 @@ describe('split transaction form helpers', () => {
         subcategoryId: 'bonus',
       }),
     ]);
+  });
+
+  it('builds mixed split lines from positive form amounts and line kind', () => {
+    const lines = buildMixedSplitLinesFromForm({
+      kind: 'income',
+      accountId: 'a1',
+      currencyCode: 'AUD',
+      parentTitle: 'Pay',
+      totalMinor: 170000,
+      lines: [
+        createSplitTransactionFormLine({
+          id: 'salary-line',
+          kind: 'income',
+          amount: '2300.00',
+          categoryId: 'income',
+          subcategoryId: 'salary',
+        }) as ReturnType<typeof createSplitTransactionFormLine> & { kind: 'income' },
+        createSplitTransactionFormLine({
+          id: 'tax-line',
+          kind: 'expense',
+          amount: '600.00',
+          categoryId: 'tax',
+          subcategoryId: 'withholding',
+        }) as ReturnType<typeof createSplitTransactionFormLine> & { kind: 'expense' },
+      ],
+    });
+
+    expect(lines).toEqual([
+      expect.objectContaining({
+        id: 'salary-line',
+        amountMinor: 230000,
+        categoryId: 'income',
+        subcategoryId: 'salary',
+        note: 'Pay',
+      }),
+      expect.objectContaining({
+        id: 'tax-line',
+        amountMinor: -60000,
+        categoryId: 'tax',
+        subcategoryId: 'withholding',
+        note: 'Pay',
+      }),
+    ]);
+  });
+
+  it('summarizes mixed split income, expense, parent net, and difference', () => {
+    const lines = [
+      createSplitTransactionFormLine({
+        id: 'salary-line',
+        kind: 'income',
+        amount: '2300.00',
+        categoryId: 'income',
+        subcategoryId: 'salary',
+      }),
+      createSplitTransactionFormLine({
+        id: 'tax-line',
+        kind: 'expense',
+        amount: '600.00',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      }),
+    ];
+
+    expect(getMixedSplitTransactionFormSummary({ kind: 'income', totalMinor: 170000, lines })).toEqual({
+      parentSignedMinor: 170000,
+      incomeMinor: 230000,
+      expenseMinor: 60000,
+      signedLineTotalMinor: 170000,
+      differenceMinor: 0,
+      invalidLineCount: 0,
+      hasIncome: true,
+      hasExpense: true,
+      isBalanced: true,
+    });
+    expect(getMixedSplitTransactionValidationMessage({ kind: 'income', totalMinor: 170000, lines })).toBe('');
+    expect(getMixedSplitTransactionValidationMessage({ kind: 'income', totalMinor: 160000, lines })).toBe(
+      'Mixed split lines must net to the transaction total.',
+    );
+  });
+
+  it('uses the parent category kind for standard splits and the line kind for mixed splits', () => {
+    const expenseLine = createSplitTransactionFormLine({
+      id: 'tax-line',
+      kind: 'expense',
+      amount: '600.00',
+      categoryId: 'food',
+      subcategoryId: 'groceries',
+    });
+
+    expect(getSplitLineCategoryKind({
+      line: expenseLine,
+      parentKind: 'income',
+      splitMode: 'standard',
+    })).toBe('income');
+    expect(getSplitLineCategoryKind({
+      line: expenseLine,
+      parentKind: 'income',
+      splitMode: 'mixed',
+    })).toBe('expense');
   });
 
   it('falls back to the parent item for blank split income line notes', () => {

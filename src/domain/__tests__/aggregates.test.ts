@@ -395,6 +395,49 @@ describe('aggregates', () => {
     ).toBe(10000);
   });
 
+  it('counts mixed split signs for spending, cash flow, and account balance net movement', () => {
+    const mixedTransactions = [makeTransaction('mixed_pay', 'income')];
+    const mixedLines = [
+      makeLine({
+        id: 'mixed_salary',
+        transactionId: 'mixed_pay',
+        amountMinor: 230000,
+        categoryId: 'income',
+      }),
+      makeLine({
+        id: 'mixed_tax',
+        transactionId: 'mixed_pay',
+        amountMinor: -60000,
+        categoryId: 'tax',
+      }),
+    ];
+
+    expect(
+      getSpendingByCategory({
+        transactions: mixedTransactions,
+        lines: mixedLines,
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual([{ categoryId: 'tax', currencyCode: 'AUD', amountMinor: 60000 }]);
+
+    expect(
+      getCashFlowSummary({
+        transactions: mixedTransactions,
+        lines: mixedLines,
+        range,
+        currencyCode: 'AUD',
+      }),
+    ).toEqual({
+      currencyCode: 'AUD',
+      incomeMinor: 230000,
+      expenseMinor: 60000,
+      netMinor: 170000,
+    });
+
+    expect(getAccountBalances(accounts, mixedLines).find((balance) => balance.account.id === 'acct_aud')?.balanceMinor).toBe(180000);
+  });
+
   it.each(['refund', 'reimbursement', 'shared_expense_contribution'] as const)(
     'excludes linked %s income and reduces linked spending',
     (linkType) => {

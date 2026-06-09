@@ -306,6 +306,49 @@ describe('transaction edit helpers', () => {
     ]);
   });
 
+  it('infers and preserves mixed split mode, line kinds, signs, and line ids', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({
+          id: 'salary-line',
+          amountMinor: 230000,
+          categoryId: 'income',
+          subcategoryId: 'salary',
+          note: 'Salary',
+        }),
+        line({
+          id: 'tax-line',
+          amountMinor: -60000,
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+          note: 'Tax',
+        }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(
+      {
+        ...draft,
+        title: 'Renamed pay',
+        splitLines: draft.splitLines?.map((splitLine) =>
+          splitLine.id === 'tax-line' ? { ...splitLine, note: 'Renamed tax' } : splitLine,
+        ),
+      },
+      accounts,
+    );
+
+    expect(draft.amount).toBe('1700.00');
+    expect(draft.splitMode).toBe('mixed');
+    expect(draft.splitLines).toEqual([
+      expect.objectContaining({ id: 'salary-line', kind: 'income', amount: '2300.00' }),
+      expect.objectContaining({ id: 'tax-line', kind: 'expense', amount: '600.00' }),
+    ]);
+    expect(input.lines).toEqual([
+      expect.objectContaining({ id: 'salary-line', amountMinor: 230000, note: 'Salary' }),
+      expect.objectContaining({ id: 'tax-line', amountMinor: -60000, note: 'Renamed tax' }),
+    ]);
+  });
+
   it('falls back to the parent title for blank edited split income line notes', () => {
     const draft = createTransactionEditDraft(
       snapshot('income', [

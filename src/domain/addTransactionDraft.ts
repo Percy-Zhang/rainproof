@@ -7,7 +7,15 @@ import { defaultCategories } from './categories';
 import { parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
-import { buildSplitLinesFromForm, type SplitTransactionFormLine } from './splitTransactionForm';
+import {
+  buildMixedSplitLinesFromForm,
+  buildSplitLinesFromForm,
+  type SplitTransactionFormLine,
+} from './splitTransactionForm';
+import type {
+  SplitTransactionLineKind,
+  SplitTransactionMode,
+} from './splitTransactions';
 import {
   buildTransferTransactionLines,
   isOutsideAccountId,
@@ -29,6 +37,7 @@ export type AddTransactionInitialDraft = {
   notes: string;
   subcategoryId: string;
   splitLines: SplitTransactionFormLine[];
+  splitMode?: SplitTransactionMode;
   time: string;
   toAccountId: string;
 };
@@ -75,6 +84,7 @@ export function createAddTransactionInitialDraft({
     notes: initialTemplate?.notes ?? '',
     subcategoryId: categorySelection.subcategoryId ?? '',
     splitLines: initialTemplate?.splitLines ?? [],
+    splitMode: initialTemplate?.splitMode ?? 'standard',
     time: initialTemplate?.time ?? toTimeInputValue(now),
     toAccountId: snapshot.accounts[1]?.id ?? OUTSIDE_ACCOUNT_ID,
   };
@@ -156,6 +166,21 @@ export function buildAddTransactionLines({
   }
 
   if (draft.splitLines.length >= 2) {
+    if (draft.splitMode === 'mixed') {
+      const parentKind = draft.kind as SplitTransactionLineKind;
+      return buildMixedSplitLinesFromForm({
+        kind: parentKind,
+        accountId: account.id,
+        currencyCode: account.currencyCode,
+        parentTitle: draft.item,
+        totalMinor: minor,
+        lines: draft.splitLines.map((line) => ({
+          ...line,
+          kind: line.kind ?? parentKind,
+        })),
+      });
+    }
+
     return buildSplitLinesFromForm({
       kind: draft.kind,
       accountId: account.id,
