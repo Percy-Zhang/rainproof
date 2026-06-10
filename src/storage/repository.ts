@@ -24,6 +24,7 @@ import type {
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
 } from '../domain/types';
+import type { RainproofBackup } from '../domain/backupExport';
 import {
   addAccountStorage,
   closeAccountStorage,
@@ -90,12 +91,14 @@ import {
   updateTransactionTemplateStorage,
 } from './transactionTemplateStorage';
 import { shouldSeedDemoData } from './seedConfig';
+import { restoreRainproofBackupStorage } from './backupRestoreStorage';
 
 export type { RepositoryDatabase } from './database';
 
 export type FinanceRepository = {
   initialize(defaultCurrencyCode: string): Promise<void>;
   getSnapshot(): Promise<AppSnapshot>;
+  restoreBackup(backup: RainproofBackup): Promise<void>;
   addAccount(input: NewAccountInput): Promise<void>;
   updateAccount(input: UpdateAccountInput): Promise<void>;
   addTransaction(input: NewTransactionInput): Promise<void>;
@@ -173,6 +176,10 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async getSnapshot(): Promise<AppSnapshot> {
     return getSnapshotStorage(this.db);
+  }
+
+  async restoreBackup(backup: RainproofBackup): Promise<void> {
+    return restoreRainproofBackupStorage(this.db, backup.data);
   }
 
   async addAccount(input: NewAccountInput): Promise<void> {

@@ -191,6 +191,7 @@ function SettingsDrawerRoute({ actions, rootNavigation, snapshot }: DrawerRouteA
       <SettingsScreen
         snapshot={snapshot}
         onOpenCategoryManagement={() => rootNavigation?.navigate('CategoryManagement')}
+        onRestoreBackup={actions.restoreBackup}
         onUpdateSettings={actions.updateSettings}
         showHeader={false}
       />
