@@ -1145,6 +1145,43 @@ describe('SQLite finance repository integration', () => {
     });
   });
 
+  it('does not undo a generated transaction after the recurring due date is manually changed', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      await repository.addRecurringItem({
+        name: 'Rent',
+        kind: 'expense',
+        amountMinor: 10000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-01',
+      });
+      let snapshot = await repository.getSnapshot();
+      const recurringItem = snapshot.recurringItems[0];
+
+      await repository.createRecurringTransaction({
+        recurringItemId: recurringItem.id,
+        previousNextDueDate: '2026-05-01',
+        transactionInput: recurringExpenseInput(everyday.id, 'Rent May', '2026-05-01'),
+        recurringItemInput: recurringUpdateInput(recurringItem, '2026-06-01'),
+      });
+      await repository.updateRecurringItem(recurringUpdateInput(recurringItem, '2026-06-15'));
+
+      await expect(repository.undoLatestRecurringTransaction(recurringItem.id)).rejects.toThrow(
+        "Undo unavailable because this recurring item's due date was changed after the transaction was created.",
+      );
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.recurringItems[0].nextDueDate).toBe('2026-06-15');
+      expect(snapshot.transactions.map((transaction) => transaction.title)).toContain('Rent May');
+      expect(snapshot.recurringTransactionHistory).toHaveLength(1);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-10000);
+    });
+  });
+
   it('persists transaction templates without creating ledger activity', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday' });

@@ -52,6 +52,25 @@ describe('RecurringItemsScreen undo actions', () => {
     expect(screen.getByText('2 generated transactions can be undone, newest first.')).toBeTruthy();
     expect(screen.getByTestId('undo-recurring-transaction-rent')).toBeTruthy();
   });
+
+  it('shows an undo conflict from storage without hiding the undo action', async () => {
+    const message =
+      "Undo unavailable because this recurring item's due date was changed after the transaction was created.";
+    const screen = render(React.createElement(RecurringItemsScreen, {
+      snapshot: snapshot(true),
+      onAddRecurringItem: jest.fn(),
+      onCreateTransaction: jest.fn(),
+      onEditRecurringItem: jest.fn(),
+      onUndoRecurringTransaction: jest.fn(async () => {
+        throw new Error(message);
+      }),
+    }));
+
+    fireEvent.press(screen.getByTestId('undo-recurring-transaction-rent'));
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(screen.getByTestId('undo-recurring-transaction-rent')).toBeTruthy();
+  });
 });
 
 function snapshot(withHistory: boolean, historyCount = 1): AppSnapshot {

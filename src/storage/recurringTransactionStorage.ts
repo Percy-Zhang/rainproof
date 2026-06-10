@@ -88,6 +88,11 @@ export async function undoLatestRecurringTransactionStorage(
       await db.runAsync('DELETE FROM recurring_transaction_history WHERE id = ?', history.id);
       return;
     }
+    if (recurringItem.next_due_date !== history.advanced_next_due_date) {
+      throw new Error(
+        "Undo unavailable because this recurring item's due date was changed after the transaction was created.",
+      );
+    }
 
     await deleteTransactionRecordsStorage(db, history.transaction_id, { allowMissing: true });
     await db.runAsync(
