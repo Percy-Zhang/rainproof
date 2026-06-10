@@ -326,6 +326,10 @@ function getStatusCopy(row: BudgetUsageDisplayRow): { label: string; remainingLa
     return { label: 'Over', remainingLabel: 'Over by' };
   }
 
+  if (row.status === 'over_budget') {
+    return { label: 'At limit', remainingLabel: 'Remaining' };
+  }
+
   if (row.status === 'near_limit') {
     return { label: 'Near limit', remainingLabel: 'Remaining' };
   }

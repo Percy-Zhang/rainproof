@@ -92,6 +92,10 @@ function getBudgetStatusLabel(row: DashboardBudgetProgressData['rows'][number]):
     return 'Over';
   }
 
+  if (row.status === 'over_budget') {
+    return 'At limit';
+  }
+
   if (row.status === 'near_limit') {
     return 'Near';
   }
