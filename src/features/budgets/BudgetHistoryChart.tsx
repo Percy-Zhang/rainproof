@@ -4,8 +4,11 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { BudgetHistoryPoint } from '../../domain/budgets';
 import { formatMoney } from '../../domain/money';
 import { colors, spacing, typography } from '../../theme/tokens';
-
-const PLOT_HEIGHT = 104;
+import {
+  BUDGET_HISTORY_LABEL_HEIGHT,
+  BUDGET_HISTORY_PLOT_HEIGHT,
+  getBudgetHistoryChartScale,
+} from './budgetHistoryChartModel';
 
 export function BudgetHistoryChart({
   accentColor,
@@ -23,12 +26,7 @@ export function BudgetHistoryChart({
     return null;
   }
 
-  const maximumSpent = Math.max(...points.map((point) => point.spentMinor), 0);
-  const scaleMaximum = Math.max(selectedPoint.limitMinor * 1.15, maximumSpent * 1.08, 1);
-  const limitBottom = Math.min(
-    PLOT_HEIGHT - 1,
-    Math.max(1, Math.round((selectedPoint.limitMinor / scaleMaximum) * PLOT_HEIGHT)),
-  );
+  const scale = getBudgetHistoryChartScale(points, selectedPoint);
 
   return (
     <View style={styles.history} testID="budget-history-chart">
@@ -55,15 +53,13 @@ export function BudgetHistoryChart({
       </View>
 
       <View style={styles.plot}>
-        <View style={[styles.limitLine, { bottom: limitBottom }]}>
+        <View style={[styles.limitLine, { bottom: scale.limitBottom }]}>
           <Text style={styles.limitLabel}>Limit</Text>
         </View>
         <View style={styles.barRow}>
           {points.map((point) => {
             const isSelected = point.id === selectedPoint.id;
-            const barHeight = point.spentMinor > 0
-              ? Math.max(3, Math.round((point.spentMinor / scaleMaximum) * PLOT_HEIGHT))
-              : 2;
+            const barHeight = scale.getBarHeight(point);
             const barColor = point.status === 'over_budget' ? colors.danger : accentColor;
 
             return (
@@ -175,7 +171,7 @@ const styles = StyleSheet.create({
     color: colors.danger,
   },
   plot: {
-    height: PLOT_HEIGHT + 24,
+    height: BUDGET_HISTORY_PLOT_HEIGHT + BUDGET_HISTORY_LABEL_HEIGHT,
     position: 'relative',
   },
   limitLine: {
@@ -211,7 +207,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   barSlot: {
-    height: PLOT_HEIGHT,
+    height: BUDGET_HISTORY_PLOT_HEIGHT,
     justifyContent: 'flex-end',
     paddingHorizontal: 2,
   },
