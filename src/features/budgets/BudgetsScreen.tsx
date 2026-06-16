@@ -10,7 +10,8 @@ import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { ActionButton, Card, ProgressBar } from '../../components/ui';
 import {
   formatBudgetPeriodRange,
-  getBudgetHistoryForBudget,
+  getBudgetCompareHistoryPointsForBudget,
+  getBudgetCurrentHistoryPointsForBudget,
   getBudgetPeriodOffsetLabel,
   getBudgetPeriodRange,
   getBudgetUsageDisplayRows,
@@ -24,6 +25,8 @@ import { formatMoney } from '../../domain/money';
 import type { AppSnapshot } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { BudgetHistoryChart } from './BudgetHistoryChart';
+
+type BudgetHistoryMode = 'current' | 'compare';
 
 type BudgetsScreenProps = {
   snapshot: AppSnapshot;
@@ -40,6 +43,7 @@ export function BudgetsScreen({
 }: BudgetsScreenProps) {
   const [anchorDate, setAnchorDate] = useState(() => new Date());
   const [expandedBudgetId, setExpandedBudgetId] = useState<string | null>(null);
+  const [historyMode, setHistoryMode] = useState<BudgetHistoryMode>('current');
   const [periodOffset, setPeriodOffset] = useState(0);
   const budgetRows = useMemo(
     () => getBudgetUsageRowsForSnapshot(snapshot, anchorDate, periodOffset),
@@ -48,19 +52,25 @@ export function BudgetsScreen({
   const expandedHistory = useMemo(() => {
     const budget = snapshot.budgets.find((candidate) => candidate.id === expandedBudgetId && candidate.isActive);
 
-    return budget
-      ? getBudgetHistoryForBudget({
-          accounts: snapshot.accounts,
-          anchorDate,
-          budget,
-          categories: snapshot.categories ?? defaultCategories,
-          endOffset: periodOffset,
-          transactionLines: snapshot.transactionLines,
-          transactionLinks: snapshot.transactionLinks,
-          transactions: snapshot.transactions,
-        })
-      : [];
-  }, [anchorDate, expandedBudgetId, periodOffset, snapshot]);
+    if (!budget) {
+      return [];
+    }
+
+    const input = {
+      accounts: snapshot.accounts,
+      anchorDate,
+      budget,
+      categories: snapshot.categories ?? defaultCategories,
+      endOffset: periodOffset,
+      transactionLines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
+      transactions: snapshot.transactions,
+    };
+
+    return historyMode === 'current'
+      ? getBudgetCurrentHistoryPointsForBudget(input)
+      : getBudgetCompareHistoryPointsForBudget(input);
+  }, [anchorDate, expandedBudgetId, historyMode, periodOffset, snapshot]);
 
   function renderBudgetRow({ item, drag, isActive }: RenderItemParams<BudgetUsageDisplayRow>) {
     const isHistoryExpanded = item.id === expandedBudgetId;
@@ -71,6 +81,7 @@ export function BudgetsScreen({
         anchorDate={anchorDate}
         dragging={isActive}
         historyPoints={isHistoryExpanded ? expandedHistory : []}
+        historyVariant={historyMode === 'compare' || item.budget.period === 'weekly' ? 'bar' : 'line'}
         isHistoryExpanded={isHistoryExpanded}
         onDrag={drag}
         onToggleHistory={() => setExpandedBudgetId((current) => current === item.id ? null : item.id)}
@@ -93,9 +104,12 @@ export function BudgetsScreen({
                 <Text style={styles.heading}>Budgets</Text>
                 <Text style={styles.subtle}>Limits using net spending for each budget range.</Text>
               </View>
-              <ActionButton onPress={onAddBudget} testID="add-budget">
-                Add
-              </ActionButton>
+              <View style={styles.headerActions}>
+                <BudgetHistoryModeToggle mode={historyMode} onChange={setHistoryMode} />
+                <ActionButton onPress={onAddBudget} testID="add-budget">
+                  Add
+                </ActionButton>
+              </View>
             </View>
             <BudgetPeriodNavigator
               offset={periodOffset}
@@ -138,6 +152,7 @@ function BudgetUsageCard({
   anchorDate,
   dragging,
   historyPoints,
+  historyVariant,
   isHistoryExpanded,
   onDrag,
   row,
@@ -148,6 +163,7 @@ function BudgetUsageCard({
   anchorDate: Date;
   dragging: boolean;
   historyPoints: BudgetHistoryPoint[];
+  historyVariant: 'bar' | 'line';
   isHistoryExpanded: boolean;
   onDrag: () => void;
   onToggleHistory: () => void;
@@ -221,8 +237,9 @@ function BudgetUsageCard({
           <BudgetHistoryChart
             accentColor={row.color}
             currencyCode={row.budget.currencyCode}
-            key={`${row.id}:${periodOffset}`}
+            key={`${row.id}:${periodOffset}:${historyVariant}`}
             points={historyPoints}
+            variant={historyVariant}
           />
         ) : null}
       </View>
@@ -321,6 +338,42 @@ function BudgetPeriodNavigator({
   );
 }
 
+function BudgetHistoryModeToggle({
+  mode,
+  onChange,
+}: {
+  mode: BudgetHistoryMode;
+  onChange: (mode: BudgetHistoryMode) => void;
+}) {
+  return (
+    <View accessibilityLabel="Budget history mode" style={styles.historyModeToggle}>
+      {(['current', 'compare'] as const).map((value) => {
+        const selected = mode === value;
+        const label = value === 'current' ? 'Current' : 'Compare';
+
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            key={value}
+            onPress={() => onChange(value)}
+            style={({ pressed }) => [
+              styles.historyModeOption,
+              selected && styles.historyModeOptionSelected,
+              pressed && styles.pressed,
+            ]}
+            testID={`budget-history-mode-${value}`}
+          >
+            <Text style={[styles.historyModeText, selected && styles.historyModeTextSelected]}>
+              {label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 function getStatusCopy(row: BudgetUsageDisplayRow): { label: string; remainingLabel: string } {
   if (row.remainingMinor < 0) {
     return { label: 'Over', remainingLabel: 'Over by' };
@@ -360,6 +413,12 @@ const styles = StyleSheet.create({
   header: {
     gap: spacing.md,
   },
+  headerActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: spacing.sm,
+  },
   summaryRow: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -380,6 +439,29 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     lineHeight: 18,
+  },
+  historyModeOption: {
+    borderRadius: 7,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  historyModeOptionSelected: {
+    backgroundColor: colors.primaryDark,
+  },
+  historyModeText: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '900',
+  },
+  historyModeTextSelected: {
+    color: colors.surface,
+  },
+  historyModeToggle: {
+    backgroundColor: colors.faint,
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: 2,
+    padding: 2,
   },
   periodNavigator: {
     alignItems: 'center',

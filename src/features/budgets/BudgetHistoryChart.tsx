@@ -1,25 +1,33 @@
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import type { BudgetHistoryPoint } from '../../domain/budgets';
 import { formatMoney } from '../../domain/money';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
   BUDGET_HISTORY_LABEL_HEIGHT,
+  BUDGET_HISTORY_LINE_WIDTH,
   BUDGET_HISTORY_PLOT_HEIGHT,
+  getBudgetHistoryLineAxisLabels,
+  getBudgetHistoryLineChartModel,
   getBudgetHistoryChartScale,
+  shouldShowBudgetHistoryBarLabel,
 } from './budgetHistoryChartModel';
 
 export function BudgetHistoryChart({
   accentColor,
   currencyCode,
   points,
+  variant = 'bar',
 }: {
   accentColor: string;
   currencyCode: string;
   points: BudgetHistoryPoint[];
+  variant?: 'bar' | 'line';
 }) {
   const [selectedPointId, setSelectedPointId] = useState(points.at(-1)?.id ?? '');
+  const [linePressableWidth, setLinePressableWidth] = useState(0);
   const selectedPoint = points.find((point) => point.id === selectedPointId) ?? points.at(-1);
 
   if (!selectedPoint) {
@@ -27,6 +35,20 @@ export function BudgetHistoryChart({
   }
 
   const scale = getBudgetHistoryChartScale(points, selectedPoint);
+  const lineModel = getBudgetHistoryLineChartModel(points, selectedPoint);
+
+  function handleLinePress(event: GestureResponderEvent) {
+    const width = linePressableWidth || BUDGET_HISTORY_LINE_WIDTH;
+    const clampedX = Math.max(0, Math.min(width, event.nativeEvent.locationX));
+    const selectedIndex = points.length <= 1
+      ? 0
+      : Math.round((clampedX / width) * (points.length - 1));
+    const nextPoint = points[selectedIndex];
+
+    if (nextPoint) {
+      setSelectedPointId(nextPoint.id);
+    }
+  }
 
   return (
     <View style={styles.history} testID="budget-history-chart">
@@ -52,45 +74,111 @@ export function BudgetHistoryChart({
         />
       </View>
 
-      <View style={styles.plot}>
-        <View style={[styles.limitLine, { bottom: scale.limitBottom }]}>
-          <Text style={styles.limitLabel}>Limit</Text>
-        </View>
-        <View style={styles.barRow}>
-          {points.map((point) => {
-            const isSelected = point.id === selectedPoint.id;
-            const barHeight = scale.getBarHeight(point);
-            const barColor = point.status === 'over_budget' ? colors.danger : accentColor;
-
-            return (
-              <Pressable
-                accessibilityLabel={`${point.rangeLabel}, ${formatMoney(point.spentMinor, currencyCode)} used`}
-                accessibilityRole="button"
-                key={point.id}
-                onPress={() => setSelectedPointId(point.id)}
-                style={styles.barColumn}
-                testID={`budget-history-bar-${point.offset}`}
+      {variant === 'line' ? (
+        <View style={styles.plot}>
+          <Pressable
+            accessibilityLabel={`${selectedPoint.rangeLabel}, ${formatMoney(selectedPoint.spentMinor, currencyCode)} used`}
+            accessibilityRole="button"
+            onLayout={(event) => setLinePressableWidth(event.nativeEvent.layout.width)}
+            onPress={handleLinePress}
+            style={({ pressed }) => [styles.linePressable, pressed && styles.pressed]}
+            testID="budget-history-line-chart"
+          >
+            <Svg pointerEvents="none" width="100%" height={BUDGET_HISTORY_PLOT_HEIGHT} viewBox={`0 0 ${BUDGET_HISTORY_LINE_WIDTH} ${BUDGET_HISTORY_PLOT_HEIGHT}`}>
+              <Line
+                x1={0}
+                x2={BUDGET_HISTORY_LINE_WIDTH}
+                y1={lineModel.limitY}
+                y2={lineModel.limitY}
+                stroke={colors.ink}
+                strokeDasharray="5 4"
+                strokeWidth={1}
+              />
+              <Polyline
+                fill="none"
+                points={lineModel.polylinePoints}
+                stroke={accentColor}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={3}
+              />
+              {lineModel.selectedChartPoint ? (
+                <Circle
+                  cx={lineModel.selectedChartPoint.x}
+                  cy={lineModel.selectedChartPoint.y}
+                  fill={selectedPoint.status === 'over_budget' ? colors.danger : accentColor}
+                  r={5}
+                  stroke={colors.surface}
+                  strokeWidth={2}
+                />
+              ) : null}
+            </Svg>
+            <Text style={[styles.limitLabel, styles.lineLimitLabel, { top: Math.max(0, lineModel.limitY - 14) }]}>
+              Limit
+            </Text>
+          </Pressable>
+          <View style={styles.lineAxisRow}>
+            {getBudgetHistoryLineAxisLabels(points).map((label) => (
+              <Text
+                key={`${label.index}:${label.label}`}
+                numberOfLines={1}
+                style={[
+                  styles.lineAxisLabel,
+                  label.align === 'center' && styles.lineAxisLabelCenter,
+                  label.align === 'right' && styles.lineAxisLabelRight,
+                ]}
               >
-                <View style={styles.barSlot}>
-                  <View
-                    style={[
-                      styles.bar,
-                      {
-                        backgroundColor: point.spentMinor > 0 ? barColor : colors.faint,
-                        height: barHeight,
-                      },
-                      isSelected && styles.selectedBar,
-                    ]}
-                  />
-                </View>
-                <Text numberOfLines={1} style={[styles.barLabel, isSelected && styles.selectedBarLabel]}>
-                  {point.shortLabel}
-                </Text>
-              </Pressable>
-            );
-          })}
+                {label.label}
+              </Text>
+            ))}
+          </View>
         </View>
-      </View>
+      ) : (
+        <View style={styles.plot}>
+          <View style={[styles.limitLine, { bottom: scale.limitBottom }]}>
+            <Text style={styles.limitLabel}>Limit</Text>
+          </View>
+          <View style={styles.barRow}>
+            {points.map((point, index) => {
+              const isSelected = point.id === selectedPoint.id;
+              const barHeight = scale.getBarHeight(point);
+              const barColor = point.status === 'over_budget' ? colors.danger : accentColor;
+              const showLabel = shouldShowBudgetHistoryBarLabel({
+                index,
+                isSelected,
+                pointCount: points.length,
+              });
+
+              return (
+                <Pressable
+                  accessibilityLabel={`${point.rangeLabel}, ${formatMoney(point.spentMinor, currencyCode)} used`}
+                  accessibilityRole="button"
+                  key={point.id}
+                  onPress={() => setSelectedPointId(point.id)}
+                  style={styles.barColumn}
+                  testID={`budget-history-bar-${point.offset}`}
+                >
+                  <View style={styles.barSlot}>
+                    <View
+                      style={[
+                        styles.bar,
+                        {
+                          backgroundColor: point.spentMinor > 0 ? barColor : colors.faint,
+                          height: barHeight,
+                        },
+                        isSelected && styles.selectedBar,
+                      ]}
+                    />
+                  </View>
+                  <Text numberOfLines={1} style={[styles.barLabel, isSelected && styles.selectedBarLabel]}>
+                    {showLabel ? point.shortLabel : ' '}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      )}
 
       <Text style={styles.limitText}>
         Limit {formatMoney(selectedPoint.limitMinor, currencyCode)}
@@ -232,6 +320,34 @@ const styles = StyleSheet.create({
   selectedBarLabel: {
     color: colors.ink,
     fontWeight: '900',
+  },
+  lineAxisLabel: {
+    color: colors.muted,
+    flex: 1,
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'left',
+  },
+  lineAxisLabelCenter: {
+    textAlign: 'center',
+  },
+  lineAxisLabelRight: {
+    textAlign: 'right',
+  },
+  lineAxisRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  lineLimitLabel: {
+    position: 'absolute',
+  },
+  linePressable: {
+    height: BUDGET_HISTORY_PLOT_HEIGHT,
+    position: 'relative',
+  },
+  pressed: {
+    opacity: 0.78,
   },
   limitText: {
     color: colors.muted,

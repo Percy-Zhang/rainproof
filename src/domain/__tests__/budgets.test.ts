@@ -4,6 +4,8 @@ import {
   calculateBudgetRemaining,
   formatBudgetPeriodRange,
   getBudgetCurrencyOptions,
+  getBudgetCompareHistoryPointsForBudget,
+  getBudgetCurrentHistoryPointsForBudget,
   getBudgetHistoryForBudget,
   getBudgetMonthlyRange,
   getBudgetPeriodCurrentLabel,
@@ -357,6 +359,143 @@ describe('budget helpers', () => {
         status: 'near_limit',
       },
     ]);
+  });
+
+  it('builds current budget history as cumulative progress inside the selected period', () => {
+    const juneFirst = makeTransaction('june_first', 'expense', 'June first', '2026-06-01T12:00:00.000Z');
+    const juneTenth = makeTransaction('june_tenth', 'expense', 'June tenth', '2026-06-10T12:00:00.000Z');
+    const anchorDate = new Date(2026, 5, 10, 9, 30);
+    const baseInput = {
+      accounts,
+      anchorDate,
+      categories: defaultCategories,
+      transactionLines: [
+        makeLine('june_first_line', juneFirst.id, 'checking', -1000, 'AUD', 'food', 'groceries'),
+        makeLine('june_tenth_line', juneTenth.id, 'checking', -2500, 'AUD', 'food', 'groceries'),
+      ],
+      transactionLinks: [],
+      transactions: [juneFirst, juneTenth],
+    };
+
+    const weekly = getBudgetCurrentHistoryPointsForBudget({
+      ...baseInput,
+      budget: makeBudget('weekly_chart', 'Weekly chart', 10000, 'overall', null, null, 'AUD', 0, undefined, 'weekly'),
+    });
+    const monthly = getBudgetCurrentHistoryPointsForBudget({
+      ...baseInput,
+      budget: makeBudget('monthly_chart', 'Monthly chart', 10000, 'overall'),
+    });
+    const yearly = getBudgetCurrentHistoryPointsForBudget({
+      ...baseInput,
+      budget: makeBudget('yearly_chart', 'Yearly chart', 10000, 'overall', null, null, 'AUD', 0, undefined, 'yearly'),
+    });
+    const rolling7 = getBudgetCurrentHistoryPointsForBudget({
+      ...baseInput,
+      budget: makeBudget('rolling_7_chart', 'Rolling 7 chart', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_7'),
+    });
+    const rolling30 = getBudgetCurrentHistoryPointsForBudget({
+      ...baseInput,
+      budget: makeBudget('rolling_30_chart', 'Rolling 30 chart', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_30'),
+    });
+    const rolling365 = getBudgetCurrentHistoryPointsForBudget({
+      ...baseInput,
+      budget: makeBudget('rolling_365_chart', 'Rolling 365 chart', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_365'),
+    });
+
+    expect(weekly).toHaveLength(7);
+    expect(monthly).toHaveLength(30);
+    expect(yearly).toHaveLength(12);
+    expect(rolling7).toHaveLength(7);
+    expect(rolling30).toHaveLength(30);
+    expect(rolling365).toHaveLength(365);
+    expect(monthly.slice(0, 10).map((point) => point.spentMinor)).toEqual([
+      1000,
+      1000,
+      1000,
+      1000,
+      1000,
+      1000,
+      1000,
+      1000,
+      1000,
+      3500,
+    ]);
+    expect(monthly.at(-1)?.rangeLabel).toBe('1-30 Jun 2026');
+  });
+
+  it('builds yearly current budget history as cumulative month-by-month progress', () => {
+    const january = makeTransaction('january', 'expense', 'January food', '2026-01-15T12:00:00.000Z');
+    const march = makeTransaction('march', 'expense', 'March food', '2026-03-15T12:00:00.000Z');
+    const ignoredIncome = makeTransaction('income', 'income', 'Income', '2026-04-15T12:00:00.000Z');
+    const history = getBudgetCurrentHistoryPointsForBudget({
+      accounts,
+      anchorDate: new Date(2026, 5, 10, 9, 30),
+      budget: makeBudget('yearly_chart', 'Yearly chart', 120000, 'overall', null, null, 'AUD', 0, undefined, 'yearly'),
+      categories: defaultCategories,
+      transactionLines: [
+        makeLine('january_food', january.id, 'checking', -1000, 'AUD', 'food', 'groceries'),
+        makeLine('march_food', march.id, 'checking', -3000, 'AUD', 'food', 'groceries'),
+        makeLine('ignored_income_line', ignoredIncome.id, 'checking', 5000, 'AUD', 'income', 'salary'),
+      ],
+      transactionLinks: [],
+      transactions: [january, march, ignoredIncome],
+    });
+
+    expect(history.map((point) => [point.shortLabel, point.spentMinor])).toEqual([
+      ['Jan', 1000],
+      ['Feb', 1000],
+      ['Mar', 4000],
+      ['Apr', 4000],
+      ['May', 4000],
+      ['Jun', 4000],
+      ['Jul', 4000],
+      ['Aug', 4000],
+      ['Sep', 4000],
+      ['Oct', 4000],
+      ['Nov', 4000],
+      ['Dec', 4000],
+    ]);
+    expect(history.at(-1)?.rangeLabel).toBe('1 Jan - 31 Dec 2026');
+  });
+
+  it('builds compare budget history as period totals with non-overlapping rolling windows', () => {
+    const anchorDate = new Date(2026, 5, 10, 9, 30);
+    const monthly = getBudgetCompareHistoryPointsForBudget({
+      accounts,
+      anchorDate,
+      budget: makeBudget('monthly_compare', 'Monthly compare', 10000, 'overall'),
+      categories: defaultCategories,
+      transactionLines: [],
+      transactionLinks: [],
+      transactions: [],
+    });
+    const rolling30 = getBudgetCompareHistoryPointsForBudget({
+      accounts,
+      anchorDate,
+      budget: makeBudget('rolling_30_compare', 'Rolling 30 compare', 10000, 'overall', null, null, 'AUD', 0, undefined, 'rolling_30'),
+      categories: defaultCategories,
+      transactionLines: [],
+      transactionLinks: [],
+      transactions: [],
+    });
+
+    expect(monthly).toHaveLength(12);
+    expect(monthly.map((point) => point.shortLabel)).toEqual([
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+    ]);
+    expect(rolling30).toHaveLength(6);
+    expect(rolling30.map((point) => point.offset)).toEqual([-150, -120, -90, -60, -30, 0]);
   });
 
   it('uses today as the default anchor for current Dashboard rolling usage', () => {
