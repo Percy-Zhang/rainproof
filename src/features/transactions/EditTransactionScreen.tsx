@@ -84,6 +84,7 @@ export function EditTransactionScreen({
     changeKind,
     changeSplitLineKind,
     changeSplitMode,
+    closeNativePicker,
     closePicker,
     confirmDelete,
     deleteCurrentTransaction,
@@ -99,9 +100,13 @@ export function EditTransactionScreen({
     itemSuggestions,
     labelSuggestions,
     nativePickerMode,
+    openDatePicker,
     openMainCategorySelect,
+    openSourceAccountPicker,
     openSplitEditor,
     openSplitLineCategorySelect,
+    openTargetAccountPicker,
+    openTimePicker,
     page,
     pickerMode,
     removeSplitLine,
@@ -109,9 +114,7 @@ export function EditTransactionScreen({
     selectedCategory,
     selectPickerAccount,
     setConfirmDelete,
-    setNativePickerMode,
     setPage,
-    setPickerMode,
     showCurrencyCodes,
     targetAmountCurrencyCode,
     toAccount,
@@ -273,8 +276,8 @@ export function EditTransactionScreen({
                 subcategoryId={draft.subcategoryId}
                 toAccount={toAccount}
                 onPressCategory={openMainCategorySelect}
-                onPressSourceAccount={() => setPickerMode('sourceAccount')}
-                onPressTargetAccount={() => setPickerMode('targetAccount')}
+                onPressSourceAccount={openSourceAccountPicker}
+                onPressTargetAccount={openTargetAccountPicker}
               />
 
               <TransactionMetadataFields
@@ -290,10 +293,10 @@ export function EditTransactionScreen({
                 onChangeGroup={(groupId) => updateDraft({ groupId })}
                 onChangeLabels={(labels) => updateDraft({ labels })}
                 onChangeNotes={(notes) => updateDraft({ notes })}
-                onCloseNativePicker={() => setNativePickerMode(null)}
+                onCloseNativePicker={closeNativePicker}
                 onNativePickerChange={handleNativePickerChange}
-                onPressDate={() => setNativePickerMode('date')}
-                onPressTime={() => setNativePickerMode('time')}
+                onPressDate={openDatePicker}
+                onPressTime={openTimePicker}
                 onSelectLabelSuggestion={applyLabelAutocompleteSuggestion}
               />
 

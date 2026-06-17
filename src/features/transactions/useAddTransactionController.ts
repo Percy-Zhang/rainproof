@@ -1,6 +1,5 @@
-import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useMemo, useState } from 'react';
-import { BackHandler, Platform } from 'react-native';
+import { BackHandler } from 'react-native';
 
 import {
   buildAddTransactionInput,
@@ -16,18 +15,12 @@ import {
   resolveAddTransactionDefaultCategory,
 } from '../../domain/addTransactionDefaults';
 import { getAddTransactionBackAction } from '../../domain/addTransactionFlow';
-import {
-  applyCalculatorAmountKey,
-  getInitialCalculatorAmountInputState,
-  type CalculatorKey,
-} from '../../domain/calculator';
 import { defaultCategories, getCategory } from '../../domain/categories';
 import {
   formatCrossCurrencyTransferRateLabel,
   isCrossCurrencyTransferAccountPair,
 } from '../../domain/crossCurrencyTransfers';
-import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
-import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
+import { applyLabelSuggestion } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
 import {
   createSplitTransactionFormLine,
@@ -45,7 +38,6 @@ import {
   getTransferAmountCurrencyCode,
   isOutsideAccountId,
 } from '../../domain/transactionEdit';
-import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type { AddTransactionTemplatePrefill } from '../../domain/transactionTemplates';
 import type {
   AddTransactionDefaults,
@@ -59,13 +51,13 @@ import type {
 } from '../categorySelection/categorySelectionModel';
 import {
   getNativePickerValue,
-  useAutocompleteOptions,
-  type NativePickerMode,
-  type TransactionPickerMode,
 } from './TransactionFormComponents';
+import { useTransactionAccountPickerRouting } from './useTransactionAccountPickerRouting';
+import { useTransactionAmountCalculator } from './useTransactionAmountCalculator';
+import { useTransactionDateTimePicker } from './useTransactionDateTimePicker';
+import { useTransactionDetailSuggestions } from './useTransactionDetailSuggestions';
 
 export type AddTransactionPage = 'amount' | 'details' | 'split';
-type TransferAmountField = 'source' | 'target';
 
 type UseAddTransactionControllerOptions = {
   snapshot: AppSnapshot;
@@ -106,22 +98,8 @@ export function useAddTransactionController({
     }),
   );
   const [page, setPage] = useState<AddTransactionPage>('amount');
-  const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
-  const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
   const [kind, setKind] = useState<TransactionKind>(initialDraft.kind);
   const [item, setItem] = useState(initialDraft.item);
-  const [initialAmountInputState] = useState(() =>
-    getInitialCalculatorAmountInputState(initialDraft.amountExpression),
-  );
-  const [amountInputState, setAmountInputState] = useState(initialAmountInputState);
-  const amountExpression = amountInputState.expression;
-  const replaceAmountOnNextKey = amountInputState.replaceOnNextEntry;
-  const [targetAmountInputState, setTargetAmountInputState] = useState(() =>
-    getInitialCalculatorAmountInputState(initialDraft.targetAmountExpression ?? ''),
-  );
-  const targetAmountExpression = targetAmountInputState.expression;
-  const targetReplaceAmountOnNextKey = targetAmountInputState.replaceOnNextEntry;
-  const [activeTransferAmountField, setActiveTransferAmountField] = useState<TransferAmountField>('source');
   const [date, setDate] = useState(initialDraft.date);
   const [time, setTime] = useState(initialDraft.time);
   const [fromAccountId, setFromAccountId] = useState(initialDraft.fromAccountId);
@@ -134,6 +112,59 @@ export function useAddTransactionController({
   const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>(initialDraft.splitLines);
   const [splitMode, setSplitMode] = useState<SplitTransactionMode>(initialDraft.splitMode ?? 'standard');
   const [error, setError] = useState('');
+  const {
+    closePicker,
+    openSourceAccountPicker,
+    openTargetAccountPicker,
+    pickerMode,
+    selectPickerAccount,
+  } = useTransactionAccountPickerRouting({
+    onSelectSourceAccount: setFromAccountId,
+    onSelectTargetAccount: setToAccountId,
+  });
+  const {
+    closeNativePicker,
+    handleNativePickerChange,
+    nativePickerMode,
+    openDatePicker,
+    openTimePicker,
+  } = useTransactionDateTimePicker({
+    onChangeDate: setDate,
+    onChangeTime: setTime,
+  });
+  const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
+  const fromAccount = isOutsideAccountId(fromAccountId)
+    ? undefined
+    : snapshot.accounts.find((account) => account.id === fromAccountId) ?? snapshot.accounts[0];
+  const toAccount = isOutsideAccountId(toAccountId)
+    ? undefined
+    : snapshot.accounts.find((account) => account.id === toAccountId);
+  const selectedCategory = categoryId ? getCategory(categoryId, categories) : categories[0];
+  const amountCurrencyCode =
+    kind === 'transfer'
+      ? getTransferAmountCurrencyCode({ accounts: snapshot.accounts, sourceAccountId: fromAccountId, targetAccountId: toAccountId })
+      : fromAccount?.currencyCode ?? '';
+  const isCrossCurrencyTransfer = kind === 'transfer' && isCrossCurrencyTransferAccountPair({
+    accounts: snapshot.accounts,
+    sourceAccountId: fromAccountId,
+    targetAccountId: toAccountId,
+  });
+  const {
+    activeTransferAmountField,
+    amountExpression,
+    pressCalculatorKey,
+    replaceAmountOnNextKey,
+    selectSourceAmountInput,
+    selectTargetAmountInput,
+    setReplaceAmountOnNextKey,
+    targetAmountExpression,
+    targetReplaceAmountOnNextKey,
+  } = useTransactionAmountCalculator({
+    initialAmountExpression: initialDraft.amountExpression,
+    initialTargetAmountExpression: initialDraft.targetAmountExpression ?? '',
+    isCrossCurrencyTransfer,
+    onError: setError,
+  });
   const transactionDraft: AddTransactionDraft = {
     amountExpression,
     categoryId,
@@ -151,14 +182,6 @@ export function useAddTransactionController({
     time,
     toAccountId,
   };
-  const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
-  const fromAccount = isOutsideAccountId(fromAccountId)
-    ? undefined
-    : snapshot.accounts.find((account) => account.id === fromAccountId) ?? snapshot.accounts[0];
-  const toAccount = isOutsideAccountId(toAccountId)
-    ? undefined
-    : snapshot.accounts.find((account) => account.id === toAccountId);
-  const selectedCategory = categoryId ? getCategory(categoryId, categories) : categories[0];
   const previewAmountMinor = getAddTransactionPreviewAmountMinor({
     amountExpression,
     kind,
@@ -171,15 +194,6 @@ export function useAddTransactionController({
       ? getMixedSplitTransactionFormSummary({ kind, totalMinor: splitTotalMinor, lines: splitLines })
       : getSplitTransactionFormSummary(splitTotalMinor, splitLines)
   ), [kind, splitLines, splitMode, splitTotalMinor]);
-  const amountCurrencyCode =
-    kind === 'transfer'
-      ? getTransferAmountCurrencyCode({ accounts: snapshot.accounts, sourceAccountId: fromAccountId, targetAccountId: toAccountId })
-      : fromAccount?.currencyCode ?? '';
-  const isCrossCurrencyTransfer = kind === 'transfer' && isCrossCurrencyTransferAccountPair({
-    accounts: snapshot.accounts,
-    sourceAccountId: fromAccountId,
-    targetAccountId: toAccountId,
-  });
   const targetAmountCurrencyCode = isCrossCurrencyTransfer ? toAccount?.currencyCode ?? '' : '';
   const crossCurrencyTransferRateLabel = isCrossCurrencyTransfer
     ? getSafeCrossCurrencyTransferRateLabel({
@@ -190,29 +204,20 @@ export function useAddTransactionController({
       })
     : '';
   const nativePickerValue = getNativePickerValue(date, time);
-  const itemHistory = useMemo(
-    () => getTransactionItemNameSuggestionValues({
-      transactions: snapshot.transactions,
-      transactionLines: snapshot.transactionLines,
-      transactionTemplates: snapshot.transactionTemplates,
-      recurringItems: snapshot.recurringItems,
-    }),
-    [snapshot.recurringItems, snapshot.transactionLines, snapshot.transactionTemplates, snapshot.transactions],
-  );
-  const groupHistory = useMemo(
-    () => snapshot.transactions.map((transaction) => transaction.groupId).filter(Boolean),
-    [snapshot.transactions],
-  );
-  const labelHistory = useMemo(
-    () => snapshot.transactions.flatMap((transaction) => transaction.labels),
-    [snapshot.transactions],
-  );
-  const itemSuggestions = useAutocompleteOptions(itemHistory, item);
-  const groupSuggestions = useAutocompleteOptions(groupHistory, groupId);
-  const labelSuggestions = useMemo(
-    () => getLabelAutocompleteOptions(labelHistory, labels),
-    [labelHistory, labels],
-  );
+  const {
+    groupSuggestions,
+    itemHistory,
+    itemSuggestions,
+    labelSuggestions,
+  } = useTransactionDetailSuggestions({
+    groupQuery: groupId,
+    itemQuery: item,
+    labelsInput: labels,
+    recurringItems: snapshot.recurringItems,
+    transactionLines: snapshot.transactionLines,
+    transactionTemplates: snapshot.transactionTemplates,
+    transactions: snapshot.transactions,
+  });
   const canSave = canBuildAddTransactionInput({
     accounts: snapshot.accounts,
     draft: transactionDraft,
@@ -227,12 +232,12 @@ export function useAddTransactionController({
       });
 
       if (action === 'dismiss_native_picker') {
-        setNativePickerMode(null);
+        closeNativePicker();
         return true;
       }
 
       if (action === 'close_picker') {
-        setPickerMode(null);
+        closePicker();
         return true;
       }
 
@@ -246,7 +251,7 @@ export function useAddTransactionController({
     });
 
     return () => subscription.remove();
-  }, [nativePickerMode, onDone, page, pickerMode]);
+  }, [closeNativePicker, closePicker, nativePickerMode, onDone, page, pickerMode]);
 
   function changeKind(nextKind: TransactionKind) {
     const defaultCategorySelection = resolveAddTransactionDefaultCategory({
@@ -272,77 +277,6 @@ export function useAddTransactionController({
     setCategoryId(defaultCategorySelection.categoryId);
     setSubcategoryId(defaultCategorySelection.subcategoryId ?? '');
     setError('');
-  }
-
-  function pressCalculatorKey(key: CalculatorKey) {
-    setError('');
-    const editsTargetAmount = isCrossCurrencyTransfer && activeTransferAmountField === 'target';
-
-    if (editsTargetAmount) {
-      if (key !== '=') {
-        setTargetAmountInputState((current) => applyCalculatorAmountKey(current, key));
-        return;
-      }
-
-      try {
-        setTargetAmountInputState(applyCalculatorAmountKey(targetAmountInputState, key));
-      } catch (caught) {
-        setError(caught instanceof Error ? caught.message : 'Could not calculate amount.');
-      }
-      return;
-    }
-
-    if (key !== '=') {
-      setAmountInputState((current) => applyCalculatorAmountKey(current, key));
-      return;
-    }
-
-    try {
-      setAmountInputState(applyCalculatorAmountKey(amountInputState, key));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not calculate amount.');
-    }
-  }
-
-  function setReplaceAmountOnNextKey(replaceOnNextEntry: boolean) {
-    setAmountInputState((current) => ({
-      ...current,
-      replaceOnNextEntry,
-    }));
-  }
-
-  function selectSourceAmountInput() {
-    setActiveTransferAmountField('source');
-    setReplaceAmountOnNextKey(true);
-  }
-
-  function selectTargetAmountInput() {
-    setActiveTransferAmountField('target');
-    setTargetAmountInputState((current) => ({
-      ...current,
-      replaceOnNextEntry: true,
-    }));
-  }
-
-  function handleNativePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
-    if (event.type === 'dismissed') {
-      setNativePickerMode(null);
-      return;
-    }
-
-    if (!selectedDate || !nativePickerMode) {
-      return;
-    }
-
-    if (nativePickerMode === 'date') {
-      setDate(toDateInputValue(selectedDate));
-    } else {
-      setTime(toTimeInputValue(selectedDate));
-    }
-
-    if (Platform.OS === 'android') {
-      setNativePickerMode(null);
-    }
   }
 
   async function submit() {
@@ -563,19 +497,6 @@ export function useAddTransactionController({
     );
   }
 
-  function closePicker() {
-    setPickerMode(null);
-  }
-
-  function selectPickerAccount(accountId: string) {
-    if (pickerMode === 'targetAccount') {
-      setToAccountId(accountId);
-    } else {
-      setFromAccountId(accountId);
-    }
-    setPickerMode(null);
-  }
-
   function applyLabelAutocompleteSuggestion(suggestion: string) {
     setLabels((current) => applyLabelSuggestion(current, suggestion));
   }
@@ -609,9 +530,14 @@ export function useAddTransactionController({
     nativePickerMode,
     nativePickerValue,
     notes,
+    closeNativePicker,
     openMainCategorySelect,
+    openDatePicker,
+    openSourceAccountPicker,
     openSplitEditor,
     openSplitLineCategorySelect,
+    openTargetAccountPicker,
+    openTimePicker,
     page,
     pickerMode,
     pressCalculatorKey,
@@ -623,10 +549,8 @@ export function useAddTransactionController({
     setGroupId,
     setItem,
     setLabels,
-    setNativePickerMode,
     setNotes,
     setPage,
-    setPickerMode,
     setReplaceAmountOnNextKey,
     showCurrencyCodes,
     splitLines,

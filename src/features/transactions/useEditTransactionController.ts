@@ -1,6 +1,5 @@
-import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useMemo, useState } from 'react';
-import { BackHandler, Platform } from 'react-native';
+import { useEffect, useState } from 'react';
+import { BackHandler } from 'react-native';
 
 import {
   defaultCategories,
@@ -12,8 +11,7 @@ import {
   formatCrossCurrencyTransferRateLabel,
   isCrossCurrencyTransferAccountPair,
 } from '../../domain/crossCurrencyTransfers';
-import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
-import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
+import { applyLabelSuggestion } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
 import {
   createSplitTransactionFormLine,
@@ -38,7 +36,6 @@ import {
   type TransactionEditDraft,
   type TransactionEditSplitLineDraft,
 } from '../../domain/transactionEdit';
-import { getTransactionItemNameSuggestionValues } from '../../domain/transactionItemSuggestions';
 import type {
   AppSnapshot,
   TransactionKind,
@@ -49,11 +46,9 @@ import type {
   CategorySelectLaunchParams,
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
-import {
-  useAutocompleteOptions,
-  type NativePickerMode,
-  type TransactionPickerMode,
-} from './TransactionFormComponents';
+import { useTransactionAccountPickerRouting } from './useTransactionAccountPickerRouting';
+import { useTransactionDateTimePicker } from './useTransactionDateTimePicker';
+import { useTransactionDetailSuggestions } from './useTransactionDetailSuggestions';
 
 export type EditTransactionPage = 'form' | 'split';
 
@@ -86,44 +81,54 @@ export function useEditTransactionController({
   const [draft, setDraft] = useState<TransactionEditDraft | null>(null);
   const [page, setPage] = useState<EditTransactionPage>('form');
   const [error, setError] = useState('');
-  const [pickerMode, setPickerMode] = useState<TransactionPickerMode | null>(null);
-  const [nativePickerMode, setNativePickerMode] = useState<NativePickerMode | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const {
+    closePicker,
+    openSourceAccountPicker,
+    openTargetAccountPicker,
+    pickerMode,
+    selectPickerAccount,
+  } = useTransactionAccountPickerRouting({
+    onSelectSourceAccount: (accountId) => {
+      setDraft((current) => (current ? { ...current, accountId } : current));
+    },
+    onSelectTargetAccount: (targetAccountId) => {
+      setDraft((current) => (current ? { ...current, targetAccountId } : current));
+    },
+  });
+  const {
+    closeNativePicker,
+    handleNativePickerChange,
+    nativePickerMode,
+    openDatePicker,
+    openTimePicker,
+  } = useTransactionDateTimePicker({
+    canChange: Boolean(draft),
+    onChangeDate: (date) => {
+      updateDraft({ date });
+    },
+    onChangeTime: (time) => {
+      updateDraft({ time });
+    },
+  });
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
   const transactionExists = snapshot.transactions.some((transaction) => transaction.id === transactionId);
-  const itemHistory = useMemo(
-    () => getTransactionItemNameSuggestionValues({
-      transactions: snapshot.transactions,
-      transactionLines: snapshot.transactionLines,
-      transactionTemplates: snapshot.transactionTemplates,
-      recurringItems: snapshot.recurringItems,
-      excludeTransactionId: transactionId,
-    }),
-    [
-      snapshot.recurringItems,
-      snapshot.transactionLines,
-      snapshot.transactionTemplates,
-      snapshot.transactions,
-      transactionId,
-    ],
-  );
-  const groupHistory = useMemo(
-    () => snapshot.transactions.map((transaction) => transaction.groupId).filter(Boolean),
-    [snapshot.transactions],
-  );
-  const labelHistory = useMemo(
-    () => snapshot.transactions
-      .filter((transaction) => transaction.id !== transactionId)
-      .flatMap((transaction) => transaction.labels),
-    [snapshot.transactions, transactionId],
-  );
-  const itemSuggestions = useAutocompleteOptions(itemHistory, draft?.title ?? '');
-  const groupSuggestions = useAutocompleteOptions(groupHistory, draft?.groupId ?? '');
-  const labelSuggestions = useMemo(
-    () => getLabelAutocompleteOptions(labelHistory, draft?.labels ?? ''),
-    [draft?.labels, labelHistory],
-  );
+  const {
+    groupSuggestions,
+    itemHistory,
+    itemSuggestions,
+    labelSuggestions,
+  } = useTransactionDetailSuggestions({
+    excludeTransactionId: transactionId,
+    groupQuery: draft?.groupId ?? '',
+    itemQuery: draft?.title ?? '',
+    labelsInput: draft?.labels ?? '',
+    recurringItems: snapshot.recurringItems,
+    transactionLines: snapshot.transactionLines,
+    transactionTemplates: snapshot.transactionTemplates,
+    transactions: snapshot.transactions,
+  });
   const fromAccount = draft && !isOutsideAccountId(draft.accountId)
     ? snapshot.accounts.find((account) => account.id === draft.accountId)
     : undefined;
@@ -173,12 +178,12 @@ export function useEditTransactionController({
   useEffect(() => {
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (nativePickerMode) {
-        setNativePickerMode(null);
+        closeNativePicker();
         return true;
       }
 
       if (pickerMode) {
-        setPickerMode(null);
+        closePicker();
         return true;
       }
 
@@ -192,7 +197,7 @@ export function useEditTransactionController({
     });
 
     return () => subscription.remove();
-  }, [nativePickerMode, onCancel, page, pickerMode]);
+  }, [closeNativePicker, closePicker, nativePickerMode, onCancel, page, pickerMode]);
 
   function updateDraft(patch: Partial<TransactionEditDraft>) {
     setDraft((current) => (current ? { ...current, ...patch } : current));
@@ -370,27 +375,6 @@ export function useEditTransactionController({
     );
   }
 
-  function handleNativePickerChange(event: DateTimePickerEvent, selectedDate?: Date) {
-    if (event.type === 'dismissed') {
-      setNativePickerMode(null);
-      return;
-    }
-
-    if (!draft || !selectedDate || !nativePickerMode) {
-      return;
-    }
-
-    if (nativePickerMode === 'date') {
-      updateDraft({ date: toDateInputValue(selectedDate) });
-    } else {
-      updateDraft({ time: toTimeInputValue(selectedDate) });
-    }
-
-    if (Platform.OS === 'android') {
-      setNativePickerMode(null);
-    }
-  }
-
   async function save() {
     if (!draft) {
       return;
@@ -489,15 +473,6 @@ export function useEditTransactionController({
     );
   }
 
-  function closePicker() {
-    setPickerMode(null);
-  }
-
-  function selectPickerAccount(accountId: string) {
-    updateDraft(pickerMode === 'targetAccount' ? { targetAccountId: accountId } : { accountId });
-    setPickerMode(null);
-  }
-
   function applyLabelAutocompleteSuggestion(suggestion: string) {
     updateDraft({ labels: applyLabelSuggestion(draft?.labels ?? '', suggestion) });
   }
@@ -526,9 +501,14 @@ export function useEditTransactionController({
     itemSuggestions,
     labelSuggestions,
     nativePickerMode,
+    closeNativePicker,
+    openDatePicker,
     openMainCategorySelect,
+    openSourceAccountPicker,
     openSplitEditor,
     openSplitLineCategorySelect,
+    openTargetAccountPicker,
+    openTimePicker,
     page,
     pickerMode,
     removeSplitLine,
@@ -536,9 +516,7 @@ export function useEditTransactionController({
     selectedCategory,
     selectPickerAccount,
     setConfirmDelete,
-    setNativePickerMode,
     setPage,
-    setPickerMode,
     showCurrencyCodes,
     targetAmountCurrencyCode,
     crossCurrencyTransferRateLabel,

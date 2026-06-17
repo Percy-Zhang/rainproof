@@ -76,6 +76,7 @@ export function AddTransactionScreen({
     changeKind,
     changeSplitLineKind,
     changeSplitMode,
+    closeNativePicker,
     closePicker,
     date,
     error,
@@ -94,9 +95,13 @@ export function AddTransactionScreen({
     nativePickerMode,
     nativePickerValue,
     notes,
+    openDatePicker,
     openMainCategorySelect,
+    openSourceAccountPicker,
     openSplitEditor,
     openSplitLineCategorySelect,
+    openTargetAccountPicker,
+    openTimePicker,
     page,
     pickerMode,
     pressCalculatorKey,
@@ -108,10 +113,8 @@ export function AddTransactionScreen({
     setGroupId,
     setItem,
     setLabels,
-    setNativePickerMode,
     setNotes,
     setPage,
-    setPickerMode,
     setReplaceAmountOnNextKey,
     showCurrencyCodes,
     splitLines,
@@ -241,8 +244,8 @@ export function AddTransactionScreen({
             subcategoryId={subcategoryId}
             toAccount={toAccount}
             onPressCategory={openMainCategorySelect}
-            onPressSourceAccount={() => setPickerMode('sourceAccount')}
-            onPressTargetAccount={() => setPickerMode('targetAccount')}
+            onPressSourceAccount={openSourceAccountPicker}
+            onPressTargetAccount={openTargetAccountPicker}
           />
 
           {kind !== 'transfer' ? (
@@ -325,10 +328,10 @@ export function AddTransactionScreen({
               onChangeItem={setItem}
               onChangeLabels={setLabels}
               onChangeNotes={setNotes}
-              onCloseNativePicker={() => setNativePickerMode(null)}
+              onCloseNativePicker={closeNativePicker}
               onNativePickerChange={handleNativePickerChange}
-              onPressDate={() => setNativePickerMode('date')}
-              onPressTime={() => setNativePickerMode('time')}
+              onPressDate={openDatePicker}
+              onPressTime={openTimePicker}
               onSelectLabelSuggestion={applyLabelAutocompleteSuggestion}
             />
           </ScrollView>
