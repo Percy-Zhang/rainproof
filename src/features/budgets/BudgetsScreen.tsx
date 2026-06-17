@@ -93,35 +93,34 @@ export function BudgetsScreen({
 
   return (
     <View style={styles.shell}>
+      <View style={styles.fixedHeader}>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryText}>
+            <Text style={styles.heading}>Budgets</Text>
+            <Text style={styles.subtle}>Limits using net spending for each budget range.</Text>
+          </View>
+          <View style={styles.headerActions}>
+            <BudgetHistoryModeToggle mode={historyMode} onChange={setHistoryMode} />
+            <ActionButton onPress={onAddBudget} testID="add-budget">
+              Add
+            </ActionButton>
+          </View>
+        </View>
+        <BudgetPeriodNavigator
+          offset={periodOffset}
+          onNext={() => setPeriodOffset((current) => current + 1)}
+          onPrevious={() => setPeriodOffset((current) => current - 1)}
+          onReset={() => {
+            setAnchorDate(new Date());
+            setPeriodOffset(0);
+          }}
+        />
+      </View>
       <DraggableFlatList
         data={budgetRows}
         keyExtractor={(row) => row.id}
         renderItem={renderBudgetRow}
-        ListHeaderComponent={(
-          <View style={styles.header}>
-            <View style={styles.summaryRow}>
-              <View style={styles.summaryText}>
-                <Text style={styles.heading}>Budgets</Text>
-                <Text style={styles.subtle}>Limits using net spending for each budget range.</Text>
-              </View>
-              <View style={styles.headerActions}>
-                <BudgetHistoryModeToggle mode={historyMode} onChange={setHistoryMode} />
-                <ActionButton onPress={onAddBudget} testID="add-budget">
-                  Add
-                </ActionButton>
-              </View>
-            </View>
-            <BudgetPeriodNavigator
-              offset={periodOffset}
-              onNext={() => setPeriodOffset((current) => current + 1)}
-              onPrevious={() => setPeriodOffset((current) => current - 1)}
-              onReset={() => {
-                setAnchorDate(new Date());
-                setPeriodOffset(0);
-              }}
-            />
-          </View>
-        )}
+        containerStyle={styles.list}
         ListEmptyComponent={(
           <Card testID="budgets-empty-state">
             <View style={styles.emptyIcon}>
@@ -407,20 +406,32 @@ const styles = StyleSheet.create({
   },
   content: {
     gap: spacing.md,
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.xl,
   },
-  header: {
+  fixedHeader: {
+    backgroundColor: colors.background,
+    borderBottomColor: colors.faint,
+    borderBottomWidth: 1,
     gap: spacing.md,
+    padding: spacing.lg,
+    paddingBottom: spacing.md,
   },
   headerActions: {
     alignItems: 'center',
     flexDirection: 'row',
+    flexWrap: 'wrap',
     flexShrink: 0,
     gap: spacing.sm,
+    justifyContent: 'flex-end',
+  },
+  list: {
+    flex: 1,
   },
   summaryRow: {
     alignItems: 'center',
+    flexWrap: 'wrap',
     flexDirection: 'row',
     gap: spacing.md,
     justifyContent: 'space-between',
