@@ -11,6 +11,7 @@ import {
 } from '../../domain/creditCards';
 import { formatMoney } from '../../domain/money';
 import type { Account } from '../../domain/types';
+import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
 
 type AccountListRowProps = {
@@ -55,7 +56,7 @@ export function AccountListRow({
             borderColor: account.themeColor,
           },
           account.isArchived && styles.archivedRow,
-          dragging && styles.draggingRow,
+          dragging && sharedStyles.draggingSurface,
           dashboardEditMode && !hiddenFromDashboard && styles.dashboardVisibleRow,
         ]}
       >
@@ -63,7 +64,7 @@ export function AccountListRow({
           accessibilityLabel={`Reorder ${getAccountDisplayName(account)}`}
           accessibilityRole="button"
           onLongPress={onDrag}
-          style={({ pressed }) => [styles.dragHandle, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.dragHandle, pressed && sharedStyles.pressed]}
           testID={`account-drag-${account.id}`}
         >
           <Ionicons name="reorder-three-outline" size={24} color={colors.primaryDark} />
@@ -71,7 +72,7 @@ export function AccountListRow({
         <Pressable
           accessibilityRole="button"
           onPress={onPress}
-          style={({ pressed }) => [styles.accountButton, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.accountButton, pressed && sharedStyles.pressed]}
           testID={`account-row-${account.id}`}
         >
           <AccountIconBadge account={account} size="md" />
@@ -111,14 +112,6 @@ const styles = StyleSheet.create({
   },
   archivedRow: {
     opacity: 0.58,
-  },
-  draggingRow: {
-    elevation: 8,
-    opacity: 0.95,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
   },
   dashboardVisibleRow: {
     borderRightColor: colors.primary,
@@ -176,9 +169,6 @@ const styles = StyleSheet.create({
   },
   closedBalanceText: {
     color: colors.muted,
-  },
-  pressed: {
-    opacity: 0.78,
   },
 });
 

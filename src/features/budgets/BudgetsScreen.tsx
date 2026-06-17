@@ -23,6 +23,7 @@ import {
 import { defaultCategories } from '../../domain/categories';
 import { formatMoney } from '../../domain/money';
 import type { AppSnapshot } from '../../domain/types';
+import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { BudgetHistoryChart } from './BudgetHistoryChart';
 
@@ -97,7 +98,7 @@ export function BudgetsScreen({
         <View style={styles.summaryRow}>
           <View style={styles.summaryText}>
             <Text style={styles.heading}>Budgets</Text>
-            <Text style={styles.subtle}>Limits using net spending for each budget range.</Text>
+            <Text style={sharedStyles.mutedSmallText}>Limits using net spending for each budget range.</Text>
           </View>
           <View style={styles.headerActions}>
             <BudgetHistoryModeToggle mode={historyMode} onChange={setHistoryMode} />
@@ -177,14 +178,17 @@ function BudgetUsageCard({
 
   return (
     <ScaleDecorator>
-      <View style={[styles.budgetCard, dragging && styles.draggingCard]} testID={`budget-row-${row.id}`}>
+      <View
+        style={[sharedStyles.surfaceCard, styles.budgetCard, dragging && sharedStyles.draggingSurface]}
+        testID={`budget-row-${row.id}`}
+      >
         <Pressable
           accessibilityHint="Long press to reorder."
           accessibilityRole="button"
           delayLongPress={150}
           onLongPress={onDrag}
           onPress={onPress}
-          style={({ pressed }) => [styles.budgetContent, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.budgetContent, pressed && sharedStyles.pressed]}
         >
           <View style={styles.budgetHeader}>
             <CategoryIconBadge color={row.color} icon={row.icon} size="md" />
@@ -218,7 +222,7 @@ function BudgetUsageCard({
           accessibilityRole="button"
           accessibilityState={{ expanded: isHistoryExpanded }}
           onPress={onToggleHistory}
-          style={({ pressed }) => [styles.historyToggle, pressed && styles.pressed]}
+          style={({ pressed }) => [styles.historyToggle, pressed && sharedStyles.pressed]}
           testID={`budget-history-toggle-${row.id}`}
         >
           <View style={styles.historyToggleLabel}>
@@ -308,11 +312,11 @@ function BudgetPeriodNavigator({
             : `${offset} steps ahead`;
 
   return (
-    <View style={styles.periodNavigator}>
+    <View style={[sharedStyles.rowSurface, styles.periodNavigator]}>
       <Pressable
         accessibilityLabel="Previous budget ranges"
         onPress={onPrevious}
-        style={({ pressed }) => [styles.periodNavButton, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.periodNavButton, pressed && sharedStyles.pressed]}
         testID="budget-period-previous"
       >
         <Ionicons name="chevron-back" size={20} color={colors.primaryDark} />
@@ -328,7 +332,7 @@ function BudgetPeriodNavigator({
       <Pressable
         accessibilityLabel="Next budget ranges"
         onPress={onNext}
-        style={({ pressed }) => [styles.periodNavButton, pressed && styles.pressed]}
+        style={({ pressed }) => [styles.periodNavButton, pressed && sharedStyles.pressed]}
         testID="budget-period-next"
       >
         <Ionicons name="chevron-forward" size={20} color={colors.primaryDark} />
@@ -359,7 +363,7 @@ function BudgetHistoryModeToggle({
             style={({ pressed }) => [
               styles.historyModeOption,
               selected && styles.historyModeOptionSelected,
-              pressed && styles.pressed,
+              pressed && sharedStyles.pressed,
             ]}
             testID={`budget-history-mode-${value}`}
           >
@@ -446,11 +450,6 @@ const styles = StyleSheet.create({
     fontSize: typography.h2,
     fontWeight: '900',
   },
-  subtle: {
-    color: colors.muted,
-    fontSize: typography.small,
-    lineHeight: 18,
-  },
   historyModeOption: {
     borderRadius: 7,
     paddingHorizontal: spacing.sm,
@@ -475,15 +474,8 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   periodNavigator: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    minHeight: 52,
-    paddingHorizontal: spacing.sm,
   },
   periodNavButton: {
     alignItems: 'center',
@@ -507,10 +499,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   budgetCard: {
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
     gap: spacing.md,
     padding: spacing.lg,
     shadowColor: colors.shadow,
@@ -520,14 +508,6 @@ const styles = StyleSheet.create({
   },
   budgetContent: {
     gap: spacing.md,
-  },
-  draggingCard: {
-    elevation: 8,
-    opacity: 0.95,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
   },
   budgetHeader: {
     alignItems: 'center',
@@ -631,8 +611,5 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.body,
     lineHeight: 21,
-  },
-  pressed: {
-    opacity: 0.78,
   },
 });
