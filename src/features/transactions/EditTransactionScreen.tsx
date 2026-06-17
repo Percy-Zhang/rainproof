@@ -94,6 +94,7 @@ export function EditTransactionScreen({
     getSplitTotalMinor,
     groupSuggestions,
     handleNativePickerChange,
+    isCrossCurrencyTransfer,
     itemHistory,
     itemSuggestions,
     labelSuggestions,
@@ -112,8 +113,10 @@ export function EditTransactionScreen({
     setPage,
     setPickerMode,
     showCurrencyCodes,
+    targetAmountCurrencyCode,
     toAccount,
     transactionExists,
+    crossCurrencyTransferRateLabel,
     updateDraft,
     updateSplitLine,
   } = controller;
@@ -234,7 +237,7 @@ export function EditTransactionScreen({
               />
 
               <InlineField
-                label="Amount"
+                label={isCrossCurrencyTransfer ? 'Sent amount' : 'Amount'}
                 value={draft.amount}
                 onChange={(amount) => updateDraft({ amount })}
                 placeholder="0.00"
@@ -242,6 +245,23 @@ export function EditTransactionScreen({
                 rightLabel={showCurrencyCodes ? amountCurrencyCode : undefined}
                 selectAllOnFocus
               />
+
+              {isCrossCurrencyTransfer ? (
+                <View style={styles.crossCurrencyBlock}>
+                  <InlineField
+                    label="Received amount"
+                    value={draft.targetAmount ?? ''}
+                    onChange={(targetAmount) => updateDraft({ targetAmount })}
+                    placeholder="0.00"
+                    keyboardType="decimal-pad"
+                    rightLabel={showCurrencyCodes ? targetAmountCurrencyCode : undefined}
+                    selectAllOnFocus
+                  />
+                  <Text style={styles.rateLabel}>
+                    {crossCurrencyTransferRateLabel || 'Enter the received amount to show the rate.'}
+                  </Text>
+                </View>
+              ) : null}
 
               <TransactionAccountCategorySelectors
                 categories={categories}
@@ -378,6 +398,14 @@ const styles = StyleSheet.create({
   deleteOnlyPane: {
     flex: 1,
     justifyContent: 'flex-end',
+  },
+  crossCurrencyBlock: {
+    gap: spacing.xs,
+  },
+  rateLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
   },
   footer: {
     gap: spacing.sm,

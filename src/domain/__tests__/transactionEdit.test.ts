@@ -530,15 +530,48 @@ describe('transaction edit helpers', () => {
     ).toThrow('Choose at least one account inside Rainproof.');
   });
 
-  it('blocks tracked account transfers across currencies until exchange rates exist', () => {
+  it('builds tracked account transfers across currencies from sent and received amounts', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('transfer', [
+        line({ id: 'source', accountId: 'a1', amountMinor: -15000, currencyCode: 'AUD', transferPeerAccountId: 'usd' }),
+        line({ id: 'target', accountId: 'usd', amountMinor: 9750, currencyCode: 'USD', transferPeerAccountId: 'a1' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(
+      { ...draft, amount: '200.00', targetAmount: '130.00' },
+      accounts,
+    );
+
+    expect(draft.amount).toBe('150.00');
+    expect(draft.targetAmount).toBe('97.50');
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        id: 'source',
+        accountId: 'a1',
+        amountMinor: -20000,
+        currencyCode: 'AUD',
+        transferPeerAccountId: 'usd',
+      }),
+      expect.objectContaining({
+        id: 'target',
+        accountId: 'usd',
+        amountMinor: 13000,
+        currencyCode: 'USD',
+        transferPeerAccountId: 'a1',
+      }),
+    ]);
+  });
+
+  it('requires a received amount when editing tracked cross-currency transfers', () => {
     const draft = createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1');
 
     expect(() =>
       buildTransactionUpdateInput(
-        { ...draft, kind: 'transfer', amount: '15.00', accountId: 'a1', targetAccountId: 'usd' },
+        { ...draft, kind: 'transfer', amount: '15.00', accountId: 'a1', targetAccountId: 'usd', targetAmount: '' },
         accounts,
       ),
-    ).toThrow('Transfers between different currencies need exchange rates.');
+    ).toThrow('Received amount must be greater than zero.');
   });
 
   it('formats edit dates with month names', () => {

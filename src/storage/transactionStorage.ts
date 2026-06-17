@@ -257,14 +257,7 @@ function validateTransactionLinesForStorage(
   }
 
   if (kind === 'transfer') {
-    if (lines.length > 2) {
-      throw new Error('Transfers cannot be split.');
-    }
-
-    if (lines.some((line) => line.categoryId?.trim() || line.subcategoryId?.trim())) {
-      throw new Error('Transfers cannot use categories.');
-    }
-
+    validateTransferLinesForStorage(lines);
     return;
   }
 
@@ -281,5 +274,40 @@ function validateTransactionLinesForStorage(
       })),
       mode: 'auto',
     });
+  }
+}
+
+function validateTransferLinesForStorage(lines: TransactionLineInput[]): void {
+  if (lines.length > 2) {
+    throw new Error('Transfers cannot be split.');
+  }
+
+  if (lines.some((line) => line.categoryId?.trim() || line.subcategoryId?.trim())) {
+    throw new Error('Transfers cannot use categories.');
+  }
+
+  if (lines.length === 1) {
+    if (lines[0].amountMinor === 0) {
+      throw new Error('Transfer amount must be greater than zero.');
+    }
+    return;
+  }
+
+  const sourceLine = lines.find((line) => line.amountMinor < 0);
+  const targetLine = lines.find((line) => line.amountMinor > 0);
+
+  if (!sourceLine || !targetLine) {
+    throw new Error('Transfers need one sent line and one received line.');
+  }
+
+  if (sourceLine.accountId === targetLine.accountId) {
+    throw new Error('Source and destination accounts must be different.');
+  }
+
+  const sourceCurrencyCode = normalizeCurrencyCode(sourceLine.currencyCode);
+  const targetCurrencyCode = normalizeCurrencyCode(targetLine.currencyCode);
+
+  if (sourceCurrencyCode === targetCurrencyCode && Math.abs(sourceLine.amountMinor) !== targetLine.amountMinor) {
+    throw new Error('Same-currency transfer amounts must match.');
   }
 }

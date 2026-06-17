@@ -8,8 +8,13 @@ import {
   getDefaultCategoryForKind,
   getDefaultSubcategoryId,
 } from '../../domain/categories';
+import {
+  formatCrossCurrencyTransferRateLabel,
+  isCrossCurrencyTransferAccountPair,
+} from '../../domain/crossCurrencyTransfers';
 import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
 import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
+import { parseMoneyInput } from '../../domain/money';
 import {
   createSplitTransactionFormLine,
   formatMinorInput,
@@ -133,6 +138,22 @@ export function useEditTransactionController({
           targetAccountId: draft.targetAccountId,
         })
       : fromAccount?.currencyCode ?? ''
+    : '';
+  const isCrossCurrencyTransfer = draft
+    ? draft.kind === 'transfer' && isCrossCurrencyTransferAccountPair({
+        accounts: snapshot.accounts,
+        sourceAccountId: draft.accountId,
+        targetAccountId: draft.targetAccountId,
+      })
+    : false;
+  const targetAmountCurrencyCode = isCrossCurrencyTransfer ? toAccount?.currencyCode ?? '' : '';
+  const crossCurrencyTransferRateLabel = isCrossCurrencyTransfer
+    ? getSafeCrossCurrencyTransferRateLabel({
+        sourceAmount: draft?.amount ?? '',
+        sourceCurrencyCode: amountCurrencyCode,
+        targetAmount: draft?.targetAmount ?? '',
+        targetCurrencyCode: targetAmountCurrencyCode,
+      })
     : '';
   const selectedCategory = draft?.categoryId ? getCategory(draft.categoryId, categories) : getDefaultCategoryForKind(draft?.kind ?? 'expense', categories);
   const canSave = draft ? canBuildTransactionUpdateInput(draft, snapshot.accounts) : false;
@@ -343,6 +364,7 @@ export function useEditTransactionController({
             subcategoryId: kind === 'transfer' ? '' : getDefaultSubcategoryId(defaultCategory),
             splitLines: kind !== 'transfer' && kind === current.kind ? current.splitLines : undefined,
             splitMode: kind !== 'transfer' && kind === current.kind ? current.splitMode : 'standard',
+            targetAmount: kind === 'transfer' ? current.targetAmount : '',
           }
         : current,
     );
@@ -499,6 +521,7 @@ export function useEditTransactionController({
     getSplitTotalMinor: getTransactionEditDraftTotalMinor,
     groupSuggestions,
     handleNativePickerChange,
+    isCrossCurrencyTransfer,
     itemHistory,
     itemSuggestions,
     labelSuggestions,
@@ -517,9 +540,40 @@ export function useEditTransactionController({
     setPage,
     setPickerMode,
     showCurrencyCodes,
+    targetAmountCurrencyCode,
+    crossCurrencyTransferRateLabel,
     toAccount,
     transactionExists,
     updateDraft,
     updateSplitLine,
   };
+}
+
+function getSafeCrossCurrencyTransferRateLabel({
+  sourceAmount,
+  sourceCurrencyCode,
+  targetAmount,
+  targetCurrencyCode,
+}: {
+  sourceAmount: string;
+  sourceCurrencyCode: string;
+  targetAmount: string;
+  targetCurrencyCode: string;
+}): string {
+  try {
+    const sourceAmountMinor = Math.abs(parseMoneyInput(sourceAmount));
+    const targetAmountMinor = Math.abs(parseMoneyInput(targetAmount));
+    if (sourceAmountMinor <= 0 || targetAmountMinor <= 0 || !sourceCurrencyCode || !targetCurrencyCode) {
+      return '';
+    }
+
+    return formatCrossCurrencyTransferRateLabel({
+      sourceAmountMinor,
+      sourceCurrencyCode,
+      targetAmountMinor,
+      targetCurrencyCode,
+    });
+  } catch {
+    return '';
+  }
 }

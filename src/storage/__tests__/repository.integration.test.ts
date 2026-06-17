@@ -12,6 +12,7 @@ import {
 } from '../../domain/aggregates';
 import { getBudgetUsageFromStatsReport } from '../../domain/budgets';
 import { buildRainproofBackup } from '../../domain/backupExport';
+import { buildCrossCurrencyTransferLines } from '../../domain/crossCurrencyTransfers';
 import { getDefaultDashboardCardSettings } from '../../domain/dashboardCards';
 import { getNextMonthlyDueDateForDay } from '../../domain/recurringItems';
 import { getStatsReport } from '../../domain/statsReports';
@@ -2384,6 +2385,17 @@ describe('SQLite finance repository integration', () => {
         }),
       ).rejects.toThrow('Transfers cannot be split.');
       await expect(
+        repository.addTransaction({
+          kind: 'transfer',
+          title: 'Mismatched same-currency transfer',
+          datetime: '2026-05-18T12:00:00.000Z',
+          lines: [
+            { accountId: everyday.id, amountMinor: -5000, currencyCode: 'AUD', transferPeerAccountId: savings.id },
+            { accountId: savings.id, amountMinor: 4000, currencyCode: 'AUD', transferPeerAccountId: everyday.id },
+          ],
+        }),
+      ).rejects.toThrow('Same-currency transfer amounts must match.');
+      await expect(
         repository.updateTransaction({
           id: transfer.id,
           kind: 'transfer',
@@ -2405,6 +2417,102 @@ describe('SQLite finance repository integration', () => {
 
       snapshot = await repository.getSnapshot();
       expect(getLinesForTransaction(snapshot, transfer.id)).toHaveLength(2);
+    });
+  });
+
+  it('persists cross-currency transfers as sent and received amounts without counting them in stats or budgets', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, {
+        name: 'AUD Everyday',
+        openingBalanceMinor: 100000,
+        currencyCode: 'AUD',
+      });
+      const usd = await addAccount(repository, {
+        name: 'USD Wallet',
+        openingBalanceMinor: 20000,
+        currencyCode: 'USD',
+      });
+      await repository.addBudget({
+        name: 'Overall AUD',
+        amountMinor: 50000,
+        currencyCode: 'AUD',
+        period: 'monthly',
+        scopeType: 'overall',
+      });
+
+      await repository.addTransaction({
+        kind: 'transfer',
+        title: 'Move to USD',
+        datetime: '2026-05-18T12:00:00.000Z',
+        lines: buildCrossCurrencyTransferLines({
+          accounts: [everyday, usd],
+          sourceAccountId: everyday.id,
+          targetAccountId: usd.id,
+          sourceAmountMinor: 15000,
+          targetAmountMinor: 9750,
+        }),
+      });
+
+      const snapshot = await repository.getSnapshot();
+      const transfer = getTransactionByTitle(snapshot, 'Move to USD');
+      const lines = getLinesForTransaction(snapshot, transfer.id);
+      const report = getStatsReport({
+        reportKind: 'expense',
+        transactions: snapshot.transactions,
+        transactionLines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        accounts: snapshot.accounts,
+        categories: snapshot.categories,
+        range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+        currencyCode: 'AUD',
+      });
+
+      expect(lines).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            accountId: everyday.id,
+            amountMinor: -15000,
+            currencyCode: 'AUD',
+            categoryId: '',
+            subcategoryId: '',
+            transferPeerAccountId: usd.id,
+          }),
+          expect.objectContaining({
+            accountId: usd.id,
+            amountMinor: 9750,
+            currencyCode: 'USD',
+            categoryId: '',
+            subcategoryId: '',
+            transferPeerAccountId: everyday.id,
+          }),
+        ]),
+      );
+      expect(getAccountBalances(snapshot.accounts, snapshot.transactionLines)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ account: expect.objectContaining({ id: everyday.id }), balanceMinor: 85000 }),
+          expect.objectContaining({ account: expect.objectContaining({ id: usd.id }), balanceMinor: 29750 }),
+        ]),
+      );
+      expect(
+        getCashFlowSummary({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'AUD',
+        }),
+      ).toEqual({ currencyCode: 'AUD', incomeMinor: 0, expenseMinor: 0, netMinor: 0 });
+      expect(
+        getCashFlowSummary({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          range: { startIso: '2026-05-01T00:00:00.000Z', endIso: '2026-06-01T00:00:00.000Z' },
+          currencyCode: 'USD',
+        }),
+      ).toEqual({ currencyCode: 'USD', incomeMinor: 0, expenseMinor: 0, netMinor: 0 });
+      expect(report.totalNetAmountMinor).toBe(0);
+      expect(getBudgetUsageFromStatsReport({ budgets: snapshot.budgets, report })[0]).toEqual(
+        expect.objectContaining({ spentMinor: 0, matchingLineIds: [] }),
+      );
     });
   });
 

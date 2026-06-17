@@ -5,6 +5,10 @@ import {
   normalizeSubcategoryId,
 } from './categories';
 import { formatLongDateLabel, parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
+import {
+  buildCrossCurrencyTransferLines,
+  isCrossCurrencyTransferAccountPair,
+} from './crossCurrencyTransfers';
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
 import {
@@ -41,6 +45,7 @@ export type TransactionEditDraft = {
   kind: TransactionKind;
   title: string;
   amount: string;
+  targetAmount?: string;
   date: string;
   time: string;
   accountId: string;
@@ -95,12 +100,17 @@ export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId:
     const sourceLine = lines.find((line) => line.amountMinor < 0);
     const targetLine = lines.find((line) => line.amountMinor > 0 && line.accountId !== sourceLine?.accountId);
     const amountLine = sourceLine ?? targetLine ?? lines[0];
+    const isCrossCurrencyTransfer =
+      sourceLine &&
+      targetLine &&
+      sourceLine.currencyCode !== targetLine.currencyCode;
 
     return {
       id: transaction.id,
       kind: transaction.kind,
       title: transaction.title,
-      amount: minorToInput(Math.abs(amountLine.amountMinor)),
+      amount: minorToInput(Math.abs((isCrossCurrencyTransfer ? sourceLine : amountLine).amountMinor)),
+      targetAmount: isCrossCurrencyTransfer ? minorToInput(Math.abs(targetLine.amountMinor)) : '',
       date: toDateInputValue(dateValue),
       time: toTimeInputValue(dateValue),
       accountId: sourceLine?.accountId ?? OUTSIDE_ACCOUNT_ID,
@@ -190,6 +200,41 @@ export function buildTransactionUpdateInput(
   const labels = parseLabelsInput(draft.labels);
 
   if (draft.kind === 'transfer') {
+    if (isCrossCurrencyTransferAccountPair({
+      accounts,
+      sourceAccountId: draft.accountId,
+      targetAccountId: draft.targetAccountId,
+    })) {
+      const targetAmountExpression = draft.targetAmount?.trim() ?? '';
+      if (!targetAmountExpression) {
+        throw new Error('Received amount must be greater than zero.');
+      }
+
+      const targetAmountMinor = Math.abs(parseMoneyInput(targetAmountExpression));
+      if (targetAmountMinor <= 0) {
+        throw new Error('Received amount must be greater than zero.');
+      }
+
+      return {
+        id: draft.id,
+        kind: draft.kind,
+        title: draft.title,
+        datetime,
+        notes: draft.notes,
+        labels,
+        groupId: draft.groupId,
+        lines: buildCrossCurrencyTransferLines({
+          accounts,
+          sourceAccountId: draft.accountId,
+          targetAccountId: draft.targetAccountId,
+          sourceAmountMinor: amountMinor,
+          targetAmountMinor,
+          sourceLineId: draft.sourceLineId,
+          targetLineId: draft.targetLineId,
+        }),
+      };
+    }
+
     return {
       id: draft.id,
       kind: draft.kind,

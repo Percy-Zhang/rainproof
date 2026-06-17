@@ -7,6 +7,7 @@ import {
   canBuildAddTransactionInput,
   createAddTransactionInitialDraft,
   getAddTransactionPreviewAmountMinor,
+  resolveAddTransactionAmountExpression,
   type AddTransactionDraft,
 } from '../../domain/addTransactionDraft';
 import {
@@ -21,8 +22,13 @@ import {
   type CalculatorKey,
 } from '../../domain/calculator';
 import { defaultCategories, getCategory } from '../../domain/categories';
+import {
+  formatCrossCurrencyTransferRateLabel,
+  isCrossCurrencyTransferAccountPair,
+} from '../../domain/crossCurrencyTransfers';
 import { toDateInputValue, toTimeInputValue } from '../../domain/dates';
 import { applyLabelSuggestion, getLabelAutocompleteOptions } from '../../domain/labels';
+import { parseMoneyInput } from '../../domain/money';
 import {
   createSplitTransactionFormLine,
   formatMinorInput,
@@ -59,6 +65,7 @@ import {
 } from './TransactionFormComponents';
 
 export type AddTransactionPage = 'amount' | 'details' | 'split';
+type TransferAmountField = 'source' | 'target';
 
 type UseAddTransactionControllerOptions = {
   snapshot: AppSnapshot;
@@ -109,6 +116,12 @@ export function useAddTransactionController({
   const [amountInputState, setAmountInputState] = useState(initialAmountInputState);
   const amountExpression = amountInputState.expression;
   const replaceAmountOnNextKey = amountInputState.replaceOnNextEntry;
+  const [targetAmountInputState, setTargetAmountInputState] = useState(() =>
+    getInitialCalculatorAmountInputState(initialDraft.targetAmountExpression ?? ''),
+  );
+  const targetAmountExpression = targetAmountInputState.expression;
+  const targetReplaceAmountOnNextKey = targetAmountInputState.replaceOnNextEntry;
+  const [activeTransferAmountField, setActiveTransferAmountField] = useState<TransferAmountField>('source');
   const [date, setDate] = useState(initialDraft.date);
   const [time, setTime] = useState(initialDraft.time);
   const [fromAccountId, setFromAccountId] = useState(initialDraft.fromAccountId);
@@ -134,6 +147,7 @@ export function useAddTransactionController({
     splitLines,
     splitMode,
     subcategoryId,
+    targetAmountExpression,
     time,
     toAccountId,
   };
@@ -150,6 +164,7 @@ export function useAddTransactionController({
     kind,
     sourceAccountId: fromAccountId,
   });
+  const targetPreviewAmountMinor = getAddTransactionTargetPreviewAmountMinor(targetAmountExpression);
   const splitTotalMinor = Math.abs(previewAmountMinor);
   const splitSummary = useMemo(() => (
     splitMode === 'mixed' && kind !== 'transfer'
@@ -160,6 +175,20 @@ export function useAddTransactionController({
     kind === 'transfer'
       ? getTransferAmountCurrencyCode({ accounts: snapshot.accounts, sourceAccountId: fromAccountId, targetAccountId: toAccountId })
       : fromAccount?.currencyCode ?? '';
+  const isCrossCurrencyTransfer = kind === 'transfer' && isCrossCurrencyTransferAccountPair({
+    accounts: snapshot.accounts,
+    sourceAccountId: fromAccountId,
+    targetAccountId: toAccountId,
+  });
+  const targetAmountCurrencyCode = isCrossCurrencyTransfer ? toAccount?.currencyCode ?? '' : '';
+  const crossCurrencyTransferRateLabel = isCrossCurrencyTransfer
+    ? getSafeCrossCurrencyTransferRateLabel({
+        sourceAmountExpression: amountExpression,
+        sourceCurrencyCode: amountCurrencyCode,
+        targetAmountExpression,
+        targetCurrencyCode: targetAmountCurrencyCode,
+      })
+    : '';
   const nativePickerValue = getNativePickerValue(date, time);
   const itemHistory = useMemo(
     () => getTransactionItemNameSuggestionValues({
@@ -247,6 +276,21 @@ export function useAddTransactionController({
 
   function pressCalculatorKey(key: CalculatorKey) {
     setError('');
+    const editsTargetAmount = isCrossCurrencyTransfer && activeTransferAmountField === 'target';
+
+    if (editsTargetAmount) {
+      if (key !== '=') {
+        setTargetAmountInputState((current) => applyCalculatorAmountKey(current, key));
+        return;
+      }
+
+      try {
+        setTargetAmountInputState(applyCalculatorAmountKey(targetAmountInputState, key));
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : 'Could not calculate amount.');
+      }
+      return;
+    }
 
     if (key !== '=') {
       setAmountInputState((current) => applyCalculatorAmountKey(current, key));
@@ -264,6 +308,19 @@ export function useAddTransactionController({
     setAmountInputState((current) => ({
       ...current,
       replaceOnNextEntry,
+    }));
+  }
+
+  function selectSourceAmountInput() {
+    setActiveTransferAmountField('source');
+    setReplaceAmountOnNextKey(true);
+  }
+
+  function selectTargetAmountInput() {
+    setActiveTransferAmountField('target');
+    setTargetAmountInputState((current) => ({
+      ...current,
+      replaceOnNextEntry: true,
     }));
   }
 
@@ -525,6 +582,7 @@ export function useAddTransactionController({
 
   return {
     addSplitLine,
+    activeTransferAmountField,
     amountCurrencyCode,
     amountExpression,
     applyLabelAutocompleteSuggestion,
@@ -577,9 +635,54 @@ export function useAddTransactionController({
     splitTotalMinor,
     subcategoryId,
     submit,
+    targetAmountCurrencyCode,
+    targetAmountExpression,
+    targetPreviewAmountMinor,
+    targetReplaceAmountOnNextKey,
+    crossCurrencyTransferRateLabel,
+    isCrossCurrencyTransfer,
     time,
     toAccount,
     toAccountId,
+    selectSourceAmountInput,
+    selectTargetAmountInput,
     updateSplitLine,
   };
+}
+
+function getAddTransactionTargetPreviewAmountMinor(amountExpression: string): number {
+  try {
+    return Math.abs(parseMoneyInput(resolveAddTransactionAmountExpression(amountExpression)));
+  } catch {
+    return 0;
+  }
+}
+
+function getSafeCrossCurrencyTransferRateLabel({
+  sourceAmountExpression,
+  sourceCurrencyCode,
+  targetAmountExpression,
+  targetCurrencyCode,
+}: {
+  sourceAmountExpression: string;
+  sourceCurrencyCode: string;
+  targetAmountExpression: string;
+  targetCurrencyCode: string;
+}): string {
+  try {
+    const sourceAmountMinor = Math.abs(parseMoneyInput(resolveAddTransactionAmountExpression(sourceAmountExpression)));
+    const targetAmountMinor = Math.abs(parseMoneyInput(resolveAddTransactionAmountExpression(targetAmountExpression)));
+    if (sourceAmountMinor <= 0 || targetAmountMinor <= 0 || !sourceCurrencyCode || !targetCurrencyCode) {
+      return '';
+    }
+
+    return formatCrossCurrencyTransferRateLabel({
+      sourceAmountMinor,
+      sourceCurrencyCode,
+      targetAmountMinor,
+      targetCurrencyCode,
+    });
+  } catch {
+    return '';
+  }
 }

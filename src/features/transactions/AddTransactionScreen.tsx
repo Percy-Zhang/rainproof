@@ -66,6 +66,7 @@ export function AddTransactionScreen({
   });
   const {
     addSplitLine,
+    activeTransferAmountField,
     amountCurrencyCode,
     amountExpression,
     applyLabelAutocompleteSuggestion,
@@ -83,6 +84,7 @@ export function AddTransactionScreen({
     groupId,
     groupSuggestions,
     handleNativePickerChange,
+    isCrossCurrencyTransfer,
     item,
     itemHistory,
     itemSuggestions,
@@ -118,9 +120,16 @@ export function AddTransactionScreen({
     splitTotalMinor,
     subcategoryId,
     submit,
+    targetAmountCurrencyCode,
+    targetAmountExpression,
+    targetPreviewAmountMinor,
+    targetReplaceAmountOnNextKey,
     time,
     toAccount,
     toAccountId,
+    crossCurrencyTransferRateLabel,
+    selectSourceAmountInput,
+    selectTargetAmountInput,
     updateSplitLine,
   } = controller;
 
@@ -180,15 +189,47 @@ export function AddTransactionScreen({
         <View style={styles.contentPane} testID="add-transaction-amount-page">
           <TransactionTypeTabs kind={kind} onChange={changeKind} />
 
-          <TransactionAmountCard
-            amountCurrencyCode={amountCurrencyCode}
-            amountExpression={amountExpression}
-            kind={kind}
-            previewAmountMinor={previewAmountMinor}
-            replaceAmountOnNextKey={replaceAmountOnNextKey}
-            showCurrencyCodes={showCurrencyCodes}
-            onPress={() => setReplaceAmountOnNextKey(true)}
-          />
+          {isCrossCurrencyTransfer ? (
+            <View style={styles.crossCurrencyAmountStack}>
+              <TransactionAmountCard
+                amountCurrencyCode={amountCurrencyCode}
+                amountExpression={amountExpression}
+                kind={kind}
+                label="Sent amount"
+                previewAmountMinor={previewAmountMinor}
+                replaceAmountOnNextKey={replaceAmountOnNextKey}
+                selected={activeTransferAmountField === 'source'}
+                showCurrencyCodes={showCurrencyCodes}
+                onPress={selectSourceAmountInput}
+              />
+              <TransactionAmountCard
+                amountCurrencyCode={targetAmountCurrencyCode}
+                amountExpression={targetAmountExpression}
+                kind={kind}
+                label="Received amount"
+                previewAmountMinor={targetPreviewAmountMinor}
+                replaceAmountOnNextKey={targetReplaceAmountOnNextKey}
+                selected={activeTransferAmountField === 'target'}
+                showCurrencyCodes={showCurrencyCodes}
+                onPress={selectTargetAmountInput}
+              />
+              <Text style={styles.rateLabel}>
+                {crossCurrencyTransferRateLabel || 'Enter both amounts to show the rate.'}
+              </Text>
+            </View>
+          ) : (
+            <TransactionAmountCard
+              amountCurrencyCode={amountCurrencyCode}
+              amountExpression={amountExpression}
+              kind={kind}
+              previewAmountMinor={previewAmountMinor}
+              replaceAmountOnNextKey={replaceAmountOnNextKey}
+              showCurrencyCodes={showCurrencyCodes}
+              onPress={() => {
+                setReplaceAmountOnNextKey(true);
+              }}
+            />
+          )}
 
           <TransactionAccountCategorySelectors
             categories={categories}
@@ -200,8 +241,8 @@ export function AddTransactionScreen({
             subcategoryId={subcategoryId}
             toAccount={toAccount}
             onPressCategory={openMainCategorySelect}
-              onPressSourceAccount={() => setPickerMode('sourceAccount')}
-              onPressTargetAccount={() => setPickerMode('targetAccount')}
+            onPressSourceAccount={() => setPickerMode('sourceAccount')}
+            onPressTargetAccount={() => setPickerMode('targetAccount')}
           />
 
           {kind !== 'transfer' ? (
@@ -358,6 +399,14 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: typography.body,
     fontWeight: '800',
+  },
+  crossCurrencyAmountStack: {
+    gap: spacing.xs,
+  },
+  rateLabel: {
+    color: colors.muted,
+    fontSize: typography.small,
+    fontWeight: '700',
   },
   contentPane: {
     flex: 1,

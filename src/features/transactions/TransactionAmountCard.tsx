@@ -1,4 +1,4 @@
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoneyAccounting } from '../../domain/money';
 import type { TransactionKind } from '../../domain/types';
@@ -9,19 +9,25 @@ export function TransactionAmountCard({
   amountCurrencyCode,
   amountExpression,
   kind,
+  label,
   previewAmountMinor,
   replaceAmountOnNextKey,
+  selected,
   showCurrencyCodes,
   onPress,
 }: {
   amountCurrencyCode: string;
   amountExpression: string;
   kind: TransactionKind;
+  label?: string;
   previewAmountMinor: number;
   replaceAmountOnNextKey: boolean;
+  selected?: boolean;
   showCurrencyCodes: boolean;
   onPress: () => void;
 }) {
+  const isSelected = selected ?? replaceAmountOnNextKey;
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -32,11 +38,20 @@ export function TransactionAmountCard({
           backgroundColor: getTransactionKindTint(kind),
           borderColor: getTransactionKindColor(kind),
         },
-        replaceAmountOnNextKey && styles.amountBlockSelected,
+        isSelected && styles.amountBlockSelected,
       ]}
     >
-      {showCurrencyCodes && amountCurrencyCode ? (
-        <Text style={[styles.amountCurrency, { color: getTransactionKindColor(kind) }]}>{amountCurrencyCode}</Text>
+      {label || (showCurrencyCodes && amountCurrencyCode) ? (
+        <View style={styles.amountMetaRow}>
+          {label ? (
+            <Text style={[styles.amountLabel, { color: getTransactionKindColor(kind) }]}>{label}</Text>
+          ) : (
+            <View />
+          )}
+          {showCurrencyCodes && amountCurrencyCode ? (
+            <Text style={[styles.amountCurrency, { color: getTransactionKindColor(kind) }]}>{amountCurrencyCode}</Text>
+          ) : null}
+        </View>
       ) : null}
       <Text numberOfLines={1} adjustsFontSizeToFit style={styles.expressionText}>
         {amountExpression || '0.00'}
@@ -71,6 +86,17 @@ const styles = StyleSheet.create({
   },
   amountBlockSelected: {
     borderWidth: 2,
+  },
+  amountMetaRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  amountLabel: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '900',
   },
   amountCurrency: {
     color: colors.primaryDark,

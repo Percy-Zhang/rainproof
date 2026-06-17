@@ -533,6 +533,89 @@ describe('Add Transaction initial draft', () => {
     expect(input.lines[0]).not.toHaveProperty('categoryId');
   });
 
+  it('builds a cross-currency transfer from sent and received amounts', () => {
+    const input = buildAddTransactionInput({
+      accounts: [
+        account('aud', { currencyCode: 'AUD' }),
+        account('usd', { currencyCode: 'USD' }),
+      ],
+      draft: {
+        amountExpression: '150.00',
+        targetAmountExpression: '97.50',
+        categoryId: '',
+        date: '2026-05-30',
+        fromAccountId: 'aud',
+        groupId: '',
+        item: 'Transfer',
+        kind: 'transfer',
+        labels: '',
+        notes: '',
+        splitLines: [],
+        subcategoryId: '',
+        time: '10:00',
+        toAccountId: 'usd',
+      },
+    });
+
+    expect(input.lines).toEqual([
+      expect.objectContaining({
+        accountId: 'aud',
+        amountMinor: -15000,
+        currencyCode: 'AUD',
+        transferPeerAccountId: 'usd',
+      }),
+      expect.objectContaining({
+        accountId: 'usd',
+        amountMinor: 9750,
+        currencyCode: 'USD',
+        transferPeerAccountId: 'aud',
+      }),
+    ]);
+  });
+
+  it('requires a received amount for cross-currency transfers only', () => {
+    const draft = {
+      amountExpression: '150.00',
+      categoryId: '',
+      date: '2026-05-30',
+      fromAccountId: 'aud',
+      groupId: '',
+      item: 'Transfer',
+      kind: 'transfer' as const,
+      labels: '',
+      notes: '',
+      splitLines: [],
+      subcategoryId: '',
+      time: '10:00',
+      toAccountId: 'usd',
+    };
+
+    expect(() =>
+      buildAddTransactionInput({
+        accounts: [
+          account('aud', { currencyCode: 'AUD' }),
+          account('usd', { currencyCode: 'USD' }),
+        ],
+        draft,
+      }),
+    ).toThrow('Received amount must be greater than zero.');
+    expect(canBuildAddTransactionInput({
+      accounts: [
+        account('aud', { currencyCode: 'AUD' }),
+        account('usd', { currencyCode: 'USD' }),
+      ],
+      draft,
+    })).toBe(false);
+
+    expect(canBuildAddTransactionInput({
+      accounts: [
+        account('aud', { currencyCode: 'AUD' }),
+        account('savings', { currencyCode: 'AUD' }),
+      ],
+      draft: { ...draft, toAccountId: 'savings' },
+    })).toBe(true);
+  });
+
   it('preserves preview amount behavior for expense, income, and outside transfers', () => {
     expect(getAddTransactionPreviewAmountMinor({
       amountExpression: '10.00',

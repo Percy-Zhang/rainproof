@@ -4,6 +4,10 @@ import {
 } from './addTransactionDefaults';
 import { evaluateMoneyExpression } from './calculator';
 import { defaultCategories } from './categories';
+import {
+  buildCrossCurrencyTransferLines,
+  isCrossCurrencyTransferAccountPair,
+} from './crossCurrencyTransfers';
 import { parseDateTimeInput, toDateInputValue, toTimeInputValue } from './dates';
 import { parseLabelsInput } from './labels';
 import { parseMoneyInput } from './money';
@@ -40,6 +44,7 @@ export type AddTransactionInitialDraft = {
   splitMode?: SplitTransactionMode;
   time: string;
   toAccountId: string;
+  targetAmountExpression?: string;
 };
 
 export type AddTransactionDraft = AddTransactionInitialDraft;
@@ -87,6 +92,7 @@ export function createAddTransactionInitialDraft({
     splitMode: initialTemplate?.splitMode ?? 'standard',
     time: initialTemplate?.time ?? toTimeInputValue(now),
     toAccountId: snapshot.accounts[1]?.id ?? OUTSIDE_ACCOUNT_ID,
+    targetAmountExpression: '',
   };
 }
 
@@ -134,6 +140,29 @@ export function buildAddTransactionLines({
     const sourceAmount = Math.abs(parseMoneyInput(resolveAddTransactionAmountExpression(draft.amountExpression)));
     if (sourceAmount <= 0) {
       throw new Error('Transfer amount must be greater than zero.');
+    }
+
+    if (isCrossCurrencyTransferAccountPair({
+      accounts,
+      sourceAccountId: draft.fromAccountId,
+      targetAccountId: draft.toAccountId,
+    })) {
+      const targetAmountExpression = draft.targetAmountExpression?.trim() ?? '';
+      if (!targetAmountExpression) {
+        throw new Error('Received amount must be greater than zero.');
+      }
+      const targetAmount = Math.abs(parseMoneyInput(resolveAddTransactionAmountExpression(targetAmountExpression)));
+      if (targetAmount <= 0) {
+        throw new Error('Received amount must be greater than zero.');
+      }
+
+      return buildCrossCurrencyTransferLines({
+        accounts,
+        sourceAccountId: draft.fromAccountId,
+        targetAccountId: draft.toAccountId,
+        sourceAmountMinor: sourceAmount,
+        targetAmountMinor: targetAmount,
+      });
     }
 
     return buildTransferTransactionLines({
