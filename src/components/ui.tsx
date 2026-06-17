@@ -4,11 +4,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  type StyleProp,
   type TextInputProps,
   View,
   type ViewStyle,
 } from 'react-native';
 
+import { sharedStyles } from '../theme/sharedStyles';
 import { colors, radii, spacing, typography } from '../theme/tokens';
 
 type CardProps = PropsWithChildren<{
@@ -19,6 +21,19 @@ type CardProps = PropsWithChildren<{
 export function Card({ children, style, testID }: CardProps) {
   return (
     <View testID={testID} style={[styles.card, style]}>
+      {children}
+    </View>
+  );
+}
+
+type SurfaceCardProps = PropsWithChildren<{
+  style?: StyleProp<ViewStyle>;
+  testID?: string;
+}>;
+
+export function SurfaceCard({ children, style, testID }: SurfaceCardProps) {
+  return (
+    <View testID={testID} style={[sharedStyles.compactListCard, style]}>
       {children}
     </View>
   );

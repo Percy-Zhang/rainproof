@@ -3,7 +3,8 @@ import { useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
-import { ActionButton, Card } from '../../components/ui';
+import { MetadataGrid } from '../../components/MetadataGrid';
+import { ActionButton, Card, SurfaceCard } from '../../components/ui';
 import {
   defaultCategories,
   getCategory,
@@ -125,7 +126,7 @@ function TemplateCard({
   const amountTone = template.kind === 'income' ? colors.success : colors.danger;
 
   return (
-    <View style={styles.card}>
+    <SurfaceCard>
       <Pressable
         accessibilityRole="button"
         onPress={onEdit}
@@ -144,10 +145,12 @@ function TemplateCard({
             {amountLabel}
           </Text>
         </View>
-        <View style={styles.metaGrid}>
-          <Meta label="Account" value={account?.name ?? 'Account needs attention'} />
-          <Meta label="Category" value={getTemplateCategoryLabel(template, categories)} />
-        </View>
+        <MetadataGrid
+          items={[
+            { label: 'Account', value: account?.name ?? 'Account needs attention' },
+            { label: 'Category', value: getTemplateCategoryLabel(template, categories) },
+          ]}
+        />
         {template.splitLines.length ? (
           <Text numberOfLines={1} style={styles.note}>{template.splitLines.length} split lines</Text>
         ) : null}
@@ -159,16 +162,7 @@ function TemplateCard({
           Use template
         </ActionButton>
       </View>
-    </View>
-  );
-}
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.meta}>
-      <Text style={styles.metaLabel}>{label}</Text>
-      <Text numberOfLines={1} style={styles.metaValue}>{value}</Text>
-    </View>
+    </SurfaceCard>
   );
 }
 
@@ -232,18 +226,6 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.md,
   },
-  card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-  },
   cardHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -270,26 +252,6 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '900',
     textAlign: 'right',
-  },
-  metaGrid: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  meta: {
-    flex: 1,
-    gap: spacing.xs,
-    minWidth: 0,
-  },
-  metaLabel: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  metaValue: {
-    color: colors.ink,
-    fontSize: typography.small,
-    fontWeight: '800',
   },
   note: {
     color: colors.muted,

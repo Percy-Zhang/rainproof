@@ -27,6 +27,18 @@ export const sharedStyles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 14,
   },
+  compactListCard: {
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: radii.sm,
+    borderWidth: 1,
+    gap: spacing.md,
+    padding: spacing.lg,
+    shadowColor: colors.shadow,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+  },
   pressed: {
     opacity: 0.78,
   },

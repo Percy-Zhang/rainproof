@@ -3,7 +3,8 @@ import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
-import { ActionButton, Card, FormError } from '../../components/ui';
+import { MetadataGrid } from '../../components/MetadataGrid';
+import { ActionButton, Card, FormError, SurfaceCard } from '../../components/ui';
 import { defaultCategories, getCategory, getSubcategoryColor, getSubcategoryIcon, getSubcategoryName } from '../../domain/categories';
 import { formatLongDateLabel } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
@@ -200,7 +201,7 @@ function RecurringItemCard({
   const actionLabel = item.kind === 'income' ? 'Mark received' : 'Mark paid';
 
   return (
-    <View style={styles.card}>
+    <SurfaceCard>
       <Pressable
         accessibilityRole="button"
         onPress={onPress}
@@ -223,11 +224,13 @@ function RecurringItemCard({
           </View>
         </View>
 
-        <View style={styles.metaGrid}>
-          <Meta label="Account" value={account?.name ?? 'Account needs attention'} />
-          <Meta label="Frequency" value={getFrequencyLabel(item.frequency)} />
-          <Meta label="Next due" value={formatLongDateLabel(item.nextDueDate)} />
-        </View>
+        <MetadataGrid
+          items={[
+            { label: 'Account', value: account?.name ?? 'Account needs attention' },
+            { label: 'Frequency', value: getFrequencyLabel(item.frequency) },
+            { label: 'Next due', value: formatLongDateLabel(item.nextDueDate) },
+          ]}
+        />
 
         {item.note ? <Text numberOfLines={2} style={styles.note}>{item.note}</Text> : null}
       </Pressable>
@@ -264,16 +267,7 @@ function RecurringItemCard({
           </View>
         </Pressable>
       ) : null}
-    </View>
-  );
-}
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.meta}>
-      <Text style={styles.metaLabel}>{label}</Text>
-      <Text numberOfLines={1} style={styles.metaValue}>{value}</Text>
-    </View>
+    </SurfaceCard>
   );
 }
 
@@ -365,18 +359,6 @@ const styles = StyleSheet.create({
   list: {
     gap: spacing.md,
   },
-  card: {
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.md,
-    padding: spacing.lg,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-  },
   cardHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -410,26 +392,6 @@ const styles = StyleSheet.create({
   status: {
     fontSize: typography.small,
     fontWeight: '900',
-  },
-  metaGrid: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
-  meta: {
-    flex: 1,
-    gap: spacing.xs,
-    minWidth: 0,
-  },
-  metaLabel: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  metaValue: {
-    color: colors.ink,
-    fontSize: typography.small,
-    fontWeight: '800',
   },
   note: {
     color: colors.muted,
