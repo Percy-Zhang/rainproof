@@ -86,6 +86,9 @@ ON budgets(period, currency_code, scope_type, scope_items_json)
 WHERE is_active = 1;
 `;
 
+const BUDGET_CREATE_TABLE_PATTERN = /CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/;
+const BUDGET_ACTIVE_SCOPE_INDEX_PATTERN = /CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/;
+
 const RECURRING_ITEMS_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS recurring_items (
   id TEXT PRIMARY KEY NOT NULL,
@@ -393,7 +396,7 @@ async function ensureBudgetSchema(db: MigrationDatabase): Promise<void> {
 
   await db.execAsync(`
 DROP TABLE IF EXISTS budgets_v1_next;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_v1_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+${getBudgetRebuildTableSql('budgets_v1_next')}
 `);
 
   for (const [sortOrder, row] of legacyRows.entries()) {
@@ -424,7 +427,7 @@ ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE
   await db.execAsync(`
 DROP TABLE budgets;
 ALTER TABLE budgets_v1_next RENAME TO budgets;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+${getBudgetIndexesSql()}
 `);
   await normalizeBudgetSortOrder(db);
 }
@@ -459,7 +462,7 @@ async function ensureBudgetScopeSchema(db: MigrationDatabase): Promise<void> {
     return;
   }
 
-  await db.execAsync(BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, ''));
+  await db.execAsync(getBudgetIndexesSql());
 }
 
 async function rebuildBudgetsForScopeItems(db: MigrationDatabase): Promise<void> {
@@ -474,7 +477,7 @@ async function rebuildBudgetsForScopeItems(db: MigrationDatabase): Promise<void>
 PRAGMA foreign_keys = OFF;
 
 DROP TABLE IF EXISTS budgets_scope_next;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_scope_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+${getBudgetRebuildTableSql('budgets_scope_next')}
 `);
 
   for (const [index, row] of rows.entries()) {
@@ -509,7 +512,7 @@ ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE
 DROP TABLE budgets;
 ALTER TABLE budgets_scope_next RENAME TO budgets;
 PRAGMA foreign_keys = ON;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+${getBudgetIndexesSql()}
 `);
   await normalizeBudgetSortOrder(db);
 }
@@ -526,7 +529,7 @@ async function rebuildBudgetsForCalendarPeriods(db: MigrationDatabase): Promise<
 PRAGMA foreign_keys = OFF;
 
 DROP TABLE IF EXISTS budgets_calendar_next;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE budgets_calendar_next').replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+${getBudgetRebuildTableSql('budgets_calendar_next')}
 `);
 
   for (const [index, row] of rows.entries()) {
@@ -556,7 +559,7 @@ ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, 'CREATE TABLE
 DROP TABLE budgets;
 ALTER TABLE budgets_calendar_next RENAME TO budgets;
 PRAGMA foreign_keys = ON;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+${getBudgetIndexesSql()}
 `);
 }
 
@@ -579,7 +582,7 @@ async function rebuildBudgetsForSupportedPeriods(
 PRAGMA foreign_keys = OFF;
 
 DROP TABLE IF EXISTS ${nextTableName};
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, `CREATE TABLE ${nextTableName}`).replace(/CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_active_scope[\s\S]*$/, '')}
+${getBudgetRebuildTableSql(nextTableName)}
 `);
 
   const activeScopeKeys = new Set<string>();
@@ -627,8 +630,18 @@ ${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets/, `CREATE TABLE
 DROP TABLE budgets;
 ALTER TABLE ${nextTableName} RENAME TO budgets;
 PRAGMA foreign_keys = ON;
-${BUDGETS_SCHEMA_SQL.replace(/CREATE TABLE IF NOT EXISTS budgets[\s\S]*?\);\n\n/, '')}
+${getBudgetIndexesSql()}
 `);
+}
+
+function getBudgetRebuildTableSql(tableName: string): string {
+  return BUDGETS_SCHEMA_SQL
+    .replace('CREATE TABLE IF NOT EXISTS budgets', `CREATE TABLE ${tableName}`)
+    .replace(BUDGET_ACTIVE_SCOPE_INDEX_PATTERN, '');
+}
+
+function getBudgetIndexesSql(): string {
+  return BUDGETS_SCHEMA_SQL.replace(BUDGET_CREATE_TABLE_PATTERN, '');
 }
 
 const SUPPORTED_BUDGET_PERIODS = [

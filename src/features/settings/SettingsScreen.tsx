@@ -1,33 +1,13 @@
-import { useState } from 'react';
-import { getRandomBytesAsync } from 'expo-crypto';
-import * as DocumentPicker from 'expo-document-picker';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { CurrencyDropdown } from '../../components/CurrencyDropdown';
 import { ActionButton, Card, FormError, SectionHeader } from '../../components/ui';
-import {
-  formatRecoveryKey,
-  decryptRainproofBackup,
-  encryptRainproofBackup,
-  parseRecoveryKey,
-  readRainproofContainerHeader,
-} from '../../domain/backupContainer';
-import {
-  buildRainproofBackup,
-  getRainproofBackupFilename,
-  type RainproofBackup,
-} from '../../domain/backupExport';
+import type { RainproofBackup } from '../../domain/backupExport';
 import { getActiveAccountCurrencyOptions } from '../../domain/currencyCatalog';
 import type { AppSnapshot, CurrencyCode, UpdateAppSettingsInput } from '../../domain/types';
-import {
-  getBackupEncryptionKey,
-  getOrCreateBackupEncryptionKey,
-  storeBackupEncryptionKey,
-} from '../../application/backupKeyStore';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { useBackupSettingsController } from './useBackupSettingsController';
 
 type SettingsScreenProps = {
   snapshot: AppSnapshot;
@@ -44,13 +24,7 @@ export function SettingsScreen({
   onUpdateSettings,
   showHeader = true,
 }: SettingsScreenProps) {
-  const [backupError, setBackupError] = useState('');
-  const [backupStatus, setBackupStatus] = useState('');
-  const [isBackupBusy, setIsBackupBusy] = useState(false);
-  const [pendingBackupBytes, setPendingBackupBytes] = useState<Uint8Array | null>(null);
-  const [pendingBackupName, setPendingBackupName] = useState('');
-  const [recoveryKey, setRecoveryKey] = useState('');
-  const [shownRecoveryKey, setShownRecoveryKey] = useState('');
+  const backup = useBackupSettingsController({ snapshot, onRestoreBackup });
   const defaultCurrencyOptions = getActiveAccountCurrencyOptions(
     snapshot.accounts,
     snapshot.settings.defaultCurrencyCode,
@@ -62,153 +36,6 @@ export function SettingsScreen({
       multiCurrencyEnabled: snapshot.settings.multiCurrencyEnabled,
       enabledCurrencyCodes: snapshot.settings.enabledCurrencyCodes,
     });
-  }
-
-  async function exportBackup() {
-    if (isBackupBusy) {
-      return;
-    }
-
-    setBackupError('');
-    setBackupStatus('');
-    setIsBackupBusy(true);
-
-    try {
-      const exportedAt = new Date().toISOString();
-      const key = await getOrCreateBackupEncryptionKey();
-      const encrypted = encryptRainproofBackup(
-        buildRainproofBackup(snapshot, exportedAt),
-        key,
-        await getRandomBytesAsync(24),
-      );
-      const backupFile = new File(Paths.cache, getRainproofBackupFilename(exportedAt));
-      backupFile.create({
-        intermediates: true,
-        overwrite: true,
-      });
-      backupFile.write(encrypted);
-
-      if (!(await Sharing.isAvailableAsync())) {
-        setBackupError('File sharing is not available on this device.');
-        return;
-      }
-
-      await Sharing.shareAsync(backupFile.uri, {
-        dialogTitle: 'Export Rainproof backup',
-        mimeType: 'application/octet-stream',
-        UTI: 'public.data',
-      });
-      setBackupStatus('Encrypted backup export completed.');
-    } catch (error) {
-      setBackupError(error instanceof Error ? error.message : 'Could not export the backup.');
-    } finally {
-      setIsBackupBusy(false);
-    }
-  }
-
-  async function chooseBackup() {
-    if (isBackupBusy) {
-      return;
-    }
-
-    setBackupError('');
-    setBackupStatus('');
-    setPendingBackupBytes(null);
-    setPendingBackupName('');
-    setRecoveryKey('');
-    setIsBackupBusy(true);
-
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        copyToCacheDirectory: true,
-        multiple: false,
-        type: '*/*',
-      });
-      if (result.canceled) {
-        return;
-      }
-
-      const asset = result.assets[0];
-      const bytes = await new File(asset.uri).bytes();
-      const header = readRainproofContainerHeader(bytes);
-      const localKey = await getBackupEncryptionKey();
-
-      if (localKey?.id === header.keyId) {
-        confirmRestore(bytes, localKey);
-      } else {
-        setPendingBackupBytes(bytes);
-        setPendingBackupName(asset.name);
-        setBackupError('Enter the recovery key for this backup to restore it.');
-      }
-    } catch (error) {
-      setBackupError(error instanceof Error ? error.message : 'Could not read the selected backup.');
-    } finally {
-      setIsBackupBusy(false);
-    }
-  }
-
-  function restorePendingBackup() {
-    if (!pendingBackupBytes) {
-      return;
-    }
-
-    try {
-      confirmRestore(pendingBackupBytes, parseRecoveryKey(recoveryKey));
-    } catch (error) {
-      setBackupError(error instanceof Error ? error.message : 'The recovery key is invalid.');
-    }
-  }
-
-  function confirmRestore(bytes: Uint8Array, key: ReturnType<typeof parseRecoveryKey>) {
-    let backup: RainproofBackup;
-    try {
-      backup = decryptRainproofBackup(bytes, key);
-    } catch (error) {
-      setBackupError(error instanceof Error ? error.message : 'Could not decrypt the selected backup.');
-      return;
-    }
-
-    Alert.alert(
-      'Restore Rainproof backup?',
-      'This replaces all current Rainproof data on this device. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Restore',
-          style: 'destructive',
-          onPress: () => {
-            void performRestore(backup, key);
-          },
-        },
-      ],
-    );
-  }
-
-  async function performRestore(backup: RainproofBackup, key: ReturnType<typeof parseRecoveryKey>) {
-    setBackupError('');
-    setBackupStatus('');
-    setIsBackupBusy(true);
-    try {
-      await onRestoreBackup(backup);
-      await storeBackupEncryptionKey(key);
-      setPendingBackupBytes(null);
-      setPendingBackupName('');
-      setRecoveryKey('');
-      setBackupStatus('Backup restored.');
-    } catch (error) {
-      setBackupError(error instanceof Error ? error.message : 'Could not restore the backup.');
-    } finally {
-      setIsBackupBusy(false);
-    }
-  }
-
-  async function showRecoveryKey() {
-    setBackupError('');
-    try {
-      setShownRecoveryKey(formatRecoveryKey(await getOrCreateBackupEncryptionKey()));
-    } catch (error) {
-      setBackupError(error instanceof Error ? error.message : 'Could not load the recovery key.');
-    }
   }
 
   return (
@@ -268,58 +95,58 @@ export function SettingsScreen({
           recover it for you.
         </Text>
         <ActionButton
-          disabled={isBackupBusy}
-          onPress={() => void exportBackup()}
+          disabled={backup.isBackupBusy}
+          onPress={() => void backup.exportBackup()}
           testID="export-rainproof-backup"
           variant="secondary"
         >
-          {isBackupBusy ? 'Working...' : 'Export encrypted backup'}
+          {backup.isBackupBusy ? 'Working...' : 'Export encrypted backup'}
         </ActionButton>
         <ActionButton
-          disabled={isBackupBusy}
-          onPress={() => void chooseBackup()}
+          disabled={backup.isBackupBusy}
+          onPress={() => void backup.chooseBackup()}
           testID="restore-rainproof-backup"
           variant="secondary"
         >
           Choose backup to restore
         </ActionButton>
         <ActionButton
-          disabled={isBackupBusy}
-          onPress={() => void showRecoveryKey()}
+          disabled={backup.isBackupBusy}
+          onPress={() => void backup.showRecoveryKey()}
           testID="show-backup-recovery-key"
           variant="secondary"
         >
           Show recovery key
         </ActionButton>
-        {shownRecoveryKey ? (
+        {backup.shownRecoveryKey ? (
           <View style={styles.recoveryKeyPanel}>
             <Text style={styles.recoveryKeyLabel}>Recovery key</Text>
-            <Text selectable style={styles.recoveryKeyValue}>{shownRecoveryKey}</Text>
+            <Text selectable style={styles.recoveryKeyValue}>{backup.shownRecoveryKey}</Text>
           </View>
         ) : null}
-        {pendingBackupBytes ? (
+        {backup.pendingBackupBytes ? (
           <View style={styles.restoreStack}>
-            <Text style={styles.settingTitle}>{pendingBackupName || 'Selected backup'}</Text>
+            <Text style={styles.settingTitle}>{backup.pendingBackupName || 'Selected backup'}</Text>
             <TextInput
               autoCapitalize="characters"
               autoCorrect={false}
-              onChangeText={setRecoveryKey}
+              onChangeText={backup.setRecoveryKey}
               placeholder="Recovery key"
               placeholderTextColor={colors.muted}
               style={styles.recoveryKeyInput}
-              value={recoveryKey}
+              value={backup.recoveryKey}
             />
             <ActionButton
-              disabled={isBackupBusy || !recoveryKey.trim()}
-              onPress={restorePendingBackup}
+              disabled={backup.isBackupBusy || !backup.recoveryKey.trim()}
+              onPress={backup.restorePendingBackup}
               testID="confirm-backup-recovery-key"
             >
               Restore selected backup
             </ActionButton>
           </View>
         ) : null}
-        <FormError message={backupError} />
-        {backupStatus ? <Text style={styles.exportStatus}>{backupStatus}</Text> : null}
+        <FormError message={backup.backupError} />
+        {backup.backupStatus ? <Text style={styles.exportStatus}>{backup.backupStatus}</Text> : null}
       </Card>
 
       <Text style={styles.note}>

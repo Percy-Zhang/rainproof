@@ -13,6 +13,20 @@ const RESTORED_SETTING_KEYS = [
   ADD_TRANSACTION_DEFAULTS_SETTING_KEY,
 ] as const;
 
+const RESTORED_TABLES_IN_DELETE_ORDER = [
+  'rainy_day_fund_accounts',
+  'transaction_links',
+  'recurring_transaction_history',
+  'transaction_template_lines',
+  'transaction_lines',
+  'transactions',
+  'budgets',
+  'recurring_items',
+  'transaction_templates',
+  'rainy_day_funds',
+  'accounts',
+] as const;
+
 export async function restoreRainproofBackupStorage(
   db: RepositoryDatabase,
   data: RainproofBackupData,
@@ -30,17 +44,9 @@ export async function restoreRainproofBackupStorage(
 }
 
 async function clearRestoredData(db: RepositoryDatabase): Promise<void> {
-  await db.runAsync('DELETE FROM rainy_day_fund_accounts');
-  await db.runAsync('DELETE FROM transaction_links');
-  await db.runAsync('DELETE FROM recurring_transaction_history');
-  await db.runAsync('DELETE FROM transaction_template_lines');
-  await db.runAsync('DELETE FROM transaction_lines');
-  await db.runAsync('DELETE FROM transactions');
-  await db.runAsync('DELETE FROM budgets');
-  await db.runAsync('DELETE FROM recurring_items');
-  await db.runAsync('DELETE FROM transaction_templates');
-  await db.runAsync('DELETE FROM rainy_day_funds');
-  await db.runAsync('DELETE FROM accounts');
+  for (const tableName of RESTORED_TABLES_IN_DELETE_ORDER) {
+    await db.runAsync(`DELETE FROM ${tableName}`);
+  }
   await db.runAsync(
     `DELETE FROM settings WHERE key IN (${RESTORED_SETTING_KEYS.map(() => '?').join(', ')})`,
     ...RESTORED_SETTING_KEYS,
@@ -48,6 +54,12 @@ async function clearRestoredData(db: RepositoryDatabase): Promise<void> {
 }
 
 async function restoreSettings(db: RepositoryDatabase, data: RainproofBackupData): Promise<void> {
+  for (const [key, value] of getRestoredSettingRows(data)) {
+    await db.runAsync('INSERT INTO settings (key, value) VALUES (?, ?)', key, value);
+  }
+}
+
+function getRestoredSettingRows(data: RainproofBackupData): [string, string][] {
   const settings = data.settings;
   const values: [string, string][] = [
     ['default_currency_code', data.defaultCurrencyCode],
@@ -64,9 +76,7 @@ async function restoreSettings(db: RepositoryDatabase, data: RainproofBackupData
     values.push([ADD_TRANSACTION_DEFAULTS_SETTING_KEY, JSON.stringify(settings.addTransactionDefaults)]);
   }
 
-  for (const [key, value] of values) {
-    await db.runAsync('INSERT INTO settings (key, value) VALUES (?, ?)', key, value);
-  }
+  return values;
 }
 
 async function restoreAccounts(db: RepositoryDatabase, data: RainproofBackupData): Promise<void> {
