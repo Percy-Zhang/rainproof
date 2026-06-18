@@ -24,7 +24,7 @@ import {
   StatisticsDrawerScreen,
   TemplatesDrawerScreen,
   TransactionsDrawerScreen,
-} from './LegacyDrawerScreen';
+} from './DrawerRootScreens';
 import type { MainDrawerParamList, RootStackParamList } from './routes';
 import {
   CategoryEditRouteScreen,

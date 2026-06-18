@@ -281,30 +281,6 @@ export const statsStyles = StyleSheet.create({
     flexShrink: 1,
     fontSize: typography.small,
   },
-  categoryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-  },
-  categoryPill: {
-    alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  swatch: {
-    borderRadius: 999,
-    height: 10,
-    width: 10,
-  },
-  categoryPillText: {
-    color: colors.ink,
-    fontSize: typography.small,
-    fontWeight: '700',
-  },
   pressed: {
     opacity: 0.78,
   },

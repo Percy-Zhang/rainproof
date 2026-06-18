@@ -220,7 +220,7 @@ function createSnapshot(): AppSnapshot {
   };
 }
 
-describe('Rainproof JSON backup export', () => {
+describe('Rainproof backup payload export', () => {
   it('includes explicit format, app, export, and schema metadata', () => {
     const backup = buildRainproofBackup(createSnapshot(), exportedAt);
 
@@ -289,7 +289,7 @@ describe('Rainproof JSON backup export', () => {
     expect(snapshot.accounts[0].name).toBe('Everyday');
   });
 
-  it('serializes compact valid JSON and builds a stable encrypted backup filename', () => {
+  it('serializes compact internal payload JSON and builds a stable .rainproof backup filename', () => {
     const backup = buildRainproofBackup(createSnapshot(), exportedAt);
 
     expect(JSON.parse(serializeRainproofBackup(backup))).toEqual(backup);

@@ -19,43 +19,43 @@ import { colors, spacing, typography } from '../theme/tokens';
 import { DrawerRouteAdapter, type DrawerRootScreenKey } from './DrawerRouteAdapters';
 import { type RootStackNavigation, useMainDrawerNavigation } from './routeHooks';
 
-type LegacyDrawerScreenProps = {
+type DrawerRootScreenProps = {
   rootScreen: DrawerRootScreenKey;
 };
 
 export function HomeDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="dashboard" />;
+  return <DrawerRootScreen rootScreen="dashboard" />;
 }
 
 export function AccountsDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="accounts" />;
+  return <DrawerRootScreen rootScreen="accounts" />;
 }
 
 export function TransactionsDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="transactions" />;
+  return <DrawerRootScreen rootScreen="transactions" />;
 }
 
 export function StatisticsDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="stats" />;
+  return <DrawerRootScreen rootScreen="stats" />;
 }
 
 export function BudgetsDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="budgets" />;
+  return <DrawerRootScreen rootScreen="budgets" />;
 }
 
 export function RecurringDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="recurring" />;
+  return <DrawerRootScreen rootScreen="recurring" />;
 }
 
 export function TemplatesDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="templates" />;
+  return <DrawerRootScreen rootScreen="templates" />;
 }
 
 export function SettingsDrawerScreen() {
-  return <LegacyDrawerScreen rootScreen="settings" />;
+  return <DrawerRootScreen rootScreen="settings" />;
 }
 
-function LegacyDrawerScreen({ rootScreen }: LegacyDrawerScreenProps) {
+function DrawerRootScreen({ rootScreen }: DrawerRootScreenProps) {
   const navigation = useMainDrawerNavigation();
   const rootNavigation = navigation.getParent<RootStackNavigation>();
   const [transactionPeriodState, setTransactionPeriodState] = useState<TransactionPeriodState>(
