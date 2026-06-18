@@ -37,8 +37,7 @@ type AddTransactionScreenProps = {
   snapshot: AppSnapshot;
   initialTemplate?: AddTransactionTemplatePrefill;
   dashboardAccountIds?: string[];
-  onAddTransaction: (input: NewTransactionInput) => Promise<void>;
-  onUpdateAddTransactionDefaults?: (defaults: AddTransactionDefaults) => Promise<void>;
+  onAddTransaction: (input: NewTransactionInput, defaults: AddTransactionDefaults) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
@@ -51,7 +50,6 @@ export function AddTransactionScreen({
   dashboardAccountIds,
   snapshot,
   onAddTransaction,
-  onUpdateAddTransactionDefaults,
   onOpenCategorySelect,
   onDone,
 }: AddTransactionScreenProps) {
@@ -62,7 +60,6 @@ export function AddTransactionScreen({
     onAddTransaction,
     onDone,
     onOpenCategorySelect,
-    onUpdateAddTransactionDefaults,
   });
   const {
     addSplitLine,

@@ -14,6 +14,7 @@ import { getEffectiveDisplayCurrency } from '../domain/currency';
 import { getDateRangeForPreset } from '../domain/dates';
 import type {
   AccountBalance,
+  AddTransactionDefaults,
   AppSnapshot,
   BudgetUsage,
   CashFlowSummary,
@@ -41,6 +42,7 @@ import type {
   UpdateTransactionInput,
 } from '../domain/types';
 import type { RainproofBackup } from '../domain/backupExport';
+import { logDevPerfDuration, timeDevPerf } from '../performance';
 import { createSQLiteFinanceRepository, type FinanceRepository } from '../storage/repository';
 import { getDeviceDefaultCurrencyCode } from './deviceCurrency';
 
@@ -57,7 +59,7 @@ type RainproofDerivedData = {
 type RainproofActions = {
   addAccount(input: NewAccountInput): Promise<void>;
   updateAccount(input: UpdateAccountInput): Promise<void>;
-  addTransaction(input: NewTransactionInput): Promise<void>;
+  addTransaction(input: NewTransactionInput, addTransactionDefaults?: AddTransactionDefaults): Promise<void>;
   updateTransaction(input: UpdateTransactionInput): Promise<void>;
   deleteTransaction(transactionId: string): Promise<void>;
   addTransactionLink(input: NewTransactionLinkInput): Promise<void>;
@@ -93,6 +95,7 @@ type RainproofActions = {
 };
 
 type MutationOptions = {
+  label?: string;
   showSaving?: boolean;
   rethrow?: boolean;
 };
@@ -129,7 +132,10 @@ export function useRainproofData(): RainproofDataState {
       return;
     }
 
-    setSnapshot(await repository.getSnapshot());
+    const startedAt = Date.now();
+    const nextSnapshot = await repository.getSnapshot();
+    setSnapshot(nextSnapshot);
+    logDevPerfDuration('rainproofData.refresh', startedAt, getSnapshotPerfCounts(nextSnapshot));
   }, []);
 
   useEffect(() => {
@@ -173,12 +179,16 @@ export function useRainproofData(): RainproofDataState {
       }
 
       const showSaving = options.showSaving !== false;
+      const label = options.label ?? 'mutation';
+      const startedAt = Date.now();
 
       try {
         if (showSaving) {
           setSaving(true);
         }
+        const writeStartedAt = Date.now();
         await mutation(repository);
+        logDevPerfDuration(`rainproofData.${label}.write`, writeStartedAt);
         await refresh();
         setError('');
       } catch (caught) {
@@ -188,6 +198,7 @@ export function useRainproofData(): RainproofDataState {
           throw new Error(message);
         }
       } finally {
+        logDevPerfDuration(`rainproofData.${label}.total`, startedAt);
         if (showSaving) {
           setSaving(false);
         }
@@ -201,65 +212,77 @@ export function useRainproofData(): RainproofDataState {
       return emptyDerived;
     }
 
-    const accountBalances = getAccountBalances(snapshot.accounts, snapshot.transactionLines);
-    const totalsByCurrency = groupBalancesByCurrency(accountBalances);
-    const rainyDayProgress = getRainyDayProgress(snapshot.rainyDayFund, accountBalances);
-    const monthRange = getDateRangeForPreset('last_month');
-    const currentCurrency = getEffectiveDisplayCurrency({
-      defaultCurrencyCode: snapshot.defaultCurrencyCode,
-      defaultCurrencyMode: snapshot.settings.defaultCurrencyMode,
-      accountCurrencyCodes: snapshot.accounts.map((account) => account.currencyCode),
-    });
-    const currentMonthSpending = getSpendingByCategory({
-      transactions: snapshot.transactions,
-      lines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      range: monthRange,
-      currencyCode: currentCurrency,
-    });
-    const budgetUsage = getBudgetUsagesForPeriods({
-      accounts: snapshot.accounts,
-      budgets: snapshot.budgets.filter((budget) => budget.currencyCode === currentCurrency),
-      categories: snapshot.categories ?? defaultCategories,
-      transactionLines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      transactions: snapshot.transactions,
-    });
-    const upcomingBills = getUpcomingBills(snapshot.recurringItems);
-    const cashFlow = getCashFlowSummary({
-      transactions: snapshot.transactions,
-      lines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      range: monthRange,
-      currencyCode: currentCurrency,
-    });
+    return timeDevPerf('rainproofData.derived', () => {
+      const accountBalances = getAccountBalances(snapshot.accounts, snapshot.transactionLines);
+      const totalsByCurrency = groupBalancesByCurrency(accountBalances);
+      const rainyDayProgress = getRainyDayProgress(snapshot.rainyDayFund, accountBalances);
+      const monthRange = getDateRangeForPreset('last_month');
+      const currentCurrency = getEffectiveDisplayCurrency({
+        defaultCurrencyCode: snapshot.defaultCurrencyCode,
+        defaultCurrencyMode: snapshot.settings.defaultCurrencyMode,
+        accountCurrencyCodes: snapshot.accounts.map((account) => account.currencyCode),
+      });
+      const currentMonthSpending = getSpendingByCategory({
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        range: monthRange,
+        currencyCode: currentCurrency,
+      });
+      const budgetUsage = getBudgetUsagesForPeriods({
+        accounts: snapshot.accounts,
+        budgets: snapshot.budgets.filter((budget) => budget.currencyCode === currentCurrency),
+        categories: snapshot.categories ?? defaultCategories,
+        transactionLines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        transactions: snapshot.transactions,
+      });
+      const upcomingBills = getUpcomingBills(snapshot.recurringItems);
+      const cashFlow = getCashFlowSummary({
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        range: monthRange,
+        currencyCode: currentCurrency,
+      });
 
-    return {
-      accountBalances,
-      totalsByCurrency,
-      rainyDayProgress,
-      currentMonthSpending,
-      budgetUsage,
-      upcomingBills,
-      cashFlow,
-    };
+      return {
+        accountBalances,
+        totalsByCurrency,
+        rainyDayProgress,
+        currentMonthSpending,
+        budgetUsage,
+        upcomingBills,
+        cashFlow,
+      };
+    }, getSnapshotPerfCounts(snapshot));
   }, [snapshot]);
 
   const actions = useMemo<RainproofActions>(
     () => ({
       addAccount: (input) => runMutation((repository) => repository.addAccount(input)),
       updateAccount: (input) => runMutation((repository) => repository.updateAccount(input)),
-      addTransaction: (input) => runMutation((repository) => repository.addTransaction(input), { rethrow: true }),
-      updateTransaction: (input) => runMutation((repository) => repository.updateTransaction(input), { rethrow: true }),
+      addTransaction: (input, addTransactionDefaults) =>
+        runMutation(async (repository) => {
+          await repository.addTransaction(input);
+          if (addTransactionDefaults) {
+            await repository.updateAddTransactionDefaults({ addTransactionDefaults });
+          }
+        }, { label: 'addTransaction', rethrow: true }),
+      updateTransaction: (input) =>
+        runMutation((repository) => repository.updateTransaction(input), { label: 'updateTransaction', rethrow: true }),
       deleteTransaction: async (transactionId) => {
         const repository = repositoryRef.current;
         if (!repository) {
           return;
         }
 
+        const startedAt = Date.now();
         try {
           setSaving(true);
+          const writeStartedAt = Date.now();
           await repository.deleteTransaction(transactionId);
+          logDevPerfDuration('rainproofData.deleteTransaction.write', writeStartedAt);
           await refresh();
           setError('');
         } catch (caught) {
@@ -267,15 +290,22 @@ export function useRainproofData(): RainproofDataState {
           setError(message);
           throw new Error(message);
         } finally {
+          logDevPerfDuration('rainproofData.deleteTransaction.total', startedAt);
           setSaving(false);
         }
       },
       addTransactionLink: (input) =>
-        runMutation((repository) => repository.addTransactionLink(input), { rethrow: true }),
+        runMutation((repository) => repository.addTransactionLink(input), { label: 'addTransactionLink', rethrow: true }),
       updateTransactionLink: (input) =>
-        runMutation((repository) => repository.updateTransactionLink(input), { rethrow: true }),
+        runMutation((repository) => repository.updateTransactionLink(input), {
+          label: 'updateTransactionLink',
+          rethrow: true,
+        }),
       deleteTransactionLink: (linkId) =>
-        runMutation((repository) => repository.deleteTransactionLink(linkId), { rethrow: true }),
+        runMutation((repository) => repository.deleteTransactionLink(linkId), {
+          label: 'deleteTransactionLink',
+          rethrow: true,
+        }),
       addBudget: (input) => runMutation((repository) => repository.addBudget(input)),
       updateBudget: (input) => runMutation((repository) => repository.updateBudget(input)),
       updateBudgetOrder: (budgetIds) => runMutation((repository) => repository.updateBudgetOrder(budgetIds)),
@@ -294,13 +324,25 @@ export function useRainproofData(): RainproofDataState {
       deleteRecurringItem: (recurringItemId) =>
         runMutation((repository) => repository.deleteRecurringItem(recurringItemId)),
       addTransactionTemplate: (input) =>
-        runMutation((repository) => repository.addTransactionTemplate(input), { rethrow: true }),
+        runMutation((repository) => repository.addTransactionTemplate(input), {
+          label: 'addTransactionTemplate',
+          rethrow: true,
+        }),
       updateTransactionTemplate: (input) =>
-        runMutation((repository) => repository.updateTransactionTemplate(input), { rethrow: true }),
+        runMutation((repository) => repository.updateTransactionTemplate(input), {
+          label: 'updateTransactionTemplate',
+          rethrow: true,
+        }),
       archiveTransactionTemplate: (templateId) =>
-        runMutation((repository) => repository.archiveTransactionTemplate(templateId), { rethrow: true }),
+        runMutation((repository) => repository.archiveTransactionTemplate(templateId), {
+          label: 'archiveTransactionTemplate',
+          rethrow: true,
+        }),
       deleteTransactionTemplate: (templateId) =>
-        runMutation((repository) => repository.deleteTransactionTemplate(templateId), { rethrow: true }),
+        runMutation((repository) => repository.deleteTransactionTemplate(templateId), {
+          label: 'deleteTransactionTemplate',
+          rethrow: true,
+        }),
       updateRainyDayFund: (input) => runMutation((repository) => repository.updateRainyDayFund(input)),
       updateSettings: (input) => runMutation((repository) => repository.updateSettings(input)),
       updateAddTransactionDefaults: (input) =>
@@ -329,5 +371,17 @@ export function useRainproofData(): RainproofDataState {
     loading,
     saving,
     error,
+  };
+}
+
+function getSnapshotPerfCounts(snapshot: AppSnapshot) {
+  return {
+    accounts: snapshot.accounts.length,
+    transactions: snapshot.transactions.length,
+    lines: snapshot.transactionLines.length,
+    links: snapshot.transactionLinks.length,
+    budgets: snapshot.budgets.length,
+    templates: snapshot.transactionTemplates.length,
+    recurring: snapshot.recurringItems.length,
   };
 }

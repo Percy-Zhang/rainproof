@@ -6,6 +6,7 @@ import type {
   TransactionLink,
   UpdateTransactionLinkInput,
 } from '../domain/types';
+import { logDevPerfDuration, timeDevPerfAsync } from '../performance';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
 import {
@@ -24,13 +25,7 @@ export async function addTransactionLinkStorage(
   const now = new Date().toISOString();
 
   await db.withTransactionAsync(async () => {
-    const { transactions, lines, links } = await getTransactionLinkValidationState(db);
-    const validated = validateTransactionLinkInput({
-      input,
-      transactions,
-      lines,
-      existingLinks: links,
-    });
+    const validated = await validateTransactionLinkForStorage(db, input);
 
     await db.runAsync(
       `INSERT INTO transaction_links (
@@ -66,14 +61,7 @@ export async function updateTransactionLinkStorage(
       throw new Error('Transaction link not found.');
     }
 
-    const { transactions, lines, links } = await getTransactionLinkValidationState(db);
-    const validated = validateTransactionLinkInput({
-      input,
-      transactions,
-      lines,
-      existingLinks: links,
-      currentLinkId: input.id,
-    });
+    const validated = await validateTransactionLinkForStorage(db, input, input.id);
 
     await db.runAsync(
       `UPDATE transaction_links
@@ -154,18 +142,52 @@ export async function removeTransactionLinksForTransactionStorage(
   );
 }
 
+async function validateTransactionLinkForStorage(
+  db: RepositoryDatabase,
+  input: NewTransactionLinkInput | UpdateTransactionLinkInput,
+  currentLinkId?: string,
+) {
+  const startedAt = Date.now();
+  const { transactions, lines, links } = await getTransactionLinkValidationState(db);
+  const validated = validateTransactionLinkInput({
+    input,
+    transactions,
+    lines,
+    existingLinks: links,
+    currentLinkId,
+  });
+
+  logDevPerfDuration('transactionLinks.validation.total', startedAt, {
+    transactions: transactions.length,
+    lines: lines.length,
+    links: links.length,
+  });
+
+  return validated;
+}
+
 async function getTransactionLinkValidationState(db: RepositoryDatabase): Promise<{
   transactions: Transaction[];
   lines: TransactionLine[];
   links: TransactionLink[];
 }> {
-  const transactionRows = await db.getAllAsync<TransactionRow>('SELECT * FROM transactions');
-  const lineRows = await db.getAllAsync<TransactionLineRow>('SELECT * FROM transaction_lines');
-  const linkRows = await db.getAllAsync<TransactionLinkRow>('SELECT * FROM transaction_links');
+  return timeDevPerfAsync(
+    'transactionLinks.validationState.read',
+    async () => {
+      const transactionRows = await db.getAllAsync<TransactionRow>('SELECT * FROM transactions');
+      const lineRows = await db.getAllAsync<TransactionLineRow>('SELECT * FROM transaction_lines');
+      const linkRows = await db.getAllAsync<TransactionLinkRow>('SELECT * FROM transaction_links');
 
-  return {
-    transactions: transactionRows.map(mapTransaction),
-    lines: lineRows.map(mapTransactionLine),
-    links: linkRows.map(mapTransactionLink),
-  };
+      return {
+        transactions: transactionRows.map(mapTransaction),
+        lines: lineRows.map(mapTransactionLine),
+        links: linkRows.map(mapTransactionLink),
+      };
+    },
+    (state) => ({
+      transactions: state.transactions.length,
+      lines: state.lines.length,
+      links: state.links.length,
+    }),
+  );
 }

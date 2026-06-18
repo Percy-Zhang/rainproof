@@ -63,8 +63,7 @@ type UseAddTransactionControllerOptions = {
   snapshot: AppSnapshot;
   initialTemplate?: AddTransactionTemplatePrefill;
   dashboardAccountIds?: string[];
-  onAddTransaction: (input: NewTransactionInput) => Promise<void>;
-  onUpdateAddTransactionDefaults?: (defaults: AddTransactionDefaults) => Promise<void>;
+  onAddTransaction: (input: NewTransactionInput, defaults: AddTransactionDefaults) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
@@ -85,7 +84,6 @@ export function useAddTransactionController({
   onAddTransaction,
   onDone,
   onOpenCategorySelect,
-  onUpdateAddTransactionDefaults,
   snapshot,
 }: UseAddTransactionControllerOptions) {
   const categories = snapshot.categories ?? defaultCategories;
@@ -296,18 +294,14 @@ export function useAddTransactionController({
         draft: transactionDraft,
       });
 
-      await onAddTransaction(input);
+      const nextDefaults = getAddTransactionDefaultsAfterSave({
+        accounts: snapshot.accounts,
+        categories,
+        currentDefaults: addTransactionDefaults,
+        input,
+      });
 
-      if (onUpdateAddTransactionDefaults) {
-        await onUpdateAddTransactionDefaults(
-          getAddTransactionDefaultsAfterSave({
-            accounts: snapshot.accounts,
-            categories,
-            currentDefaults: addTransactionDefaults,
-            input,
-          }),
-        );
-      }
+      await onAddTransaction(input, nextDefaults);
 
       onDone();
     } catch (caught) {

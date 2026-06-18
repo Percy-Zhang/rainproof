@@ -5,6 +5,7 @@ import { getEffectiveDisplayCurrency, normalizeDefaultCurrencyMode } from '../do
 import { normalizeDashboardCardSettings } from '../domain/dashboardCards';
 import { normalizeCurrencyCode } from '../domain/money';
 import type { AppSnapshot, RainyDayFund } from '../domain/types';
+import { logDevPerfDuration, timeDevPerfAsync } from '../performance';
 import type { RepositoryDatabase } from './database';
 import { ADD_TRANSACTION_DEFAULTS_SETTING_KEY } from './settingsStorage';
 import {
@@ -36,6 +37,7 @@ import {
 } from './mappers';
 
 export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSnapshot> {
+  const startedAt = Date.now();
   const defaultCurrency =
     (await db.getFirstAsync<SettingRow>(
       'SELECT value FROM settings WHERE key = ?',
@@ -47,34 +49,67 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       'default_currency_mode',
     ))?.value,
   );
-  const accountRows = await db.getAllAsync<AccountRow>(
-    'SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC',
+  const accountRows = await timeDevPerfAsync(
+    'snapshotStorage.read.accounts',
+    () => db.getAllAsync<AccountRow>('SELECT * FROM accounts ORDER BY sort_order ASC, created_at ASC'),
+    (rows) => ({ rows: rows.length }),
   );
-  const transactionRows = await db.getAllAsync<TransactionRow>(
-    'SELECT * FROM transactions ORDER BY datetime DESC, created_at DESC, id DESC',
+  const transactionRows = await timeDevPerfAsync(
+    'snapshotStorage.read.transactions',
+    () => db.getAllAsync<TransactionRow>('SELECT * FROM transactions ORDER BY datetime DESC, created_at DESC, id DESC'),
+    (rows) => ({ rows: rows.length }),
   );
-  const lineRows = await db.getAllAsync<TransactionLineRow>(
-    'SELECT * FROM transaction_lines ORDER BY created_at ASC',
+  const lineRows = await timeDevPerfAsync(
+    'snapshotStorage.read.transactionLines',
+    () => db.getAllAsync<TransactionLineRow>('SELECT * FROM transaction_lines ORDER BY created_at ASC'),
+    (rows) => ({ rows: rows.length }),
   );
-  const linkRows = await db.getAllAsync<TransactionLinkRow>(
-    'SELECT * FROM transaction_links ORDER BY created_at ASC, id ASC',
+  const linkRows = await timeDevPerfAsync(
+    'snapshotStorage.read.transactionLinks',
+    () => db.getAllAsync<TransactionLinkRow>('SELECT * FROM transaction_links ORDER BY created_at ASC, id ASC'),
+    (rows) => ({ rows: rows.length }),
   );
-  const budgetRows = await db.getAllAsync<BudgetRow>(
-    `SELECT * FROM budgets
-     ORDER BY is_active DESC, sort_order ASC, created_at ASC, id ASC`,
+  const budgetRows = await timeDevPerfAsync(
+    'snapshotStorage.read.budgets',
+    () =>
+      db.getAllAsync<BudgetRow>(
+        `SELECT * FROM budgets
+         ORDER BY is_active DESC, sort_order ASC, created_at ASC, id ASC`,
+      ),
+    (rows) => ({ rows: rows.length }),
   );
-  const recurringItemRows = await db.getAllAsync<RecurringItemRow>(
-    'SELECT * FROM recurring_items ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC',
+  const recurringItemRows = await timeDevPerfAsync(
+    'snapshotStorage.read.recurringItems',
+    () =>
+      db.getAllAsync<RecurringItemRow>(
+        'SELECT * FROM recurring_items ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC',
+      ),
+    (rows) => ({ rows: rows.length }),
   );
-  const recurringTransactionHistoryRows = await db.getAllAsync<RecurringTransactionHistoryRow>(
-    `SELECT * FROM recurring_transaction_history
-     ORDER BY recurring_item_id ASC, sequence DESC`,
+  const recurringTransactionHistoryRows = await timeDevPerfAsync(
+    'snapshotStorage.read.recurringHistory',
+    () =>
+      db.getAllAsync<RecurringTransactionHistoryRow>(
+        `SELECT * FROM recurring_transaction_history
+         ORDER BY recurring_item_id ASC, sequence DESC`,
+      ),
+    (rows) => ({ rows: rows.length }),
   );
-  const transactionTemplateRows = await db.getAllAsync<TransactionTemplateRow>(
-    'SELECT * FROM transaction_templates ORDER BY is_active DESC, name ASC, created_at ASC, id ASC',
+  const transactionTemplateRows = await timeDevPerfAsync(
+    'snapshotStorage.read.transactionTemplates',
+    () =>
+      db.getAllAsync<TransactionTemplateRow>(
+        'SELECT * FROM transaction_templates ORDER BY is_active DESC, name ASC, created_at ASC, id ASC',
+      ),
+    (rows) => ({ rows: rows.length }),
   );
-  const transactionTemplateLineRows = await db.getAllAsync<TransactionTemplateLineRow>(
-    'SELECT * FROM transaction_template_lines ORDER BY template_id ASC, sort_order ASC, created_at ASC, id ASC',
+  const transactionTemplateLineRows = await timeDevPerfAsync(
+    'snapshotStorage.read.transactionTemplateLines',
+    () =>
+      db.getAllAsync<TransactionTemplateLineRow>(
+        'SELECT * FROM transaction_template_lines ORDER BY template_id ASC, sort_order ASC, created_at ASC, id ASC',
+      ),
+    (rows) => ({ rows: rows.length }),
   );
   const storedEnabledCurrencyCodes = safeParseCurrencyCodes(
     (await db.getFirstAsync<SettingRow>(
@@ -150,7 +185,7 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   const recurringItems = recurringItemRows.map(mapRecurringItem);
   const transactionTemplateLinesByTemplateId = groupTransactionTemplateLinesByTemplateId(transactionTemplateLineRows);
 
-  return {
+  const snapshot: AppSnapshot = {
     defaultCurrencyCode,
     settings: {
       defaultCurrencyCode,
@@ -174,6 +209,9 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
       mapTransactionTemplate(row, transactionTemplateLinesByTemplateId.get(row.id) ?? [])),
     rainyDayFund,
   };
+
+  logDevPerfDuration('snapshotStorage.getSnapshot.total', startedAt, getSnapshotStoragePerfCounts(snapshot));
+  return snapshot;
 }
 
 function groupTransactionTemplateLinesByTemplateId(
@@ -189,4 +227,16 @@ function groupTransactionTemplateLinesByTemplateId(
   }
 
   return result;
+}
+
+function getSnapshotStoragePerfCounts(snapshot: AppSnapshot) {
+  return {
+    accounts: snapshot.accounts.length,
+    transactions: snapshot.transactions.length,
+    lines: snapshot.transactionLines.length,
+    links: snapshot.transactionLinks.length,
+    budgets: snapshot.budgets.length,
+    templates: snapshot.transactionTemplates.length,
+    recurring: snapshot.recurringItems.length,
+  };
 }

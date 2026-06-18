@@ -47,8 +47,6 @@ export function AddTransactionRouteScreen() {
         initialTemplate={initialTemplate}
         snapshot={snapshot}
         onAddTransaction={actions.addTransaction}
-        onUpdateAddTransactionDefaults={(addTransactionDefaults) =>
-          actions.updateAddTransactionDefaults({ addTransactionDefaults })}
         onOpenCategorySelect={openCategorySelect}
         onDone={() => navigation.goBack()}
       />

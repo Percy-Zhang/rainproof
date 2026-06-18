@@ -16,6 +16,7 @@ import {
 } from '../../domain/transactionList';
 import { getTransactionGroupGranularity } from '../../domain/transactionGrouping';
 import type { AppSnapshot } from '../../domain/types';
+import { timeDevPerf } from '../../performance';
 import type { PeriodCarouselOption, PeriodOption } from './PeriodCarousel';
 
 type RangeMode = 'preset' | 'custom';
@@ -72,29 +73,50 @@ export function useTransactionsViewModel({
   );
   const balanceAfterByEntryId = useMemo(
     () =>
-      getBalanceAfterDisplayEntries({
-        accounts: snapshot.accounts,
-        transactions: snapshot.transactions,
-        lines: snapshot.transactionLines,
-      }),
+      timeDevPerf(
+        'transactionsViewModel.balanceAfter',
+        () =>
+          getBalanceAfterDisplayEntries({
+            accounts: snapshot.accounts,
+            transactions: snapshot.transactions,
+            lines: snapshot.transactionLines,
+          }),
+        {
+          accounts: snapshot.accounts.length,
+          transactions: snapshot.transactions.length,
+          lines: snapshot.transactionLines.length,
+        },
+      ),
     [snapshot.accounts, snapshot.transactionLines, snapshot.transactions],
   );
   const groups = useMemo(() => {
-    const entries = getTransactionDisplayEntries({
-      transactions: snapshot.transactions,
-      lines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      accountIds: selectedAccountIds,
-    })
-      .filter((entry) => isWithinDateRange(entry.transaction.datetime, range));
-    const searchedEntries = filterTransactionDisplayEntriesBySearch({
-      entries,
-      query: searchQuery,
-      accounts: snapshot.accounts,
-      categories,
-    }).sort(compareTransactionDisplayEntriesDescending);
+    return timeDevPerf(
+      'transactionsViewModel.groups',
+      () => {
+        const entries = getTransactionDisplayEntries({
+          transactions: snapshot.transactions,
+          lines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          accountIds: selectedAccountIds,
+        }).filter((entry) => isWithinDateRange(entry.transaction.datetime, range));
+        const searchedEntries = filterTransactionDisplayEntriesBySearch({
+          entries,
+          query: searchQuery,
+          accounts: snapshot.accounts,
+          categories,
+        }).sort(compareTransactionDisplayEntriesDescending);
 
-    return groupTransactionDisplayEntries(searchedEntries, getTransactionGroupGranularity(range));
+        return groupTransactionDisplayEntries(searchedEntries, getTransactionGroupGranularity(range));
+      },
+      (nextGroups) => ({
+        accounts: snapshot.accounts.length,
+        selectedAccounts: selectedAccountIds.length,
+        transactions: snapshot.transactions.length,
+        lines: snapshot.transactionLines.length,
+        links: snapshot.transactionLinks.length,
+        groups: nextGroups.length,
+      }),
+    );
   }, [
     categories,
     range,
