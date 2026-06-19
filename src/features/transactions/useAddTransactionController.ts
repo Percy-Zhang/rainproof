@@ -45,7 +45,7 @@ import type {
   NewTransactionInput,
   TransactionKind,
 } from '../../domain/types';
-import { timeDevPerf } from '../../performance';
+import { logDevPerfDuration, timeDevPerf } from '../../performance';
 import type {
   CategorySelectLaunchParams,
   CategorySelectionResult,
@@ -279,6 +279,7 @@ export function useAddTransactionController({
   }
 
   async function submit() {
+    const submitStartedAt = Date.now();
     if (!canBuildAddTransactionInput({ accounts: snapshot.accounts, draft: transactionDraft })) {
       setError('Complete the transaction before saving.');
       return;
@@ -315,8 +316,19 @@ export function useAddTransactionController({
         }),
       );
 
+      const acceptedStartedAt = Date.now();
       await onAddTransaction(input, nextDefaults);
+      logDevPerfDuration(
+        'addTransactionController.optimisticAccepted',
+        acceptedStartedAt,
+        getAddTransactionInputPerfMetadata(input),
+      );
 
+      logDevPerfDuration(
+        'addTransactionController.closeRequested',
+        submitStartedAt,
+        getAddTransactionInputPerfMetadata(input),
+      );
       onDone();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not add transaction.');

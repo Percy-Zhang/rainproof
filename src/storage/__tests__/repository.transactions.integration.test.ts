@@ -127,6 +127,38 @@ describe('SQLite finance repository transactions and links', () => {
     });
   });
 
+  it('persists prepared Add Transaction records exactly', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });
+      const input = {
+        kind: 'expense' as const,
+        title: 'Prepared expense',
+        datetime: '2026-05-18T12:00:00.000Z',
+        notes: 'Prepared note',
+        labels: ['prepared'],
+        groupId: 'home',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: -2500,
+            currencyCode: 'AUD' as const,
+            categoryId: 'food-dining',
+            subcategoryId: 'groceries',
+            note: 'Prepared line',
+          },
+        ],
+      };
+      const prepared = repository.prepareAddTransaction(input);
+
+      const persisted = await repository.addTransaction(input, prepared);
+      const snapshot = await repository.getSnapshot();
+
+      expect(persisted).toEqual(prepared);
+      expect(snapshot.transactions).toEqual(expect.arrayContaining([prepared.transaction]));
+      expect(snapshot.transactionLines).toEqual(expect.arrayContaining(prepared.lines));
+    });
+  });
+
   it('preserves one-line transaction line IDs during edits', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday' });

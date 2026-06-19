@@ -45,7 +45,11 @@ import type { RainproofBackup } from '../domain/backupExport';
 import { logDevPerfDuration, timeDevPerf, timeDevPerfAsync } from '../performance';
 import { createSQLiteFinanceRepository, type FinanceRepository } from '../storage/repository';
 import { getDeviceDefaultCurrencyCode } from './deviceCurrency';
-import { patchSnapshotAfterAddTransaction } from './rainproofSnapshotPatches';
+import {
+  canPatchSnapshotAfterAddTransaction,
+  patchSnapshotAfterAddTransaction,
+  rollbackSnapshotAfterOptimisticAddTransaction,
+} from './rainproofSnapshotPatches';
 
 type RainproofDerivedData = {
   accountBalances: AccountBalance[];
@@ -105,6 +109,11 @@ type MutationResult = {
   patchSnapshot?: (snapshot: AppSnapshot) => AppSnapshot | null;
 };
 
+type AddTransactionPersistenceRecords = ReturnType<FinanceRepository['prepareAddTransaction']>;
+type AddTransactionWriteQueueRef = {
+  current: Promise<void>;
+};
+
 export type RainproofDataState = {
   snapshot: AppSnapshot | null;
   derived: RainproofDerivedData;
@@ -127,6 +136,7 @@ const emptyDerived: RainproofDerivedData = {
 export function useRainproofData(): RainproofDataState {
   const repositoryRef = useRef<FinanceRepository | null>(null);
   const snapshotRef = useRef<AppSnapshot | null>(null);
+  const addTransactionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -249,6 +259,83 @@ export function useRainproofData(): RainproofDataState {
     [applySnapshotPatch, refresh],
   );
 
+  const addTransactionOptimistically = useCallback(
+    (input: NewTransactionInput, addTransactionDefaults?: AddTransactionDefaults): Promise<void> => {
+      const repository = repositoryRef.current;
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      const metadata = getNewTransactionInputPerfMetadata(input);
+      const startedAt = Date.now();
+
+      try {
+        const previousSnapshot = snapshotRef.current;
+        if (!previousSnapshot) {
+          return persistAddTransactionWithSaving({
+            addTransactionDefaults,
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }).finally(() => {
+            logDevPerfDuration('rainproofData.addTransaction.perceived', startedAt, { refresh: 'full' });
+            logDevPerfDuration('rainproofData.addTransaction.total', startedAt);
+          });
+        }
+
+        const optimisticRecords = timeDevPerf(
+          'rainproofData.addTransaction.optimisticBuild',
+          () => repository.prepareAddTransaction(input),
+          metadata,
+        );
+        const canPatchOptimistically = canPatchSnapshotAfterAddTransaction(previousSnapshot, {
+          addTransactionDefaults,
+          input,
+          lines: optimisticRecords.lines,
+          transaction: optimisticRecords.transaction,
+        });
+
+        if (!canPatchOptimistically) {
+          return persistAddTransactionWithSaving({
+            addTransactionDefaults,
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }).finally(() => {
+            logDevPerfDuration('rainproofData.addTransaction.perceived', startedAt, { refresh: 'full' });
+            logDevPerfDuration('rainproofData.addTransaction.total', startedAt);
+          });
+        }
+
+        scheduleAddTransactionTask(() => {
+          applyAcceptedOptimisticAddTransaction({
+            addTransactionDefaults,
+            applySnapshotPatch,
+            addTransactionWriteQueueRef,
+            input,
+            optimisticRecords,
+            previousAddTransactionDefaults: previousSnapshot.settings.addTransactionDefaults,
+            refresh,
+            repository,
+            setError,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.addTransaction.accepted', startedAt, { refresh: 'optimistic' });
+        logDevPerfDuration('rainproofData.addTransaction.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.addTransaction.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not add transaction.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
   const derived = useMemo<RainproofDerivedData>(() => {
     if (!snapshot) {
       return emptyDerived;
@@ -304,33 +391,7 @@ export function useRainproofData(): RainproofDataState {
     () => ({
       addAccount: (input) => runMutation((repository) => repository.addAccount(input)),
       updateAccount: (input) => runMutation((repository) => repository.updateAccount(input)),
-      addTransaction: (input, addTransactionDefaults) =>
-        runMutation(async (repository) => {
-          const persisted = await timeDevPerfAsync(
-            'rainproofData.addTransaction.repositoryAdd',
-            () => repository.addTransaction(input),
-            getNewTransactionInputPerfMetadata(input),
-          );
-          if (addTransactionDefaults) {
-            await timeDevPerfAsync(
-              'rainproofData.addTransaction.defaultsWrite',
-              () => repository.updateAddTransactionDefaults({ addTransactionDefaults }),
-              {
-                hasAccountDefault: Boolean(addTransactionDefaults.lastManualAccountId),
-                categoryDefaults: Object.keys(addTransactionDefaults.lastCategoryByKind ?? {}).length,
-              },
-            );
-          }
-          return {
-            patchSnapshot: (currentSnapshot) =>
-              patchSnapshotAfterAddTransaction(currentSnapshot, {
-                addTransactionDefaults,
-                input,
-                lines: persisted.lines,
-                transaction: persisted.transaction,
-              }),
-          };
-        }, { label: 'addTransaction', rethrow: true }),
+      addTransaction: addTransactionOptimistically,
       updateTransaction: (input) =>
         runMutation((repository) => repository.updateTransaction(input), { label: 'updateTransaction', rethrow: true }),
       deleteTransaction: async (transactionId) => {
@@ -423,7 +484,7 @@ export function useRainproofData(): RainproofDataState {
       restoreBackup: (backup) => runMutation((repository) => repository.restoreBackup(backup), { rethrow: true }),
       refresh,
     }),
-    [refresh, runMutation],
+    [addTransactionOptimistically, refresh, runMutation],
   );
 
   return {
@@ -456,4 +517,255 @@ function getNewTransactionInputPerfMetadata(input: NewTransactionInput) {
     transfer: input.kind === 'transfer',
     crossCurrencyTransfer: input.kind === 'transfer' && new Set(input.lines.map((line) => line.currencyCode)).size > 1,
   };
+}
+
+function enqueueAddTransactionWrite(
+  queueRef: AddTransactionWriteQueueRef,
+  write: () => Promise<void>,
+): void {
+  const nextWrite = queueRef.current.then(write, write);
+  queueRef.current = nextWrite.catch(() => undefined);
+  void nextWrite;
+}
+
+function scheduleAddTransactionTask(task: () => void): void {
+  setTimeout(task, 0);
+}
+
+function applyAcceptedOptimisticAddTransaction({
+  addTransactionDefaults,
+  addTransactionWriteQueueRef,
+  applySnapshotPatch,
+  input,
+  optimisticRecords,
+  previousAddTransactionDefaults,
+  refresh,
+  repository,
+  setError,
+}: {
+  addTransactionDefaults?: AddTransactionDefaults;
+  addTransactionWriteQueueRef: AddTransactionWriteQueueRef;
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  input: NewTransactionInput;
+  optimisticRecords: AddTransactionPersistenceRecords;
+  previousAddTransactionDefaults?: AddTransactionDefaults;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setError: (message: string) => void;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterAddTransaction(currentSnapshot, {
+      addTransactionDefaults,
+      input,
+      lines: optimisticRecords.lines,
+      transaction: optimisticRecords.transaction,
+    }),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistAddTransactionWithFullRefresh({
+      addTransactionDefaults,
+      input,
+      refresh,
+      repository,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not save transaction.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.addTransaction.optimisticPatch',
+    optimisticPatchStartedAt,
+    getSnapshotPerfCounts(optimisticSnapshot),
+  );
+  setError('');
+
+  enqueueAddTransactionWrite(addTransactionWriteQueueRef, async () => {
+    await persistOptimisticAddTransaction({
+      addTransactionDefaults,
+      input,
+      optimisticRecords,
+      refresh,
+      repository,
+      rollbackPatch: (records) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticAddTransaction(currentSnapshot, {
+          lineIds: records.lines.map((line) => line.id),
+          optimisticAddTransactionDefaults: addTransactionDefaults,
+          previousAddTransactionDefaults,
+          transactionId: records.transaction.id,
+        }),
+      ),
+      setError,
+    });
+  });
+}
+
+async function persistAddTransactionWithSaving({
+  addTransactionDefaults,
+  input,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  addTransactionDefaults?: AddTransactionDefaults;
+  input: NewTransactionInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistAddTransactionWithFullRefresh({
+      addTransactionDefaults,
+      input,
+      refresh,
+      repository,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistAddTransactionWithFullRefresh({
+  addTransactionDefaults,
+  input,
+  refresh,
+  repository,
+}: {
+  addTransactionDefaults?: AddTransactionDefaults;
+  input: NewTransactionInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await persistAddTransactionRecords({
+    addTransactionDefaults,
+    input,
+    repository,
+  });
+  await refresh();
+}
+
+async function persistOptimisticAddTransaction({
+  addTransactionDefaults,
+  input,
+  optimisticRecords,
+  refresh,
+  repository,
+  rollbackPatch,
+  setError,
+}: {
+  addTransactionDefaults?: AddTransactionDefaults;
+  input: NewTransactionInput;
+  optimisticRecords: AddTransactionPersistenceRecords;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollbackPatch: (records: AddTransactionPersistenceRecords) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  let transactionPersisted = false;
+
+  try {
+    const persistedRecords = await timeDevPerfAsync(
+      'rainproofData.addTransaction.backgroundWrite',
+      async () => {
+        const records = await timeDevPerfAsync(
+          'rainproofData.addTransaction.repositoryAdd',
+          () => repository.addTransaction(input, optimisticRecords),
+          getNewTransactionInputPerfMetadata(input),
+        );
+        transactionPersisted = true;
+
+        if (addTransactionDefaults) {
+          await timeDevPerfAsync(
+            'rainproofData.addTransaction.defaultsWrite',
+            () => repository.updateAddTransactionDefaults({ addTransactionDefaults }),
+            {
+              hasAccountDefault: Boolean(addTransactionDefaults.lastManualAccountId),
+              categoryDefaults: Object.keys(addTransactionDefaults.lastCategoryByKind ?? {}).length,
+            },
+          );
+        }
+
+        return records;
+      },
+      getNewTransactionInputPerfMetadata(input),
+    );
+
+    const reconcileStartedAt = Date.now();
+    if (areAddTransactionPersistenceRecordsEqual(persistedRecords, optimisticRecords)) {
+      logDevPerfDuration('rainproofData.addTransaction.reconcile', reconcileStartedAt, { refresh: 'none' });
+      return;
+    }
+
+    await refresh();
+    logDevPerfDuration('rainproofData.addTransaction.reconcile', reconcileStartedAt, { refresh: 'full' });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not save transaction.';
+
+    if (transactionPersisted) {
+      const refreshStartedAt = Date.now();
+      await refresh();
+      logDevPerfDuration('rainproofData.addTransaction.rollback', refreshStartedAt, { refresh: 'full' });
+      setError(message);
+      return;
+    }
+
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(optimisticRecords);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration(
+        'rainproofData.addTransaction.rollback',
+        rollbackStartedAt,
+        {
+          ...getSnapshotPerfCounts(rolledBackSnapshot),
+          refresh: 'patched',
+        },
+      );
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.addTransaction.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
+}
+
+async function persistAddTransactionRecords({
+  addTransactionDefaults,
+  input,
+  records,
+  repository,
+}: {
+  addTransactionDefaults?: AddTransactionDefaults;
+  input: NewTransactionInput;
+  records?: AddTransactionPersistenceRecords;
+  repository: FinanceRepository;
+}): Promise<AddTransactionPersistenceRecords> {
+  const persistedRecords = await timeDevPerfAsync(
+    'rainproofData.addTransaction.repositoryAdd',
+    () => repository.addTransaction(input, records),
+    getNewTransactionInputPerfMetadata(input),
+  );
+
+  if (addTransactionDefaults) {
+    await timeDevPerfAsync(
+      'rainproofData.addTransaction.defaultsWrite',
+      () => repository.updateAddTransactionDefaults({ addTransactionDefaults }),
+      {
+        hasAccountDefault: Boolean(addTransactionDefaults.lastManualAccountId),
+        categoryDefaults: Object.keys(addTransactionDefaults.lastCategoryByKind ?? {}).length,
+      },
+    );
+  }
+
+  return persistedRecords;
+}
+
+function areAddTransactionPersistenceRecordsEqual(
+  left: AddTransactionPersistenceRecords,
+  right: AddTransactionPersistenceRecords,
+): boolean {
+  return JSON.stringify(left.transaction) === JSON.stringify(right.transaction) &&
+    JSON.stringify(left.lines) === JSON.stringify(right.lines);
 }

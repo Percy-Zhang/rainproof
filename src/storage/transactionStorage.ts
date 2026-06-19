@@ -22,9 +22,43 @@ export type AddTransactionStorageResult = {
   transaction: Transaction;
 };
 
+type CreateAddTransactionRecordsOptions = {
+  createdAt?: string;
+  transactionId?: string;
+};
+
+type InsertTransactionRecordsOptions = CreateAddTransactionRecordsOptions & {
+  records?: AddTransactionStorageResult;
+};
+
+export function createAddTransactionStorageRecords(
+  input: NewTransactionInput,
+  options: CreateAddTransactionRecordsOptions = {},
+): AddTransactionStorageResult {
+  validateTransactionLinesForStorage(input.kind, input.lines);
+
+  const now = options.createdAt ?? new Date().toISOString();
+  const transactionId = options.transactionId ?? createLocalId('txn');
+  const transaction: Transaction = {
+    id: transactionId,
+    kind: input.kind,
+    title: input.title.trim() || fallbackTransactionTitle(input.kind),
+    datetime: input.datetime,
+    notes: input.notes?.trim() ?? '',
+    labels: [...(input.labels ?? [])],
+    groupId: input.groupId?.trim() ?? '',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const lines = input.lines.map((line) => createTransactionLineRecord(transactionId, line, now));
+
+  return { lines, transaction };
+}
+
 export async function addTransactionStorage(
   db: RepositoryDatabase,
   input: NewTransactionInput,
+  records?: AddTransactionStorageResult,
 ): Promise<AddTransactionStorageResult> {
   const metadata = getTransactionWritePerfMetadata(input, 'manual');
   const beforeTransactionStartedAt = Date.now();
@@ -41,7 +75,7 @@ export async function addTransactionStorage(
             logAddTransactionBoundary('transactionStorage.addTransaction.beforeCallback', beforeTransactionStartedAt, metadata);
             const callbackStartedAt = Date.now();
             try {
-              result = await insertTransactionRecordsStorage(transactionDb, input);
+              result = await insertTransactionRecordsStorage(transactionDb, input, { records });
             } finally {
               callbackFinishedAt = Date.now();
               logAddTransactionBoundary('transactionStorage.addTransaction.callback', callbackStartedAt, metadata);
@@ -67,23 +101,23 @@ export async function addTransactionStorage(
 export async function insertTransactionRecordsStorage(
   db: TransactionWriteDatabase,
   input: NewTransactionInput,
-  options: { transactionId?: string; createdAt?: string } = {},
+  options: InsertTransactionRecordsOptions = {},
 ): Promise<AddTransactionStorageResult> {
   const metadata = getTransactionWritePerfMetadata(input);
   timeDevPerf(
     'transactionStorage.insertRecords.validation',
     () => {
       validateTransactionLinesForStorage(input.kind, input.lines);
+      if (options.records) {
+        validateAddTransactionStorageRecords(input, options.records);
+      }
     },
     metadata,
   );
 
-  const { now, transactionId } = timeDevPerf(
+  const records = timeDevPerf(
     'transactionStorage.insertRecords.identifiers',
-    () => ({
-      now: options.createdAt ?? new Date().toISOString(),
-      transactionId: options.transactionId ?? createLocalId('txn'),
-    }),
+    () => options.records ?? createAddTransactionStorageRecords(input, options),
     metadata,
   );
 
@@ -94,43 +128,30 @@ export async function insertTransactionRecordsStorage(
         `INSERT INTO transactions (
           id, kind, title, datetime, notes, labels_json, group_id, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        transactionId,
-        input.kind,
-        input.title.trim() || fallbackTransactionTitle(input.kind),
-        input.datetime,
-        input.notes?.trim() ?? '',
-        JSON.stringify(input.labels ?? []),
-        input.groupId?.trim() ?? '',
-        now,
-        now,
+        records.transaction.id,
+        records.transaction.kind,
+        records.transaction.title,
+        records.transaction.datetime,
+        records.transaction.notes,
+        JSON.stringify(records.transaction.labels),
+        records.transaction.groupId,
+        records.transaction.createdAt,
+        records.transaction.updatedAt,
       ),
     metadata,
   );
 
-  const transaction: Transaction = {
-    id: transactionId,
-    kind: input.kind,
-    title: input.title.trim() || fallbackTransactionTitle(input.kind),
-    datetime: input.datetime,
-    notes: input.notes?.trim() ?? '',
-    labels: [...(input.labels ?? [])],
-    groupId: input.groupId?.trim() ?? '',
-    createdAt: now,
-    updatedAt: now,
-  };
-  const lines: TransactionLine[] = [];
-
   await timeDevPerfAsync(
     'transactionStorage.insertRecords.lines',
     async () => {
-      for (const line of input.lines) {
-        lines.push(await insertTransactionLineStorage(db, transactionId, line, now));
+      for (const line of records.lines) {
+        await insertTransactionLineStorage(db, line);
       }
     },
     metadata,
   );
 
-  return { lines, transaction };
+  return records;
 }
 
 export async function updateTransactionStorage(
@@ -172,7 +193,7 @@ export async function updateTransactionStorage(
       if (plan.existingLineId) {
         await updateTransactionLineStorage(db, plan.existingLineId, input.id, plan.line);
       } else {
-        await insertTransactionLineStorage(db, input.id, plan.line, now);
+        await insertTransactionLineStorage(db, createTransactionLineRecord(input.id, plan.line, now));
       }
     }
   });
@@ -254,13 +275,34 @@ function fallbackTransactionTitle(kind: TransactionKind): string {
 
 async function insertTransactionLineStorage(
   db: TransactionWriteDatabase,
+  line: TransactionLine,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT INTO transaction_lines (
+      id, transaction_id, account_id, amount_minor, currency_code, category_id,
+      subcategory_id, external_party, transfer_peer_account_id, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    line.id,
+    line.transactionId,
+    line.accountId,
+    line.amountMinor,
+    line.currencyCode,
+    line.categoryId,
+    line.subcategoryId,
+    line.externalParty,
+    line.transferPeerAccountId,
+    line.note,
+    line.createdAt,
+  );
+}
+
+function createTransactionLineRecord(
   transactionId: string,
   line: TransactionLineInput,
   createdAt: string,
-): Promise<TransactionLine> {
-  const lineId = createLocalId('line');
-  const persistedLine: TransactionLine = {
-    id: lineId,
+): TransactionLine {
+  return {
+    id: createLocalId('line'),
     transactionId,
     accountId: line.accountId,
     amountMinor: line.amountMinor,
@@ -272,26 +314,45 @@ async function insertTransactionLineStorage(
     note: line.note?.trim() ?? '',
     createdAt,
   };
+}
 
-  await db.runAsync(
-    `INSERT INTO transaction_lines (
-      id, transaction_id, account_id, amount_minor, currency_code, category_id,
-      subcategory_id, external_party, transfer_peer_account_id, note, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    persistedLine.id,
-    transactionId,
-    persistedLine.accountId,
-    persistedLine.amountMinor,
-    persistedLine.currencyCode,
-    persistedLine.categoryId,
-    persistedLine.subcategoryId,
-    persistedLine.externalParty,
-    persistedLine.transferPeerAccountId,
-    persistedLine.note,
-    createdAt,
-  );
+function validateAddTransactionStorageRecords(
+  input: NewTransactionInput,
+  records: AddTransactionStorageResult,
+): void {
+  if (records.transaction.kind !== input.kind) {
+    throw new Error('Prepared transaction does not match the transaction kind.');
+  }
+  if (
+    records.transaction.title !== (input.title.trim() || fallbackTransactionTitle(input.kind)) ||
+    records.transaction.datetime !== input.datetime ||
+    records.transaction.notes !== (input.notes?.trim() ?? '') ||
+    records.transaction.groupId !== (input.groupId?.trim() ?? '') ||
+    JSON.stringify(records.transaction.labels) !== JSON.stringify(input.labels ?? [])
+  ) {
+    throw new Error('Prepared transaction does not match the input.');
+  }
 
-  return persistedLine;
+  if (records.lines.length !== input.lines.length) {
+    throw new Error('Prepared transaction line count does not match the input.');
+  }
+
+  records.lines.forEach((line, index) => {
+    const inputLine = input.lines[index];
+    if (
+      line.transactionId !== records.transaction.id ||
+      line.accountId !== inputLine.accountId ||
+      line.amountMinor !== inputLine.amountMinor ||
+      line.currencyCode !== normalizeCurrencyCode(inputLine.currencyCode) ||
+      line.categoryId !== (inputLine.categoryId ?? '') ||
+      line.subcategoryId !== (inputLine.subcategoryId ?? '') ||
+      line.externalParty !== (inputLine.externalParty?.trim() ?? '') ||
+      line.transferPeerAccountId !== (inputLine.transferPeerAccountId ?? '') ||
+      line.note !== (inputLine.note?.trim() ?? '')
+    ) {
+      throw new Error('Prepared transaction line does not match the input.');
+    }
+  });
 }
 
 async function updateTransactionLineStorage(

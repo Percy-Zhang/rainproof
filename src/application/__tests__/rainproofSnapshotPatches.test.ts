@@ -1,4 +1,7 @@
-import { patchSnapshotAfterAddTransaction } from '../rainproofSnapshotPatches';
+import {
+  patchSnapshotAfterAddTransaction,
+  rollbackSnapshotAfterOptimisticAddTransaction,
+} from '../rainproofSnapshotPatches';
 import type {
   Account,
   AppSnapshot,
@@ -137,10 +140,103 @@ describe('patchSnapshotAfterAddTransaction', () => {
     expect(
       patchSnapshotAfterAddTransaction(createSnapshot(), {
         input,
-        lines: [],
+        lines: [transactionLine('line-mismatch', { ...input.lines[0], amountMinor: -9999 }, 'txn-mismatch')],
         transaction: transaction('txn-mismatch', 'expense'),
       }),
     ).toBeNull();
+  });
+
+  it('rolls back an optimistic transaction and restores previous defaults', () => {
+    const input = newTransactionInput('expense', [
+      { accountId: 'aud-checking', amountMinor: -1234, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+    ]);
+    const line = transactionLine('line-optimistic', input.lines[0], 'txn-optimistic');
+    const patched = patchSnapshotAfterAddTransaction(createSnapshot(), {
+      addTransactionDefaults: {
+        lastManualAccountId: 'aud-checking',
+        lastCategoryByKind: {
+          expense: { categoryId: 'food', subcategoryId: 'groceries' },
+        },
+      },
+      input,
+      lines: [line],
+      transaction: transaction('txn-optimistic', 'expense'),
+    });
+
+    expect(patched).not.toBeNull();
+
+    const rolledBack = rollbackSnapshotAfterOptimisticAddTransaction(patched!, {
+      lineIds: [line.id],
+      optimisticAddTransactionDefaults: {
+        lastManualAccountId: 'aud-checking',
+        lastCategoryByKind: {
+          expense: { categoryId: 'food', subcategoryId: 'groceries' },
+        },
+      },
+      previousAddTransactionDefaults: {
+        lastManualAccountId: 'usd-wallet',
+      },
+      transactionId: 'txn-optimistic',
+    });
+
+    expect(rolledBack?.transactions.map((item) => item.id)).toEqual(['txn-existing']);
+    expect(rolledBack?.transactionLines.map((item) => item.id)).toEqual(['line-existing']);
+    expect(rolledBack?.settings.addTransactionDefaults).toEqual({ lastManualAccountId: 'usd-wallet' });
+  });
+
+  it('falls back from rollback when optimistic lines are no longer exact', () => {
+    const input = newTransactionInput('expense', [
+      { accountId: 'aud-checking', amountMinor: -1234, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+    ]);
+    const line = transactionLine('line-optimistic', input.lines[0], 'txn-optimistic');
+    const patched = patchSnapshotAfterAddTransaction(createSnapshot(), {
+      input,
+      lines: [line],
+      transaction: transaction('txn-optimistic', 'expense'),
+    });
+
+    expect(patched).not.toBeNull();
+
+    expect(
+      rollbackSnapshotAfterOptimisticAddTransaction({
+        ...patched!,
+        transactionLines: patched!.transactionLines.filter((item) => item.id !== line.id),
+      }, {
+        lineIds: [line.id],
+        transactionId: 'txn-optimistic',
+      }),
+    ).toBeNull();
+  });
+
+  it('does not clobber defaults changed after the optimistic patch', () => {
+    const input = newTransactionInput('expense', [
+      { accountId: 'aud-checking', amountMinor: -1234, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+    ]);
+    const line = transactionLine('line-optimistic', input.lines[0], 'txn-optimistic');
+    const patched = patchSnapshotAfterAddTransaction(createSnapshot(), {
+      addTransactionDefaults: { lastManualAccountId: 'aud-checking' },
+      input,
+      lines: [line],
+      transaction: transaction('txn-optimistic', 'expense'),
+    });
+
+    expect(patched).not.toBeNull();
+
+    const changedAfterPatch = {
+      ...patched!,
+      settings: {
+        ...patched!.settings,
+        addTransactionDefaults: { lastManualAccountId: 'usd-wallet' },
+      },
+    };
+    const rolledBack = rollbackSnapshotAfterOptimisticAddTransaction(changedAfterPatch, {
+      lineIds: [line.id],
+      optimisticAddTransactionDefaults: { lastManualAccountId: 'aud-checking' },
+      previousAddTransactionDefaults: {},
+      transactionId: 'txn-optimistic',
+    });
+
+    expect(rolledBack?.settings.addTransactionDefaults).toEqual({ lastManualAccountId: 'usd-wallet' });
   });
 });
 
@@ -230,7 +326,7 @@ function transaction(
   return {
     id,
     kind,
-    title: id,
+    title: `New ${kind}`,
     datetime,
     notes: '',
     labels: [],
