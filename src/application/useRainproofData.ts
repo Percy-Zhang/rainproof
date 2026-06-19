@@ -42,9 +42,10 @@ import type {
   UpdateTransactionInput,
 } from '../domain/types';
 import type { RainproofBackup } from '../domain/backupExport';
-import { logDevPerfDuration, timeDevPerf } from '../performance';
+import { logDevPerfDuration, timeDevPerf, timeDevPerfAsync } from '../performance';
 import { createSQLiteFinanceRepository, type FinanceRepository } from '../storage/repository';
 import { getDeviceDefaultCurrencyCode } from './deviceCurrency';
+import { patchSnapshotAfterAddTransaction } from './rainproofSnapshotPatches';
 
 type RainproofDerivedData = {
   accountBalances: AccountBalance[];
@@ -100,6 +101,10 @@ type MutationOptions = {
   rethrow?: boolean;
 };
 
+type MutationResult = {
+  patchSnapshot?: (snapshot: AppSnapshot) => AppSnapshot | null;
+};
+
 export type RainproofDataState = {
   snapshot: AppSnapshot | null;
   derived: RainproofDerivedData;
@@ -121,6 +126,7 @@ const emptyDerived: RainproofDerivedData = {
 
 export function useRainproofData(): RainproofDataState {
   const repositoryRef = useRef<FinanceRepository | null>(null);
+  const snapshotRef = useRef<AppSnapshot | null>(null);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -134,8 +140,25 @@ export function useRainproofData(): RainproofDataState {
 
     const startedAt = Date.now();
     const nextSnapshot = await repository.getSnapshot();
+    snapshotRef.current = nextSnapshot;
     setSnapshot(nextSnapshot);
     logDevPerfDuration('rainproofData.refresh', startedAt, getSnapshotPerfCounts(nextSnapshot));
+  }, []);
+
+  const applySnapshotPatch = useCallback((patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => {
+    const currentSnapshot = snapshotRef.current;
+    if (!currentSnapshot) {
+      return null;
+    }
+
+    const nextSnapshot = patchSnapshot(currentSnapshot);
+    if (!nextSnapshot) {
+      return null;
+    }
+
+    snapshotRef.current = nextSnapshot;
+    setSnapshot(nextSnapshot);
+    return nextSnapshot;
   }, []);
 
   useEffect(() => {
@@ -150,6 +173,7 @@ export function useRainproofData(): RainproofDataState {
 
         if (mounted) {
           repositoryRef.current = repository;
+          snapshotRef.current = nextSnapshot;
           setSnapshot(nextSnapshot);
           setError('');
         }
@@ -172,7 +196,7 @@ export function useRainproofData(): RainproofDataState {
   }, []);
 
   const runMutation = useCallback(
-    async (mutation: (repository: FinanceRepository) => Promise<void>, options: MutationOptions = {}) => {
+    async (mutation: (repository: FinanceRepository) => Promise<MutationResult | void>, options: MutationOptions = {}) => {
       const repository = repositoryRef.current;
       if (!repository) {
         return;
@@ -187,9 +211,27 @@ export function useRainproofData(): RainproofDataState {
           setSaving(true);
         }
         const writeStartedAt = Date.now();
-        await mutation(repository);
+        const mutationResult = await mutation(repository);
         logDevPerfDuration(`rainproofData.${label}.write`, writeStartedAt);
-        await refresh();
+        const refreshStartedAt = Date.now();
+        let refreshMode: 'full' | 'patched' = 'full';
+        if (mutationResult?.patchSnapshot) {
+          const patchStartedAt = Date.now();
+          try {
+            const patchedSnapshot = applySnapshotPatch(mutationResult.patchSnapshot);
+            if (patchedSnapshot) {
+              refreshMode = 'patched';
+              logDevPerfDuration(`rainproofData.${label}.patch`, patchStartedAt, getSnapshotPerfCounts(patchedSnapshot));
+            }
+          } catch {
+            refreshMode = 'full';
+          }
+        }
+
+        if (refreshMode === 'full') {
+          await refresh();
+        }
+        logDevPerfDuration(`rainproofData.${label}.refresh`, refreshStartedAt, { refresh: refreshMode });
         setError('');
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : 'Something went wrong.';
@@ -204,7 +246,7 @@ export function useRainproofData(): RainproofDataState {
         }
       }
     },
-    [refresh],
+    [applySnapshotPatch, refresh],
   );
 
   const derived = useMemo<RainproofDerivedData>(() => {
@@ -264,10 +306,30 @@ export function useRainproofData(): RainproofDataState {
       updateAccount: (input) => runMutation((repository) => repository.updateAccount(input)),
       addTransaction: (input, addTransactionDefaults) =>
         runMutation(async (repository) => {
-          await repository.addTransaction(input);
+          const persisted = await timeDevPerfAsync(
+            'rainproofData.addTransaction.repositoryAdd',
+            () => repository.addTransaction(input),
+            getNewTransactionInputPerfMetadata(input),
+          );
           if (addTransactionDefaults) {
-            await repository.updateAddTransactionDefaults({ addTransactionDefaults });
+            await timeDevPerfAsync(
+              'rainproofData.addTransaction.defaultsWrite',
+              () => repository.updateAddTransactionDefaults({ addTransactionDefaults }),
+              {
+                hasAccountDefault: Boolean(addTransactionDefaults.lastManualAccountId),
+                categoryDefaults: Object.keys(addTransactionDefaults.lastCategoryByKind ?? {}).length,
+              },
+            );
           }
+          return {
+            patchSnapshot: (currentSnapshot) =>
+              patchSnapshotAfterAddTransaction(currentSnapshot, {
+                addTransactionDefaults,
+                input,
+                lines: persisted.lines,
+                transaction: persisted.transaction,
+              }),
+          };
         }, { label: 'addTransaction', rethrow: true }),
       updateTransaction: (input) =>
         runMutation((repository) => repository.updateTransaction(input), { label: 'updateTransaction', rethrow: true }),
@@ -383,5 +445,15 @@ function getSnapshotPerfCounts(snapshot: AppSnapshot) {
     budgets: snapshot.budgets.length,
     templates: snapshot.transactionTemplates.length,
     recurring: snapshot.recurringItems.length,
+  };
+}
+
+function getNewTransactionInputPerfMetadata(input: NewTransactionInput) {
+  return {
+    kind: input.kind,
+    lines: input.lines.length,
+    split: input.kind !== 'transfer' && input.lines.length > 1,
+    transfer: input.kind === 'transfer',
+    crossCurrencyTransfer: input.kind === 'transfer' && new Set(input.lines.map((line) => line.currencyCode)).size > 1,
   };
 }

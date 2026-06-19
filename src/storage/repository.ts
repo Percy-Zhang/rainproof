@@ -80,6 +80,7 @@ import {
 } from './transactionLinkStorage';
 import {
   addTransactionStorage,
+  type AddTransactionStorageResult,
   deleteTransactionStorage,
   updateTransactionStorage,
 } from './transactionStorage';
@@ -101,7 +102,7 @@ export type FinanceRepository = {
   restoreBackup(backup: RainproofBackup): Promise<void>;
   addAccount(input: NewAccountInput): Promise<void>;
   updateAccount(input: UpdateAccountInput): Promise<void>;
-  addTransaction(input: NewTransactionInput): Promise<void>;
+  addTransaction(input: NewTransactionInput): Promise<AddTransactionStorageResult>;
   updateTransaction(input: UpdateTransactionInput): Promise<void>;
   deleteTransaction(transactionId: string): Promise<void>;
   addTransactionLink(input: NewTransactionLinkInput): Promise<void>;
@@ -190,7 +191,7 @@ class SQLiteFinanceRepository implements FinanceRepository {
     return updateAccountStorage(this.db, input);
   }
 
-  async addTransaction(input: NewTransactionInput): Promise<void> {
+  async addTransaction(input: NewTransactionInput): Promise<AddTransactionStorageResult> {
     return addTransactionStorage(this.db, input);
   }
 

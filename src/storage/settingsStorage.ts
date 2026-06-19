@@ -4,6 +4,7 @@ import { normalizeDefaultCurrencyMode } from '../domain/currency';
 import { normalizeAddTransactionDefaults } from '../domain/addTransactionDefaults';
 import { getDefaultDashboardCardSettings, normalizeDashboardCardSettings } from '../domain/dashboardCards';
 import { normalizeCurrencyCode } from '../domain/money';
+import { timeDevPerfAsync } from '../performance';
 import type {
   AddTransactionDefaults,
   DashboardCardSetting,
@@ -198,7 +199,14 @@ export async function updateAddTransactionDefaultsStorage(
   db: RepositoryDatabase,
   input: UpdateAddTransactionDefaultsInput,
 ): Promise<void> {
-  await writeAddTransactionDefaultsStorage(db, input.addTransactionDefaults);
+  await timeDevPerfAsync(
+    'settingsStorage.updateAddTransactionDefaults',
+    () => writeAddTransactionDefaultsStorage(db, input.addTransactionDefaults),
+    {
+      hasAccountDefault: Boolean(input.addTransactionDefaults.lastManualAccountId),
+      categoryDefaults: Object.keys(input.addTransactionDefaults.lastCategoryByKind ?? {}).length,
+    },
+  );
 }
 
 export async function addAccountToStoredDashboardSelection(

@@ -45,6 +45,7 @@ import type {
   NewTransactionInput,
   TransactionKind,
 } from '../../domain/types';
+import { timeDevPerf } from '../../performance';
 import type {
   CategorySelectLaunchParams,
   CategorySelectionResult,
@@ -289,17 +290,30 @@ export function useAddTransactionController({
     }
 
     try {
-      const input = buildAddTransactionInput({
-        accounts: snapshot.accounts,
-        draft: transactionDraft,
-      });
+      const input = timeDevPerf(
+        'addTransactionController.buildInput',
+        () =>
+          buildAddTransactionInput({
+            accounts: snapshot.accounts,
+            draft: transactionDraft,
+          }),
+        (nextInput) => getAddTransactionInputPerfMetadata(nextInput),
+      );
 
-      const nextDefaults = getAddTransactionDefaultsAfterSave({
-        accounts: snapshot.accounts,
-        categories,
-        currentDefaults: addTransactionDefaults,
-        input,
-      });
+      const nextDefaults = timeDevPerf(
+        'addTransactionController.prepareDefaults',
+        () =>
+          getAddTransactionDefaultsAfterSave({
+            accounts: snapshot.accounts,
+            categories,
+            currentDefaults: addTransactionDefaults,
+            input,
+          }),
+        (defaults) => ({
+          hasAccountDefault: Boolean(defaults.lastManualAccountId),
+          categoryDefaults: Object.keys(defaults.lastCategoryByKind ?? {}).length,
+        }),
+      );
 
       await onAddTransaction(input, nextDefaults);
 
@@ -566,6 +580,24 @@ export function useAddTransactionController({
     selectTargetAmountInput,
     updateSplitLine,
   };
+}
+
+function getAddTransactionInputPerfMetadata(input: NewTransactionInput) {
+  return {
+    kind: input.kind,
+    lines: input.lines.length,
+    split: input.kind !== 'transfer' && input.lines.length > 1,
+    transfer: input.kind === 'transfer',
+    crossCurrencyTransfer: isCrossCurrencyTransferInput(input),
+  };
+}
+
+function isCrossCurrencyTransferInput(input: NewTransactionInput): boolean {
+  if (input.kind !== 'transfer') {
+    return false;
+  }
+
+  return new Set(input.lines.map((line) => line.currencyCode)).size > 1;
 }
 
 function getAddTransactionTargetPreviewAmountMinor(amountExpression: string): number {

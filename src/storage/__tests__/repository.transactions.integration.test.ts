@@ -85,6 +85,48 @@ describe('SQLite finance repository transactions and links', () => {
     });
   });
 
+  it('rolls back the parent transaction if a line insert fails', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });
+      const originalRunAsync = db.runAsync.bind(db);
+      let forcedLineFailure = false;
+
+      db.runAsync = async (source: string, ...params: unknown[]) => {
+        if (!forcedLineFailure && source.includes('INSERT INTO transaction_lines')) {
+          forcedLineFailure = true;
+          throw new Error('Forced transaction line insert failure.');
+        }
+
+        return originalRunAsync(source, ...params);
+      };
+
+      try {
+        await expect(
+          repository.addTransaction({
+            kind: 'expense',
+            title: 'Rollback candidate',
+            datetime: '2026-05-18T12:00:00.000Z',
+            lines: [
+              {
+                accountId: everyday.id,
+                amountMinor: -2500,
+                currencyCode: 'AUD',
+                categoryId: 'food-dining',
+                subcategoryId: 'groceries',
+              },
+            ],
+          }),
+        ).rejects.toThrow('Forced transaction line insert failure.');
+      } finally {
+        db.runAsync = originalRunAsync;
+      }
+
+      const snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.some((transaction) => transaction.title === 'Rollback candidate')).toBe(false);
+      expect(snapshot.transactionLines.some((line) => line.accountId === everyday.id && line.amountMinor === -2500)).toBe(false);
+    });
+  });
+
   it('preserves one-line transaction line IDs during edits', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday' });

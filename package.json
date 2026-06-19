@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "jest --runInBand",
+    "perf:large-data": "node scripts/run-large-dataset-perf.js",
     "expo:check": "npx expo install --check"
   },
   "dependencies": {
