@@ -1,5 +1,8 @@
 import {
+  getRollbackForDeleteTransaction,
   patchSnapshotAfterAddTransaction,
+  patchSnapshotAfterDeleteTransaction,
+  rollbackSnapshotAfterOptimisticDeleteTransaction,
   rollbackSnapshotAfterOptimisticAddTransaction,
 } from '../rainproofSnapshotPatches';
 import type {
@@ -7,6 +10,7 @@ import type {
   AppSnapshot,
   NewTransactionInput,
   Transaction,
+  TransactionLink,
   TransactionLine,
 } from '../../domain/types';
 
@@ -240,6 +244,107 @@ describe('patchSnapshotAfterAddTransaction', () => {
   });
 });
 
+describe('patchSnapshotAfterDeleteTransaction', () => {
+  it('removes an expense transaction with its lines and parent/split links', () => {
+    const snapshot = createLinkedDeleteSnapshot('expense', [
+      {
+        accountId: 'aud-checking',
+        amountMinor: -1000,
+        currencyCode: 'AUD',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      },
+      {
+        accountId: 'aud-checking',
+        amountMinor: -500,
+        currencyCode: 'AUD',
+        categoryId: 'bills',
+        subcategoryId: 'electricity',
+      },
+    ]);
+
+    const patched = patchSnapshotAfterDeleteTransaction(snapshot, 'txn-delete');
+
+    expect(patched?.transactions.some((transaction) => transaction.id === 'txn-delete')).toBe(false);
+    expect(patched?.transactionLines.some((line) => line.transactionId === 'txn-delete')).toBe(false);
+    expect(patched?.transactionLinks.map((link) => link.id)).toEqual([]);
+    expect(patched?.transactions.some((transaction) => transaction.id === 'txn-source')).toBe(true);
+  });
+
+  it('removes income, same-currency transfer, cross-currency transfer, and mixed split shapes', () => {
+    const cases = [
+      createDeleteSnapshot('income', [
+        { accountId: 'aud-checking', amountMinor: 1000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+      ]),
+      createDeleteSnapshot('transfer', [
+        { accountId: 'aud-checking', amountMinor: -1000, currencyCode: 'AUD', transferPeerAccountId: 'aud-savings' },
+        { accountId: 'aud-savings', amountMinor: 1000, currencyCode: 'AUD', transferPeerAccountId: 'aud-checking' },
+      ]),
+      createDeleteSnapshot('transfer', [
+        { accountId: 'aud-checking', amountMinor: -170000, currencyCode: 'AUD', transferPeerAccountId: 'usd-wallet' },
+        { accountId: 'usd-wallet', amountMinor: 110000, currencyCode: 'USD', transferPeerAccountId: 'aud-checking' },
+      ]),
+      createDeleteSnapshot('expense', [
+        { accountId: 'aud-checking', amountMinor: 230000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+        { accountId: 'aud-checking', amountMinor: -60000, currencyCode: 'AUD', categoryId: 'tax', subcategoryId: 'income-tax' },
+      ]),
+    ];
+
+    for (const snapshot of cases) {
+      const patched = patchSnapshotAfterDeleteTransaction(snapshot, 'txn-delete');
+
+      expect(patched?.transactions.some((transaction) => transaction.id === 'txn-delete')).toBe(false);
+      expect(patched?.transactionLines.some((line) => line.transactionId === 'txn-delete')).toBe(false);
+    }
+  });
+
+  it('rolls back an optimistic delete exactly when the snapshot is still safe', () => {
+    const snapshot = createLinkedDeleteSnapshot('expense', [
+      {
+        accountId: 'aud-checking',
+        amountMinor: -1000,
+        currencyCode: 'AUD',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      },
+    ]);
+    const rollback = getRollbackForDeleteTransaction(snapshot, 'txn-delete');
+
+    expect(rollback).not.toBeNull();
+
+    const patched = patchSnapshotAfterDeleteTransaction(snapshot, 'txn-delete');
+    const rolledBack = rollbackSnapshotAfterOptimisticDeleteTransaction(patched!, rollback!);
+
+    expect(rolledBack?.transactions).toEqual(snapshot.transactions);
+    expect(rolledBack?.transactionLines).toEqual(snapshot.transactionLines);
+    expect(rolledBack?.transactionLinks).toEqual(snapshot.transactionLinks);
+  });
+
+  it('falls back from delete rollback when a linked counterpart disappeared', () => {
+    const snapshot = createLinkedDeleteSnapshot('expense', [
+      {
+        accountId: 'aud-checking',
+        amountMinor: -1000,
+        currencyCode: 'AUD',
+        categoryId: 'food',
+        subcategoryId: 'groceries',
+      },
+    ]);
+    const rollback = getRollbackForDeleteTransaction(snapshot, 'txn-delete');
+    const patched = patchSnapshotAfterDeleteTransaction(snapshot, 'txn-delete');
+
+    expect(rollback).not.toBeNull();
+    expect(patched).not.toBeNull();
+
+    expect(
+      rollbackSnapshotAfterOptimisticDeleteTransaction({
+        ...patched!,
+        transactions: patched!.transactions.filter((transaction) => transaction.id !== 'txn-source'),
+      }, rollback!),
+    ).toBeNull();
+  });
+});
+
 function createSnapshot(): AppSnapshot {
   return {
     defaultCurrencyCode: 'AUD',
@@ -281,6 +386,43 @@ function createSnapshot(): AppSnapshot {
       createdAt: '2026-01-01T00:00:00.000Z',
       updatedAt: '2026-01-01T00:00:00.000Z',
     },
+  };
+}
+
+function createDeleteSnapshot(
+  kind: Transaction['kind'],
+  lines: NewTransactionInput['lines'],
+): AppSnapshot {
+  return {
+    ...createSnapshot(),
+    transactions: [transaction('txn-delete', kind), transaction('txn-existing', 'expense', '2026-05-01T12:00:00.000Z')],
+    transactionLines: lines.map((line, index) => transactionLine(`line-delete-${index}`, line, 'txn-delete')),
+  };
+}
+
+function createLinkedDeleteSnapshot(
+  kind: Transaction['kind'],
+  lines: NewTransactionInput['lines'],
+): AppSnapshot {
+  const baseSnapshot = createDeleteSnapshot(kind, lines);
+  const sourceTransaction = transaction('txn-source', 'income');
+  const sourceLine = transactionLine('line-source', {
+    accountId: 'aud-checking',
+    amountMinor: 1000,
+    currencyCode: 'AUD',
+    categoryId: 'income',
+    subcategoryId: 'reimbursement',
+  }, sourceTransaction.id);
+  const firstDeleteLine = baseSnapshot.transactionLines.find((line) => line.transactionId === 'txn-delete');
+
+  return {
+    ...baseSnapshot,
+    transactions: [sourceTransaction, ...baseSnapshot.transactions],
+    transactionLines: [sourceLine, ...baseSnapshot.transactionLines],
+    transactionLinks: [
+      transactionLink('link-parent', sourceTransaction.id, 'txn-delete'),
+      transactionLink('link-line', sourceTransaction.id, 'txn-delete', sourceLine.id, firstDeleteLine?.id ?? null),
+    ],
   };
 }
 
@@ -353,5 +495,26 @@ function transactionLine(
     transferPeerAccountId: line.transferPeerAccountId ?? '',
     note: line.note ?? '',
     createdAt: '2026-06-01T12:00:00.000Z',
+  };
+}
+
+function transactionLink(
+  id: string,
+  sourceTransactionId: string,
+  targetTransactionId: string,
+  sourceLineId: string | null = null,
+  targetLineId: string | null = null,
+): TransactionLink {
+  return {
+    id,
+    sourceTransactionId,
+    targetTransactionId,
+    sourceLineId,
+    targetLineId,
+    linkType: 'reimbursement',
+    amountMinor: 1000,
+    currencyCode: 'AUD',
+    createdAt: '2026-06-01T12:00:00.000Z',
+    updatedAt: '2026-06-01T12:00:00.000Z',
   };
 }

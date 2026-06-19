@@ -46,6 +46,7 @@ import type {
   CategorySelectLaunchParams,
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
+import { logDevPerfDuration } from '../../performance';
 import { useTransactionAccountPickerRouting } from './useTransactionAccountPickerRouting';
 import { useTransactionDateTimePicker } from './useTransactionDateTimePicker';
 import { useTransactionDetailSuggestions } from './useTransactionDetailSuggestions';
@@ -419,8 +420,11 @@ export function useEditTransactionController({
     }
 
     try {
+      const deleteStartedAt = Date.now();
       await onDeleteTransaction(transactionId);
+      logDevPerfDuration('editTransactionController.deleteAccepted', deleteStartedAt);
       setError('');
+      logDevPerfDuration('editTransactionController.deleteCloseRequested', deleteStartedAt);
       onDone();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not delete transaction.');

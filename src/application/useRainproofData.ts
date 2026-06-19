@@ -47,8 +47,14 @@ import { createSQLiteFinanceRepository, type FinanceRepository } from '../storag
 import { getDeviceDefaultCurrencyCode } from './deviceCurrency';
 import {
   canPatchSnapshotAfterAddTransaction,
+  canPatchSnapshotAfterDeleteTransaction,
+  getRollbackForDeleteTransaction,
+  isSnapshotAfterDeleteTransaction,
+  patchSnapshotAfterDeleteTransactionWithRollback,
   patchSnapshotAfterAddTransaction,
+  rollbackSnapshotAfterOptimisticDeleteTransaction,
   rollbackSnapshotAfterOptimisticAddTransaction,
+  type OptimisticDeleteTransactionRollback,
 } from './rainproofSnapshotPatches';
 
 type RainproofDerivedData = {
@@ -110,7 +116,7 @@ type MutationResult = {
 };
 
 type AddTransactionPersistenceRecords = ReturnType<FinanceRepository['prepareAddTransaction']>;
-type AddTransactionWriteQueueRef = {
+type BackgroundWriteQueueRef = {
   current: Promise<void>;
 };
 
@@ -137,6 +143,7 @@ export function useRainproofData(): RainproofDataState {
   const repositoryRef = useRef<FinanceRepository | null>(null);
   const snapshotRef = useRef<AppSnapshot | null>(null);
   const addTransactionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const deleteTransactionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -309,7 +316,7 @@ export function useRainproofData(): RainproofDataState {
           });
         }
 
-        scheduleAddTransactionTask(() => {
+        scheduleOptimisticMutationTask(() => {
           applyAcceptedOptimisticAddTransaction({
             addTransactionDefaults,
             applySnapshotPatch,
@@ -329,6 +336,71 @@ export function useRainproofData(): RainproofDataState {
         return Promise.resolve();
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : 'Could not add transaction.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
+  const deleteTransactionOptimistically = useCallback(
+    (transactionId: string): Promise<void> => {
+      const repository = repositoryRef.current;
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      const startedAt = Date.now();
+
+      try {
+        const previousSnapshot = snapshotRef.current;
+        if (!previousSnapshot || !canPatchSnapshotAfterDeleteTransaction(previousSnapshot, transactionId)) {
+          return persistDeleteTransactionWithSaving({
+            refresh,
+            repository,
+            setSaving,
+            transactionId,
+          }).finally(() => {
+            logDevPerfDuration('rainproofData.deleteTransaction.perceived', startedAt, { refresh: 'full' });
+            logDevPerfDuration('rainproofData.deleteTransaction.total', startedAt);
+          });
+        }
+
+        const rollback = getRollbackForDeleteTransaction(previousSnapshot, transactionId);
+        if (!rollback) {
+          return persistDeleteTransactionWithSaving({
+            refresh,
+            repository,
+            setSaving,
+            transactionId,
+          }).finally(() => {
+            logDevPerfDuration('rainproofData.deleteTransaction.perceived', startedAt, { refresh: 'full' });
+            logDevPerfDuration('rainproofData.deleteTransaction.total', startedAt);
+          });
+        }
+
+        scheduleOptimisticMutationTask(() => {
+          applyAcceptedOptimisticDeleteTransaction({
+            applySnapshotPatch,
+            deleteTransactionWriteQueueRef,
+            getSnapshot: () => snapshotRef.current,
+            refresh,
+            repository,
+            rollback,
+            setError,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.deleteTransaction.accepted', startedAt, {
+          links: rollback.links.length,
+          lines: rollback.lines.length,
+          refresh: 'optimistic',
+        });
+        logDevPerfDuration('rainproofData.deleteTransaction.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.deleteTransaction.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not delete transaction.';
         setError(message);
         return Promise.reject(new Error(message));
       }
@@ -394,29 +466,7 @@ export function useRainproofData(): RainproofDataState {
       addTransaction: addTransactionOptimistically,
       updateTransaction: (input) =>
         runMutation((repository) => repository.updateTransaction(input), { label: 'updateTransaction', rethrow: true }),
-      deleteTransaction: async (transactionId) => {
-        const repository = repositoryRef.current;
-        if (!repository) {
-          return;
-        }
-
-        const startedAt = Date.now();
-        try {
-          setSaving(true);
-          const writeStartedAt = Date.now();
-          await repository.deleteTransaction(transactionId);
-          logDevPerfDuration('rainproofData.deleteTransaction.write', writeStartedAt);
-          await refresh();
-          setError('');
-        } catch (caught) {
-          const message = caught instanceof Error ? caught.message : 'Could not delete transaction.';
-          setError(message);
-          throw new Error(message);
-        } finally {
-          logDevPerfDuration('rainproofData.deleteTransaction.total', startedAt);
-          setSaving(false);
-        }
-      },
+      deleteTransaction: deleteTransactionOptimistically,
       addTransactionLink: (input) =>
         runMutation((repository) => repository.addTransactionLink(input), { label: 'addTransactionLink', rethrow: true }),
       updateTransactionLink: (input) =>
@@ -484,7 +534,7 @@ export function useRainproofData(): RainproofDataState {
       restoreBackup: (backup) => runMutation((repository) => repository.restoreBackup(backup), { rethrow: true }),
       refresh,
     }),
-    [addTransactionOptimistically, refresh, runMutation],
+    [addTransactionOptimistically, deleteTransactionOptimistically, refresh, runMutation],
   );
 
   return {
@@ -519,8 +569,8 @@ function getNewTransactionInputPerfMetadata(input: NewTransactionInput) {
   };
 }
 
-function enqueueAddTransactionWrite(
-  queueRef: AddTransactionWriteQueueRef,
+function enqueueBackgroundWrite(
+  queueRef: BackgroundWriteQueueRef,
   write: () => Promise<void>,
 ): void {
   const nextWrite = queueRef.current.then(write, write);
@@ -528,7 +578,7 @@ function enqueueAddTransactionWrite(
   void nextWrite;
 }
 
-function scheduleAddTransactionTask(task: () => void): void {
+function scheduleOptimisticMutationTask(task: () => void): void {
   setTimeout(task, 0);
 }
 
@@ -544,7 +594,7 @@ function applyAcceptedOptimisticAddTransaction({
   setError,
 }: {
   addTransactionDefaults?: AddTransactionDefaults;
-  addTransactionWriteQueueRef: AddTransactionWriteQueueRef;
+  addTransactionWriteQueueRef: BackgroundWriteQueueRef;
   applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
   input: NewTransactionInput;
   optimisticRecords: AddTransactionPersistenceRecords;
@@ -582,7 +632,7 @@ function applyAcceptedOptimisticAddTransaction({
   );
   setError('');
 
-  enqueueAddTransactionWrite(addTransactionWriteQueueRef, async () => {
+  enqueueBackgroundWrite(addTransactionWriteQueueRef, async () => {
     await persistOptimisticAddTransaction({
       addTransactionDefaults,
       input,
@@ -600,6 +650,158 @@ function applyAcceptedOptimisticAddTransaction({
       setError,
     });
   });
+}
+
+function applyAcceptedOptimisticDeleteTransaction({
+  applySnapshotPatch,
+  deleteTransactionWriteQueueRef,
+  getSnapshot,
+  refresh,
+  repository,
+  rollback,
+  setError,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  deleteTransactionWriteQueueRef: BackgroundWriteQueueRef;
+  getSnapshot: () => AppSnapshot | null;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticDeleteTransactionRollback;
+  setError: (message: string) => void;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterDeleteTransactionWithRollback(currentSnapshot, rollback),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistDeleteTransactionWithFullRefresh({
+      refresh,
+      repository,
+      transactionId: rollback.transaction.item.id,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not delete transaction.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.deleteTransaction.optimisticPatch',
+    optimisticPatchStartedAt,
+    {
+      ...getSnapshotPerfCounts(optimisticSnapshot),
+      linksRemoved: rollback.links.length,
+      linesRemoved: rollback.lines.length,
+    },
+  );
+  setError('');
+
+  enqueueBackgroundWrite(deleteTransactionWriteQueueRef, async () => {
+    await persistOptimisticDeleteTransaction({
+      getSnapshot,
+      refresh,
+      repository,
+      rollback,
+      rollbackPatch: (deleteRollback) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticDeleteTransaction(currentSnapshot, deleteRollback),
+      ),
+      setError,
+    });
+  });
+}
+
+async function persistDeleteTransactionWithSaving({
+  refresh,
+  repository,
+  setSaving,
+  transactionId,
+}: {
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+  transactionId: string;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistDeleteTransactionWithFullRefresh({
+      refresh,
+      repository,
+      transactionId,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistDeleteTransactionWithFullRefresh({
+  refresh,
+  repository,
+  transactionId,
+}: {
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  transactionId: string;
+}): Promise<void> {
+  await timeDevPerfAsync(
+    'rainproofData.deleteTransaction.repositoryDelete',
+    () => repository.deleteTransaction(transactionId),
+  );
+  await refresh();
+}
+
+async function persistOptimisticDeleteTransaction({
+  getSnapshot,
+  refresh,
+  repository,
+  rollback,
+  rollbackPatch,
+  setError,
+}: {
+  getSnapshot: () => AppSnapshot | null;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticDeleteTransactionRollback;
+  rollbackPatch: (rollback: OptimisticDeleteTransactionRollback) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    await timeDevPerfAsync(
+      'rainproofData.deleteTransaction.backgroundWrite',
+      () => repository.deleteTransaction(rollback.transaction.item.id),
+      {
+        links: rollback.links.length,
+        lines: rollback.lines.length,
+      },
+    );
+
+    const reconcileStartedAt = Date.now();
+    const currentSnapshot = getSnapshot();
+    if (currentSnapshot && isSnapshotAfterDeleteTransaction(currentSnapshot, rollback)) {
+      logDevPerfDuration('rainproofData.deleteTransaction.reconcile', reconcileStartedAt, { refresh: 'none' });
+      return;
+    }
+
+    await refresh();
+    logDevPerfDuration('rainproofData.deleteTransaction.reconcile', reconcileStartedAt, { refresh: 'full' });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not delete transaction.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(rollback);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration(
+        'rainproofData.deleteTransaction.rollback',
+        rollbackStartedAt,
+        {
+          ...getSnapshotPerfCounts(rolledBackSnapshot),
+          refresh: 'patched',
+        },
+      );
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.deleteTransaction.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
 }
 
 async function persistAddTransactionWithSaving({

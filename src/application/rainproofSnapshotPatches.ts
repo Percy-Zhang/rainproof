@@ -5,6 +5,7 @@ import type {
   AppSnapshot,
   NewTransactionInput,
   Transaction,
+  TransactionLink,
   TransactionLine,
 } from '../domain/types';
 
@@ -20,6 +21,17 @@ export type OptimisticAddTransactionRollback = {
   optimisticAddTransactionDefaults?: AddTransactionDefaults;
   previousAddTransactionDefaults?: AddTransactionDefaults;
   transactionId: string;
+};
+
+type IndexedSnapshotItem<T> = {
+  index: number;
+  item: T;
+};
+
+export type OptimisticDeleteTransactionRollback = {
+  links: IndexedSnapshotItem<TransactionLink>[];
+  lines: IndexedSnapshotItem<TransactionLine>[];
+  transaction: IndexedSnapshotItem<Transaction>;
 };
 
 export function canPatchSnapshotAfterAddTransaction(
@@ -109,6 +121,116 @@ export function rollbackSnapshotAfterOptimisticAddTransaction(
   };
 }
 
+export function getRollbackForDeleteTransaction(
+  snapshot: AppSnapshot,
+  transactionId: string,
+): OptimisticDeleteTransactionRollback | null {
+  const transactionIndex = snapshot.transactions.findIndex((transaction) => transaction.id === transactionId);
+  if (transactionIndex < 0) {
+    return null;
+  }
+
+  const lines = getIndexedMatches(snapshot.transactionLines, (line) => line.transactionId === transactionId);
+  const lineIds = new Set(lines.map(({ item }) => item.id));
+  const links = getIndexedMatches(snapshot.transactionLinks, (link) =>
+    link.sourceTransactionId === transactionId ||
+    link.targetTransactionId === transactionId ||
+    Boolean(link.sourceLineId && lineIds.has(link.sourceLineId)) ||
+    Boolean(link.targetLineId && lineIds.has(link.targetLineId))
+  );
+
+  return {
+    links,
+    lines,
+    transaction: {
+      index: transactionIndex,
+      item: snapshot.transactions[transactionIndex],
+    },
+  };
+}
+
+export function canPatchSnapshotAfterDeleteTransaction(
+  snapshot: AppSnapshot,
+  transactionId: string,
+): boolean {
+  return getRollbackForDeleteTransaction(snapshot, transactionId) !== null;
+}
+
+export function patchSnapshotAfterDeleteTransaction(
+  snapshot: AppSnapshot,
+  transactionId: string,
+): AppSnapshot | null {
+  const rollback = getRollbackForDeleteTransaction(snapshot, transactionId);
+  if (!rollback) {
+    return null;
+  }
+
+  return patchSnapshotAfterDeleteTransactionWithRollback(snapshot, rollback);
+}
+
+export function patchSnapshotAfterDeleteTransactionWithRollback(
+  snapshot: AppSnapshot,
+  rollback: OptimisticDeleteTransactionRollback,
+): AppSnapshot | null {
+  if (!snapshot.transactions.some((transaction) => transaction.id === rollback.transaction.item.id)) {
+    return null;
+  }
+
+  const lineIds = new Set(rollback.lines.map(({ item }) => item.id));
+  const linkIds = new Set(rollback.links.map(({ item }) => item.id));
+
+  return {
+    ...snapshot,
+    transactions: snapshot.transactions.filter((transaction) => transaction.id !== rollback.transaction.item.id),
+    transactionLines: snapshot.transactionLines.filter((line) => !lineIds.has(line.id)),
+    transactionLinks: snapshot.transactionLinks.filter((link) => !linkIds.has(link.id)),
+  };
+}
+
+export function rollbackSnapshotAfterOptimisticDeleteTransaction(
+  snapshot: AppSnapshot,
+  rollback: OptimisticDeleteTransactionRollback,
+): AppSnapshot | null {
+  if (snapshot.transactions.some((transaction) => transaction.id === rollback.transaction.item.id)) {
+    return null;
+  }
+
+  const existingLineIds = new Set(snapshot.transactionLines.map((line) => line.id));
+  if (rollback.lines.some(({ item }) => existingLineIds.has(item.id))) {
+    return null;
+  }
+
+  const existingLinkIds = new Set(snapshot.transactionLinks.map((link) => link.id));
+  if (rollback.links.some(({ item }) => existingLinkIds.has(item.id))) {
+    return null;
+  }
+
+  const lineIdsToRestore = new Set(rollback.lines.map(({ item }) => item.id));
+  if (!canRestoreDeletedLinks(snapshot, rollback, lineIdsToRestore)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactions: restoreIndexedItems(snapshot.transactions, [rollback.transaction]),
+    transactionLines: restoreIndexedItems(snapshot.transactionLines, rollback.lines),
+    transactionLinks: restoreIndexedItems(snapshot.transactionLinks, rollback.links),
+  };
+}
+
+export function isSnapshotAfterDeleteTransaction(
+  snapshot: AppSnapshot,
+  rollback: OptimisticDeleteTransactionRollback,
+): boolean {
+  const transactionId = rollback.transaction.item.id;
+  const lineIds = new Set(rollback.lines.map(({ item }) => item.id));
+  const linkIds = new Set(rollback.links.map(({ item }) => item.id));
+
+  return !snapshot.transactions.some((transaction) => transaction.id === transactionId) &&
+    !snapshot.transactionLines.some((line) => lineIds.has(line.id)) &&
+    !snapshot.transactionLinks.some((link) => linkIds.has(link.id));
+}
+
 function getRolledBackSettings(
   snapshot: AppSnapshot,
   rollback: OptimisticAddTransactionRollback,
@@ -136,6 +258,53 @@ function doesTransactionMatchInput(transaction: Transaction, input: NewTransacti
     transaction.notes === (input.notes?.trim() ?? '') &&
     transaction.groupId === (input.groupId?.trim() ?? '') &&
     JSON.stringify(transaction.labels) === JSON.stringify(input.labels ?? []);
+}
+
+function getIndexedMatches<T>(
+  items: T[],
+  predicate: (item: T) => boolean,
+): IndexedSnapshotItem<T>[] {
+  return items.reduce<IndexedSnapshotItem<T>[]>((result, item, index) => {
+    if (predicate(item)) {
+      result.push({ index, item });
+    }
+    return result;
+  }, []);
+}
+
+function restoreIndexedItems<T>(
+  currentItems: T[],
+  entries: IndexedSnapshotItem<T>[],
+): T[] {
+  return [...entries]
+    .sort((left, right) => left.index - right.index)
+    .reduce<T[]>((result, entry) => {
+      const next = [...result];
+      next.splice(Math.min(entry.index, next.length), 0, entry.item);
+      return next;
+    }, [...currentItems]);
+}
+
+function canRestoreDeletedLinks(
+  snapshot: AppSnapshot,
+  rollback: OptimisticDeleteTransactionRollback,
+  lineIdsToRestore: Set<string>,
+): boolean {
+  const transactionIds = new Set([
+    rollback.transaction.item.id,
+    ...snapshot.transactions.map((transaction) => transaction.id),
+  ]);
+  const lineIds = new Set([
+    ...lineIdsToRestore,
+    ...snapshot.transactionLines.map((line) => line.id),
+  ]);
+
+  return rollback.links.every(({ item }) =>
+    transactionIds.has(item.sourceTransactionId) &&
+    transactionIds.has(item.targetTransactionId) &&
+    (!item.sourceLineId || lineIds.has(item.sourceLineId)) &&
+    (!item.targetLineId || lineIds.has(item.targetLineId))
+  );
 }
 
 function doesLineMatchInput(
