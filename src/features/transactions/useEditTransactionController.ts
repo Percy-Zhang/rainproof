@@ -56,7 +56,7 @@ export type EditTransactionPage = 'form' | 'split';
 type UseEditTransactionControllerOptions = {
   snapshot: AppSnapshot;
   transactionId: string;
-  onUpdateTransaction: (input: UpdateTransactionInput) => Promise<void>;
+  onUpdateTransaction: (input: UpdateTransactionInput, options?: { optimistic?: boolean }) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
   onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
   onDeleteTransactionLink: (linkId: string) => Promise<void>;
@@ -387,14 +387,21 @@ export function useEditTransactionController({
     }
 
     try {
+      const saveStartedAt = Date.now();
       const input = buildTransactionUpdateInput(draft, snapshot.accounts);
       const linkSavePlan = getTransactionEditLinkSavePlan({
         input,
         transactionId,
         transactionLinks: snapshot.transactionLinks,
       });
+      const hasLinkSavePlanChanges = Boolean(
+        linkSavePlan.sourceLinkUpdate ||
+        linkSavePlan.sourceLinkDeleteId ||
+        linkSavePlan.targetLinkDeleteIds.length,
+      );
 
-      await onUpdateTransaction(input);
+      await onUpdateTransaction(input, { optimistic: !hasLinkSavePlanChanges });
+      logDevPerfDuration('editTransactionController.updateAccepted', saveStartedAt);
 
       if (linkSavePlan.sourceLinkUpdate) {
         await onUpdateTransactionLink(linkSavePlan.sourceLinkUpdate);
@@ -406,6 +413,7 @@ export function useEditTransactionController({
         await onDeleteTransactionLink(targetLinkId);
       }
 
+      logDevPerfDuration('editTransactionController.closeRequested', saveStartedAt);
       onDone();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'Could not save transaction.');

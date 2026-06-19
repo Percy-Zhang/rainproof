@@ -1,8 +1,11 @@
 import {
   getRollbackForDeleteTransaction,
+  getRollbackForEditTransaction,
   patchSnapshotAfterAddTransaction,
   patchSnapshotAfterDeleteTransaction,
+  patchSnapshotAfterEditTransaction,
   rollbackSnapshotAfterOptimisticDeleteTransaction,
+  rollbackSnapshotAfterOptimisticEditTransaction,
   rollbackSnapshotAfterOptimisticAddTransaction,
 } from '../rainproofSnapshotPatches';
 import type {
@@ -12,6 +15,7 @@ import type {
   Transaction,
   TransactionLink,
   TransactionLine,
+  UpdateTransactionInput,
 } from '../../domain/types';
 
 describe('patchSnapshotAfterAddTransaction', () => {
@@ -345,6 +349,222 @@ describe('patchSnapshotAfterDeleteTransaction', () => {
   });
 });
 
+describe('patchSnapshotAfterEditTransaction', () => {
+  it('patches normal expense and income edits without changing amount or currency unexpectedly', () => {
+    const cases = [
+      {
+        kind: 'expense' as const,
+        lines: [
+          { accountId: 'aud-checking', amountMinor: -3000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+        ],
+      },
+      {
+        kind: 'income' as const,
+        lines: [
+          { accountId: 'aud-checking', amountMinor: 90000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+        ],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const snapshot = createEditSnapshot(testCase.kind, [
+        { accountId: 'aud-checking', amountMinor: testCase.kind === 'expense' ? -2500 : 80000, currencyCode: 'AUD' },
+      ]);
+      const existingLine = snapshot.transactionLines.find((line) => line.transactionId === 'txn-edit')!;
+      const input = {
+        id: 'txn-edit',
+        kind: testCase.kind,
+        title: `Edited ${testCase.kind}`,
+        datetime: '2026-06-02T12:00:00.000Z',
+        lines: [{ id: existingLine.id, ...testCase.lines[0] }],
+      };
+      const patch = createEditPatch(input, snapshot, input.lines);
+      const patched = patchSnapshotAfterEditTransaction(snapshot, patch);
+
+      expect(patched?.transactions.find((transaction) => transaction.id === 'txn-edit')).toEqual(
+        expect.objectContaining({ title: `Edited ${testCase.kind}`, updatedAt: patch.transaction.updatedAt }),
+      );
+      expect(patched?.transactionLines.find((line) => line.id === existingLine.id)).toEqual(
+        expect.objectContaining({
+          amountMinor: testCase.lines[0].amountMinor,
+          currencyCode: 'AUD',
+        }),
+      );
+    }
+  });
+
+  it('patches same-currency transfer and cross-currency transfer edits exactly', () => {
+    const cases = [
+      [
+        { accountId: 'aud-checking', amountMinor: -6000, currencyCode: 'AUD', transferPeerAccountId: 'aud-savings' },
+        { accountId: 'aud-savings', amountMinor: 6000, currencyCode: 'AUD', transferPeerAccountId: 'aud-checking' },
+      ],
+      [
+        { accountId: 'aud-checking', amountMinor: -170000, currencyCode: 'AUD', transferPeerAccountId: 'usd-wallet' },
+        { accountId: 'usd-wallet', amountMinor: 110000, currencyCode: 'USD', transferPeerAccountId: 'aud-checking' },
+      ],
+    ];
+
+    for (const lines of cases) {
+      const snapshot = createEditSnapshot('transfer', [
+        { accountId: 'aud-checking', amountMinor: -5000, currencyCode: 'AUD', transferPeerAccountId: 'aud-savings' },
+        { accountId: 'aud-savings', amountMinor: 5000, currencyCode: 'AUD', transferPeerAccountId: 'aud-checking' },
+      ]);
+      const existingLines = snapshot.transactionLines.filter((line) => line.transactionId === 'txn-edit');
+      const input = {
+        id: 'txn-edit',
+        kind: 'transfer' as const,
+        title: 'Edited transfer',
+        datetime: '2026-06-02T12:00:00.000Z',
+        lines: lines.map((line, index) => ({ id: existingLines[index].id, ...line })),
+      };
+      const patched = patchSnapshotAfterEditTransaction(snapshot, createEditPatch(input, snapshot, input.lines));
+
+      expect(patched?.transactionLines.filter((line) => line.transactionId === 'txn-edit')).toEqual(
+        expect.arrayContaining(lines.map((line) => expect.objectContaining(line))),
+      );
+    }
+  });
+
+  it('patches split and mixed split edits while preserving kept line links', () => {
+    const snapshot = createLinkedEditSnapshot('expense', [
+      { accountId: 'aud-checking', amountMinor: -1000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+      { accountId: 'aud-checking', amountMinor: -500, currencyCode: 'AUD', categoryId: 'bills', subcategoryId: 'electricity' },
+    ]);
+    const editLines = snapshot.transactionLines.filter((line) => line.transactionId === 'txn-edit');
+    const input = {
+      id: 'txn-edit',
+      kind: 'expense' as const,
+      title: 'Edited split',
+      datetime: '2026-06-02T12:00:00.000Z',
+      lines: [
+        {
+          id: editLines[0].id,
+          accountId: 'aud-checking',
+          amountMinor: 230000,
+          currencyCode: 'AUD',
+          categoryId: 'income',
+          subcategoryId: 'salary',
+        },
+        {
+          id: editLines[1].id,
+          accountId: 'aud-checking',
+          amountMinor: -60000,
+          currencyCode: 'AUD',
+          categoryId: 'tax',
+          subcategoryId: 'income-tax',
+        },
+      ],
+    };
+
+    const patched = patchSnapshotAfterEditTransaction(snapshot, createEditPatch(input, snapshot, input.lines));
+
+    expect(patched?.transactionLines.filter((line) => line.transactionId === 'txn-edit')).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: editLines[0].id, amountMinor: 230000, categoryId: 'income' }),
+        expect.objectContaining({ id: editLines[1].id, amountMinor: -60000, categoryId: 'tax' }),
+      ]),
+    );
+    expect(patched?.transactionLinks.map((link) => link.id)).toEqual(['link-parent', 'link-line']);
+  });
+
+  it('removes links for split lines removed by an edit', () => {
+    const snapshot = createLinkedEditSnapshot('expense', [
+      { accountId: 'aud-checking', amountMinor: -1000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+      { accountId: 'aud-checking', amountMinor: -500, currencyCode: 'AUD', categoryId: 'bills', subcategoryId: 'electricity' },
+    ]);
+    const editLines = snapshot.transactionLines.filter((line) => line.transactionId === 'txn-edit');
+    const input = {
+      id: 'txn-edit',
+      kind: 'expense' as const,
+      title: 'One-line edit',
+      datetime: '2026-06-02T12:00:00.000Z',
+      lines: [
+        {
+          id: editLines[1].id,
+          accountId: 'aud-checking',
+          amountMinor: -1500,
+          currencyCode: 'AUD',
+          categoryId: 'bills',
+          subcategoryId: 'electricity',
+        },
+      ],
+    };
+    const patched = patchSnapshotAfterEditTransaction(snapshot, createEditPatch(input, snapshot, input.lines));
+
+    expect(patched?.transactionLines.filter((line) => line.transactionId === 'txn-edit').map((line) => line.id)).toEqual([
+      editLines[1].id,
+    ]);
+    expect(patched?.transactionLinks.map((link) => link.id)).toEqual(['link-parent']);
+  });
+
+  it('rolls back an optimistic edit exactly when still safe', () => {
+    const snapshot = createLinkedEditSnapshot('expense', [
+      { accountId: 'aud-checking', amountMinor: -1000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+      { accountId: 'aud-checking', amountMinor: -500, currencyCode: 'AUD', categoryId: 'bills', subcategoryId: 'electricity' },
+    ]);
+    const rollback = getRollbackForEditTransaction(snapshot, 'txn-edit');
+    const editLines = snapshot.transactionLines.filter((line) => line.transactionId === 'txn-edit');
+    const input = {
+      id: 'txn-edit',
+      kind: 'expense' as const,
+      title: 'Rolled back edit',
+      datetime: '2026-06-02T12:00:00.000Z',
+      lines: [
+        {
+          id: editLines[1].id,
+          accountId: 'aud-checking',
+          amountMinor: -1500,
+          currencyCode: 'AUD',
+          categoryId: 'bills',
+          subcategoryId: 'electricity',
+        },
+      ],
+    };
+    const patch = createEditPatch(input, snapshot, input.lines);
+    const patched = patchSnapshotAfterEditTransaction(snapshot, patch);
+    const rolledBack = rollbackSnapshotAfterOptimisticEditTransaction(patched!, rollback!, patch);
+
+    expect(rolledBack?.transactions).toEqual(snapshot.transactions);
+    expect(rolledBack?.transactionLines).toEqual(snapshot.transactionLines);
+    expect(rolledBack?.transactionLinks).toEqual(snapshot.transactionLinks);
+  });
+
+  it('falls back from edit rollback if the optimistic transaction changed again', () => {
+    const snapshot = createEditSnapshot('expense', [
+      { accountId: 'aud-checking', amountMinor: -1000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+    ]);
+    const rollback = getRollbackForEditTransaction(snapshot, 'txn-edit');
+    const editLine = snapshot.transactionLines.find((line) => line.transactionId === 'txn-edit')!;
+    const input = {
+      id: 'txn-edit',
+      kind: 'expense' as const,
+      title: 'Edited expense',
+      datetime: '2026-06-02T12:00:00.000Z',
+      lines: [
+        {
+          id: editLine.id,
+          accountId: 'aud-checking',
+          amountMinor: -1500,
+          currencyCode: 'AUD',
+          categoryId: 'food',
+          subcategoryId: 'groceries',
+        },
+      ],
+    };
+    const patch = createEditPatch(input, snapshot, input.lines);
+    const patched = patchSnapshotAfterEditTransaction(snapshot, patch);
+
+    expect(
+      rollbackSnapshotAfterOptimisticEditTransaction({
+        ...patched!,
+        transactions: patched!.transactions.map((transaction) =>
+          transaction.id === 'txn-edit' ? { ...transaction, title: 'Touched again' } : transaction),
+      }, rollback!, patch),
+    ).toBeNull();
+  });
+});
+
 function createSnapshot(): AppSnapshot {
   return {
     defaultCurrencyCode: 'AUD',
@@ -423,6 +643,92 @@ function createLinkedDeleteSnapshot(
       transactionLink('link-parent', sourceTransaction.id, 'txn-delete'),
       transactionLink('link-line', sourceTransaction.id, 'txn-delete', sourceLine.id, firstDeleteLine?.id ?? null),
     ],
+  };
+}
+
+function createEditSnapshot(
+  kind: Transaction['kind'],
+  lines: NewTransactionInput['lines'],
+): AppSnapshot {
+  return {
+    ...createSnapshot(),
+    transactions: [transaction('txn-edit', kind), transaction('txn-existing', 'expense', '2026-05-01T12:00:00.000Z')],
+    transactionLines: lines.map((line, index) => transactionLine(`line-edit-${index}`, line, 'txn-edit')),
+  };
+}
+
+function createLinkedEditSnapshot(
+  kind: Transaction['kind'],
+  lines: NewTransactionInput['lines'],
+): AppSnapshot {
+  const baseSnapshot = createEditSnapshot(kind, lines);
+  const sourceTransaction = transaction('txn-source', 'income');
+  const sourceLine = transactionLine('line-source', {
+    accountId: 'aud-checking',
+    amountMinor: 1000,
+    currencyCode: 'AUD',
+    categoryId: 'income',
+    subcategoryId: 'reimbursement',
+  }, sourceTransaction.id);
+  const firstEditLine = baseSnapshot.transactionLines.find((line) => line.transactionId === 'txn-edit');
+
+  return {
+    ...baseSnapshot,
+    transactions: [sourceTransaction, ...baseSnapshot.transactions],
+    transactionLines: [sourceLine, ...baseSnapshot.transactionLines],
+    transactionLinks: [
+      transactionLink('link-parent', sourceTransaction.id, 'txn-edit'),
+      transactionLink('link-line', sourceTransaction.id, 'txn-edit', sourceLine.id, firstEditLine?.id ?? null),
+    ],
+  };
+}
+
+function createEditPatch(
+  input: UpdateTransactionInput,
+  snapshot: AppSnapshot,
+  inputLines: UpdateTransactionInput['lines'],
+) {
+  const existingTransaction = snapshot.transactions.find((transaction) => transaction.id === input.id)!;
+  const existingLines = snapshot.transactionLines.filter((line) => line.transactionId === input.id);
+  const existingLineIds = new Set(existingLines.map((line) => line.id));
+  const usedExistingLineIds = new Set<string>();
+  const updatedLineIds: string[] = [];
+  const insertedLineIds: string[] = [];
+  const patchLines = inputLines.map((line, index) => {
+    const requestedLineId = line.id?.trim() ?? '';
+    const lineId = requestedLineId && existingLineIds.has(requestedLineId) && !usedExistingLineIds.has(requestedLineId)
+      ? requestedLineId
+      : existingLines[index]?.id;
+
+    if (lineId) {
+      usedExistingLineIds.add(lineId);
+      updatedLineIds.push(lineId);
+      return transactionLine(lineId, line, input.id);
+    }
+
+    const insertedLineId = `line-edit-new-${index}`;
+    insertedLineIds.push(insertedLineId);
+    return transactionLine(insertedLineId, line, input.id);
+  });
+
+  return {
+    input,
+    insertedLineIds,
+    lines: patchLines,
+    removedLineIds: existingLines
+      .filter((line) => !usedExistingLineIds.has(line.id))
+      .map((line) => line.id),
+    transaction: {
+      ...existingTransaction,
+      kind: input.kind,
+      title: input.title,
+      datetime: input.datetime,
+      notes: input.notes ?? '',
+      labels: input.labels ?? [],
+      groupId: input.groupId ?? '',
+      updatedAt: '2026-06-02T12:00:00.000Z',
+    },
+    updatedLineIds,
   };
 }
 

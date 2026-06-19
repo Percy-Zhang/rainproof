@@ -4,7 +4,13 @@ import type { NewTransactionInput, Transaction, TransactionKind, TransactionLine
 import { logDevPerfDuration, type PerfMetadata, timeDevPerf, timeDevPerfAsync } from '../performance';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
-import type { TableColumnRow, TransactionLineRow, TransactionRow } from './mappers';
+import {
+  mapTransaction,
+  mapTransactionLine,
+  type TableColumnRow,
+  type TransactionLineRow,
+  type TransactionRow,
+} from './mappers';
 import { removeTransactionLinksForTransactionStorage } from './transactionLinkStorage';
 
 type TransactionLineInput = NewTransactionInput['lines'][number];
@@ -22,6 +28,14 @@ export type AddTransactionStorageResult = {
   transaction: Transaction;
 };
 
+export type UpdateTransactionStorageResult = {
+  insertedLineIds: string[];
+  lines: TransactionLine[];
+  removedLineIds: string[];
+  transaction: Transaction;
+  updatedLineIds: string[];
+};
+
 type CreateAddTransactionRecordsOptions = {
   createdAt?: string;
   transactionId?: string;
@@ -29,6 +43,10 @@ type CreateAddTransactionRecordsOptions = {
 
 type InsertTransactionRecordsOptions = CreateAddTransactionRecordsOptions & {
   records?: AddTransactionStorageResult;
+};
+
+type UpdateTransactionRecordsOptions = {
+  updatedAt?: string;
 };
 
 export function createAddTransactionStorageRecords(
@@ -53,6 +71,64 @@ export function createAddTransactionStorageRecords(
   const lines = input.lines.map((line) => createTransactionLineRecord(transactionId, line, now));
 
   return { lines, transaction };
+}
+
+export function createUpdateTransactionStorageRecords(
+  input: UpdateTransactionInput,
+  existingTransaction: Transaction,
+  existingLines: TransactionLine[],
+  options: UpdateTransactionRecordsOptions = {},
+): UpdateTransactionStorageResult {
+  validateTransactionLinesForStorage(input.kind, input.lines);
+
+  if (input.id !== existingTransaction.id) {
+    throw new Error('Prepared transaction does not match the transaction id.');
+  }
+
+  const now = options.updatedAt ?? new Date().toISOString();
+  const transaction: Transaction = {
+    ...existingTransaction,
+    kind: input.kind,
+    title: input.title.trim() || fallbackTransactionTitle(input.kind),
+    datetime: input.datetime,
+    notes: input.notes?.trim() ?? '',
+    labels: [...(input.labels ?? [])],
+    groupId: input.groupId?.trim() ?? '',
+    updatedAt: now,
+  };
+  const plans = getTransactionLinePersistencePlans(input.lines, existingLines);
+  const updatedLineIds: string[] = [];
+  const insertedLineIds: string[] = [];
+  const lines = plans.map((plan) => {
+    if (plan.existingLineId) {
+      const existingLine = existingLines.find((line) => line.id === plan.existingLineId);
+      if (!existingLine) {
+        throw new Error('Prepared transaction line does not match existing lines.');
+      }
+      updatedLineIds.push(plan.existingLineId);
+      return createTransactionLineRecordFromInput(input.id, plan.line, {
+        createdAt: existingLine.createdAt,
+        lineId: plan.existingLineId,
+      });
+    }
+
+    const line = createTransactionLineRecord(input.id, plan.line, now);
+    insertedLineIds.push(line.id);
+    return line;
+  });
+  const keptLineIds = new Set(updatedLineIds);
+  const removedLineIds = existingLines
+    .filter((line) => !keptLineIds.has(line.id))
+    .map((line) => line.id);
+  const records = {
+    insertedLineIds,
+    lines,
+    removedLineIds,
+    transaction,
+    updatedLineIds,
+  };
+  validateUpdateTransactionStorageRecords(input, records);
+  return records;
 }
 
 export async function addTransactionStorage(
@@ -157,46 +233,73 @@ export async function insertTransactionRecordsStorage(
 export async function updateTransactionStorage(
   db: RepositoryDatabase,
   input: UpdateTransactionInput,
-): Promise<void> {
+  records?: UpdateTransactionStorageResult,
+): Promise<UpdateTransactionStorageResult> {
   validateTransactionLinesForStorage(input.kind, input.lines);
 
-  const now = new Date().toISOString();
+  let result: UpdateTransactionStorageResult | null = null;
   await db.withTransactionAsync(async () => {
-    await db.runAsync(
+    if (records) {
+      validateUpdateTransactionStorageRecords(input, records);
+      result = records;
+    } else {
+      const existingTransactionRow = await db.getFirstAsync<TransactionRow>(
+        'SELECT * FROM transactions WHERE id = ?',
+        input.id,
+      );
+      if (!existingTransactionRow) {
+        throw new Error('Transaction not found.');
+      }
+      const existingLineRows = await db.getAllAsync<TransactionLineRow>(
+        'SELECT * FROM transaction_lines WHERE transaction_id = ? ORDER BY created_at ASC, id ASC',
+        input.id,
+      );
+      result = createUpdateTransactionStorageRecords(
+        input,
+        mapTransaction(existingTransactionRow),
+        existingLineRows.map(mapTransactionLine),
+      );
+    }
+
+    const updateResult = await db.runAsync(
       `UPDATE transactions
        SET kind = ?, title = ?, datetime = ?, notes = ?, labels_json = ?, group_id = ?, updated_at = ?
        WHERE id = ?`,
-      input.kind,
-      input.title.trim() || fallbackTransactionTitle(input.kind),
-      input.datetime,
-      input.notes?.trim() ?? '',
-      JSON.stringify(input.labels ?? []),
-      input.groupId?.trim() ?? '',
-      now,
+      result.transaction.kind,
+      result.transaction.title,
+      result.transaction.datetime,
+      result.transaction.notes,
+      JSON.stringify(result.transaction.labels),
+      result.transaction.groupId,
+      result.transaction.updatedAt,
       input.id,
     );
-
-    const existingLines = await db.getAllAsync<TransactionLineRow>(
-      'SELECT * FROM transaction_lines WHERE transaction_id = ? ORDER BY created_at ASC, id ASC',
-      input.id,
-    );
-    const plans = getTransactionLinePersistencePlans(input.lines, existingLines);
-    const keptLineIds = new Set(plans.flatMap((plan) => (plan.existingLineId ? [plan.existingLineId] : [])));
-
-    for (const existingLine of existingLines) {
-      if (!keptLineIds.has(existingLine.id)) {
-        await db.runAsync('DELETE FROM transaction_lines WHERE id = ? AND transaction_id = ?', existingLine.id, input.id);
-      }
+    if (updateResult.changes === 0) {
+      throw new Error('Transaction not found.');
     }
 
-    for (const plan of plans) {
-      if (plan.existingLineId) {
-        await updateTransactionLineStorage(db, plan.existingLineId, input.id, plan.line);
+    for (const removedLineId of result.removedLineIds) {
+      await db.runAsync('DELETE FROM transaction_lines WHERE id = ? AND transaction_id = ?', removedLineId, input.id);
+    }
+
+    const insertedLineIds = new Set(result.insertedLineIds);
+    const updatedLineIds = new Set(result.updatedLineIds);
+    for (const line of result.lines) {
+      if (updatedLineIds.has(line.id)) {
+        await updateTransactionLineRecordStorage(db, line);
+      } else if (insertedLineIds.has(line.id)) {
+        await insertTransactionLineStorage(db, line);
       } else {
-        await insertTransactionLineStorage(db, createTransactionLineRecord(input.id, plan.line, now));
+        throw new Error('Prepared transaction line action is invalid.');
       }
     }
   });
+
+  if (!result) {
+    throw new Error('Transaction was not updated.');
+  }
+
+  return result;
 }
 
 export async function deleteTransactionStorage(
@@ -301,8 +404,16 @@ function createTransactionLineRecord(
   line: TransactionLineInput,
   createdAt: string,
 ): TransactionLine {
+  return createTransactionLineRecordFromInput(transactionId, line, { createdAt });
+}
+
+function createTransactionLineRecordFromInput(
+  transactionId: string,
+  line: TransactionLineInput,
+  options: { createdAt: string; lineId?: string },
+): TransactionLine {
   return {
-    id: createLocalId('line'),
+    id: options.lineId ?? createLocalId('line'),
     transactionId,
     accountId: line.accountId,
     amountMinor: line.amountMinor,
@@ -312,7 +423,7 @@ function createTransactionLineRecord(
     externalParty: line.externalParty?.trim() ?? '',
     transferPeerAccountId: line.transferPeerAccountId ?? '',
     note: line.note?.trim() ?? '',
-    createdAt,
+    createdAt: options.createdAt,
   };
 }
 
@@ -355,33 +466,80 @@ function validateAddTransactionStorageRecords(
   });
 }
 
-async function updateTransactionLineStorage(
+function validateUpdateTransactionStorageRecords(
+  input: UpdateTransactionInput,
+  records: UpdateTransactionStorageResult,
+): void {
+  if (records.transaction.id !== input.id || records.transaction.kind !== input.kind) {
+    throw new Error('Prepared transaction does not match the input.');
+  }
+  if (
+    records.transaction.title !== (input.title.trim() || fallbackTransactionTitle(input.kind)) ||
+    records.transaction.datetime !== input.datetime ||
+    records.transaction.notes !== (input.notes?.trim() ?? '') ||
+    records.transaction.groupId !== (input.groupId?.trim() ?? '') ||
+    JSON.stringify(records.transaction.labels) !== JSON.stringify(input.labels ?? [])
+  ) {
+    throw new Error('Prepared transaction does not match the input.');
+  }
+
+  if (records.lines.length !== input.lines.length) {
+    throw new Error('Prepared transaction line count does not match the input.');
+  }
+
+  const actionLineIds = new Set([...records.insertedLineIds, ...records.updatedLineIds]);
+  if (actionLineIds.size !== records.lines.length) {
+    throw new Error('Prepared transaction line actions are invalid.');
+  }
+
+  records.lines.forEach((line, index) => {
+    const inputLine = input.lines[index];
+    if (
+      !actionLineIds.has(line.id) ||
+      records.removedLineIds.includes(line.id) ||
+      line.transactionId !== input.id ||
+      line.accountId !== inputLine.accountId ||
+      line.amountMinor !== inputLine.amountMinor ||
+      line.currencyCode !== normalizeCurrencyCode(inputLine.currencyCode) ||
+      line.categoryId !== (inputLine.categoryId ?? '') ||
+      line.subcategoryId !== (inputLine.subcategoryId ?? '') ||
+      line.externalParty !== (inputLine.externalParty?.trim() ?? '') ||
+      line.transferPeerAccountId !== (inputLine.transferPeerAccountId ?? '') ||
+      line.note !== (inputLine.note?.trim() ?? '')
+    ) {
+      throw new Error('Prepared transaction line does not match the input.');
+    }
+  });
+}
+
+async function updateTransactionLineRecordStorage(
   db: RepositoryDatabase,
-  lineId: string,
-  transactionId: string,
-  line: TransactionLineInput,
+  line: TransactionLine,
 ): Promise<void> {
-  await db.runAsync(
+  const updateResult = await db.runAsync(
     `UPDATE transaction_lines
      SET account_id = ?, amount_minor = ?, currency_code = ?, category_id = ?,
          subcategory_id = ?, external_party = ?, transfer_peer_account_id = ?, note = ?
      WHERE id = ? AND transaction_id = ?`,
     line.accountId,
     line.amountMinor,
-    normalizeCurrencyCode(line.currencyCode),
-    line.categoryId ?? '',
-    line.subcategoryId ?? '',
-    line.externalParty?.trim() ?? '',
+    line.currencyCode,
+    line.categoryId,
+    line.subcategoryId,
+    line.externalParty,
     line.transferPeerAccountId ?? '',
-    line.note?.trim() ?? '',
-    lineId,
-    transactionId,
+    line.note,
+    line.id,
+    line.transactionId,
   );
+  if (updateResult.changes === 0) {
+    throw new Error('Transaction line not found.');
+  }
 }
 
 function getTransactionLinePersistencePlans(
   lines: TransactionLineInput[],
-  existingLines: TransactionLineRow[],
+  existingLines: Pick<TransactionLine, 'id'>[],
 ): TransactionLinePersistencePlan[] {
   const existingLineIds = new Set(existingLines.map((line) => line.id));
   const usedExistingLineIds = new Set<string>();

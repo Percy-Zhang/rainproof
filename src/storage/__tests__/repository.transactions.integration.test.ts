@@ -261,6 +261,55 @@ describe('SQLite finance repository transactions and links', () => {
     });
   });
 
+  it('persists prepared edit records used by optimistic transaction updates', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const splitExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Prepared split edit',
+        lines: [
+          { accountId: everyday.id, amountMinor: -2500, categoryId: 'food-dining', subcategoryId: 'groceries' },
+          { accountId: everyday.id, amountMinor: -1500, categoryId: 'housing', subcategoryId: 'rent' },
+        ],
+      });
+
+      const snapshot = await repository.getSnapshot();
+      const existingTransaction = snapshot.transactions.find((transaction) => transaction.id === splitExpense.id)!;
+      const existingLines = getLinesForTransaction(snapshot, splitExpense.id);
+      const input = {
+        id: splitExpense.id,
+        kind: 'expense' as const,
+        title: 'Prepared split edit updated',
+        datetime: '2026-05-19T12:00:00.000Z',
+        lines: [
+          {
+            id: existingLines[1].id,
+            accountId: everyday.id,
+            amountMinor: -4000,
+            currencyCode: 'AUD',
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+          },
+        ],
+      };
+      const preparedRecords = repository.prepareUpdateTransaction(input, existingTransaction, existingLines);
+
+      const persistedRecords = await repository.updateTransaction(input, preparedRecords);
+      const nextSnapshot = await repository.getSnapshot();
+
+      expect(persistedRecords).toEqual(preparedRecords);
+      expect(getLinesForTransaction(nextSnapshot, splitExpense.id)).toEqual([
+        expect.objectContaining({ id: existingLines[1].id, amountMinor: -4000, categoryId: 'housing' }),
+      ]);
+      expect(nextSnapshot.transactions.find((transaction) => transaction.id === splitExpense.id)).toEqual(
+        expect.objectContaining({
+          title: 'Prepared split edit updated',
+          updatedAt: preparedRecords.transaction.updatedAt,
+        }),
+      );
+    });
+  });
+
   it('persists a split expense as one parent transaction with multiple lines', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday', openingBalanceMinor: 10000 });

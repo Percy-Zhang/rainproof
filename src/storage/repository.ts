@@ -11,7 +11,9 @@ import type {
   TransactionTemplate,
   NewTransactionInput,
   NewTransactionLinkInput,
+  Transaction,
   TransactionLink,
+  TransactionLine,
   UpdateAccountInput,
   UpdateAddTransactionDefaultsInput,
   UpdateAppSettingsInput,
@@ -81,7 +83,9 @@ import {
 import {
   addTransactionStorage,
   createAddTransactionStorageRecords,
+  createUpdateTransactionStorageRecords,
   type AddTransactionStorageResult,
+  type UpdateTransactionStorageResult,
   deleteTransactionStorage,
   updateTransactionStorage,
 } from './transactionStorage';
@@ -105,7 +109,12 @@ export type FinanceRepository = {
   updateAccount(input: UpdateAccountInput): Promise<void>;
   prepareAddTransaction(input: NewTransactionInput): AddTransactionStorageResult;
   addTransaction(input: NewTransactionInput, records?: AddTransactionStorageResult): Promise<AddTransactionStorageResult>;
-  updateTransaction(input: UpdateTransactionInput): Promise<void>;
+  prepareUpdateTransaction(
+    input: UpdateTransactionInput,
+    existingTransaction: Transaction,
+    existingLines: TransactionLine[],
+  ): UpdateTransactionStorageResult;
+  updateTransaction(input: UpdateTransactionInput, records?: UpdateTransactionStorageResult): Promise<UpdateTransactionStorageResult>;
   deleteTransaction(transactionId: string): Promise<void>;
   addTransactionLink(input: NewTransactionLinkInput): Promise<void>;
   updateTransactionLink(input: UpdateTransactionLinkInput): Promise<void>;
@@ -204,8 +213,19 @@ class SQLiteFinanceRepository implements FinanceRepository {
     return addTransactionStorage(this.db, input, records);
   }
 
-  async updateTransaction(input: UpdateTransactionInput): Promise<void> {
-    return updateTransactionStorage(this.db, input);
+  prepareUpdateTransaction(
+    input: UpdateTransactionInput,
+    existingTransaction: Transaction,
+    existingLines: TransactionLine[],
+  ): UpdateTransactionStorageResult {
+    return createUpdateTransactionStorageRecords(input, existingTransaction, existingLines);
+  }
+
+  async updateTransaction(
+    input: UpdateTransactionInput,
+    records?: UpdateTransactionStorageResult,
+  ): Promise<UpdateTransactionStorageResult> {
+    return updateTransactionStorage(this.db, input, records);
   }
 
   async deleteTransaction(transactionId: string): Promise<void> {
