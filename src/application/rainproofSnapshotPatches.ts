@@ -24,7 +24,7 @@ export type OptimisticAddTransactionRollback = {
   transactionId: string;
 };
 
-type IndexedSnapshotItem<T> = {
+export type IndexedSnapshotItem<T> = {
   index: number;
   item: T;
 };
@@ -47,6 +47,19 @@ export type EditTransactionSnapshotPatch = {
 };
 
 export type OptimisticEditTransactionRollback = OptimisticTransactionRollback;
+
+export type OptimisticTransactionLinkRollback = IndexedSnapshotItem<TransactionLink>;
+
+export type TransactionLinkBatchSnapshotPatch = {
+  addedLinks: TransactionLink[];
+  deletedLinkIds: string[];
+  updatedLinks: TransactionLink[];
+};
+
+export type OptimisticTransactionLinkBatchRollback = {
+  addedLinkIds: string[];
+  links: IndexedSnapshotItem<TransactionLink>[];
+};
 
 export function canPatchSnapshotAfterAddTransaction(
   snapshot: AppSnapshot,
@@ -381,6 +394,312 @@ export function isSnapshotAfterDeleteTransaction(
     !snapshot.transactionLinks.some((link) => linkIds.has(link.id));
 }
 
+export function canPatchSnapshotAfterAddTransactionLink(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+): boolean {
+  return !snapshot.transactionLinks.some((item) => item.id === link.id) &&
+    canRepresentTransactionLink(snapshot, link);
+}
+
+export function patchSnapshotAfterAddTransactionLink(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+): AppSnapshot | null {
+  if (!canPatchSnapshotAfterAddTransactionLink(snapshot, link)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: sortTransactionLinksByCreatedAt([...snapshot.transactionLinks, link]),
+  };
+}
+
+export function rollbackSnapshotAfterOptimisticAddTransactionLink(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+): AppSnapshot | null {
+  const currentLink = snapshot.transactionLinks.find((item) => item.id === link.id);
+  if (!currentLink || !areTransactionLinksEqual(currentLink, link)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: snapshot.transactionLinks.filter((item) => item.id !== link.id),
+  };
+}
+
+export function getRollbackForUpdateTransactionLink(
+  snapshot: AppSnapshot,
+  linkId: string,
+): OptimisticTransactionLinkRollback | null {
+  const index = snapshot.transactionLinks.findIndex((link) => link.id === linkId);
+  if (index < 0) {
+    return null;
+  }
+
+  return {
+    index,
+    item: snapshot.transactionLinks[index],
+  };
+}
+
+export function canPatchSnapshotAfterUpdateTransactionLink(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+  rollback: OptimisticTransactionLinkRollback,
+): boolean {
+  const currentLink = snapshot.transactionLinks.find((item) => item.id === rollback.item.id);
+  return link.id === rollback.item.id &&
+    Boolean(currentLink) &&
+    areTransactionLinksEqual(currentLink as TransactionLink, rollback.item) &&
+    canRepresentTransactionLink(snapshot, link);
+}
+
+export function patchSnapshotAfterUpdateTransactionLinkWithRollback(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+  rollback: OptimisticTransactionLinkRollback,
+): AppSnapshot | null {
+  if (!canPatchSnapshotAfterUpdateTransactionLink(snapshot, link, rollback)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: snapshot.transactionLinks.map((item) => (item.id === link.id ? link : item)),
+  };
+}
+
+export function rollbackSnapshotAfterOptimisticUpdateTransactionLink(
+  snapshot: AppSnapshot,
+  rollback: OptimisticTransactionLinkRollback,
+  optimisticLink: TransactionLink,
+): AppSnapshot | null {
+  const currentLink = snapshot.transactionLinks.find((link) => link.id === optimisticLink.id);
+  if (!currentLink || !areTransactionLinksEqual(currentLink, optimisticLink)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: restoreIndexedItems(
+      snapshot.transactionLinks.filter((link) => link.id !== rollback.item.id),
+      [rollback],
+    ),
+  };
+}
+
+export function getRollbackForDeleteTransactionLink(
+  snapshot: AppSnapshot,
+  linkId: string,
+): OptimisticTransactionLinkRollback | null {
+  const index = snapshot.transactionLinks.findIndex((link) => link.id === linkId);
+  if (index < 0) {
+    return null;
+  }
+
+  return {
+    index,
+    item: snapshot.transactionLinks[index],
+  };
+}
+
+export function patchSnapshotAfterDeleteTransactionLinkWithRollback(
+  snapshot: AppSnapshot,
+  rollback: OptimisticTransactionLinkRollback,
+): AppSnapshot | null {
+  const currentLink = snapshot.transactionLinks.find((link) => link.id === rollback.item.id);
+  if (!currentLink || !areTransactionLinksEqual(currentLink, rollback.item)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: snapshot.transactionLinks.filter((link) => link.id !== rollback.item.id),
+  };
+}
+
+export function rollbackSnapshotAfterOptimisticDeleteTransactionLink(
+  snapshot: AppSnapshot,
+  rollback: OptimisticTransactionLinkRollback,
+): AppSnapshot | null {
+  if (snapshot.transactionLinks.some((link) => link.id === rollback.item.id)) {
+    return null;
+  }
+
+  if (!canRepresentTransactionLink(snapshot, rollback.item)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: restoreIndexedItems(snapshot.transactionLinks, [rollback]),
+  };
+}
+
+export function isSnapshotAfterAddTransactionLink(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+): boolean {
+  const currentLink = snapshot.transactionLinks.find((item) => item.id === link.id);
+  return Boolean(currentLink) && areTransactionLinksEqual(currentLink as TransactionLink, link);
+}
+
+export function isSnapshotAfterUpdateTransactionLink(
+  snapshot: AppSnapshot,
+  link: TransactionLink,
+): boolean {
+  return isSnapshotAfterAddTransactionLink(snapshot, link);
+}
+
+export function isSnapshotAfterDeleteTransactionLink(
+  snapshot: AppSnapshot,
+  rollback: OptimisticTransactionLinkRollback,
+): boolean {
+  return !snapshot.transactionLinks.some((link) => link.id === rollback.item.id);
+}
+
+export function getRollbackForTransactionLinkBatch(
+  snapshot: AppSnapshot,
+  patch: TransactionLinkBatchSnapshotPatch,
+): OptimisticTransactionLinkBatchRollback | null {
+  const affectedExistingIds = uniqueIds([
+    ...patch.deletedLinkIds,
+    ...patch.updatedLinks.map((link) => link.id),
+  ]);
+  const addedLinkIds = uniqueIds(patch.addedLinks.map((link) => link.id));
+
+  if (addedLinkIds.some((linkId) => snapshot.transactionLinks.some((link) => link.id === linkId))) {
+    return null;
+  }
+
+  const links = affectedExistingIds.map((linkId) => {
+    const index = snapshot.transactionLinks.findIndex((link) => link.id === linkId);
+    return index >= 0
+      ? { index, item: snapshot.transactionLinks[index] }
+      : null;
+  });
+
+  if (links.some((link) => !link)) {
+    return null;
+  }
+
+  return {
+    addedLinkIds,
+    links: links.filter((link): link is IndexedSnapshotItem<TransactionLink> => Boolean(link)),
+  };
+}
+
+export function canPatchSnapshotAfterTransactionLinkBatch(
+  snapshot: AppSnapshot,
+  patch: TransactionLinkBatchSnapshotPatch,
+  rollback: OptimisticTransactionLinkBatchRollback,
+): boolean {
+  const addedLinkIds = new Set(patch.addedLinks.map((link) => link.id));
+  const updatedLinkIds = new Set(patch.updatedLinks.map((link) => link.id));
+  const deletedLinkIds = new Set(patch.deletedLinkIds);
+
+  if (addedLinkIds.size !== patch.addedLinks.length || updatedLinkIds.size !== patch.updatedLinks.length) {
+    return false;
+  }
+
+  if ([...addedLinkIds].some((linkId) => updatedLinkIds.has(linkId) || deletedLinkIds.has(linkId))) {
+    return false;
+  }
+
+  if ([...updatedLinkIds].some((linkId) => deletedLinkIds.has(linkId))) {
+    return false;
+  }
+
+  if (![...updatedLinkIds].every((linkId) => rollback.links.some(({ item }) => item.id === linkId))) {
+    return false;
+  }
+
+  if (![...deletedLinkIds].every((linkId) => rollback.links.some(({ item }) => item.id === linkId))) {
+    return false;
+  }
+
+  if (!rollback.links.every(({ item }) => {
+    const currentLink = snapshot.transactionLinks.find((link) => link.id === item.id);
+    return Boolean(currentLink) && areTransactionLinksEqual(currentLink as TransactionLink, item);
+  })) {
+    return false;
+  }
+
+  return [...patch.addedLinks, ...patch.updatedLinks].every((link) =>
+    canRepresentTransactionLink(snapshot, link));
+}
+
+export function patchSnapshotAfterTransactionLinkBatchWithRollback(
+  snapshot: AppSnapshot,
+  patch: TransactionLinkBatchSnapshotPatch,
+  rollback: OptimisticTransactionLinkBatchRollback,
+): AppSnapshot | null {
+  if (!canPatchSnapshotAfterTransactionLinkBatch(snapshot, patch, rollback)) {
+    return null;
+  }
+
+  return {
+    ...snapshot,
+    transactionLinks: getTransactionLinksAfterBatch(snapshot.transactionLinks, patch),
+  };
+}
+
+export function rollbackSnapshotAfterOptimisticTransactionLinkBatch(
+  snapshot: AppSnapshot,
+  rollback: OptimisticTransactionLinkBatchRollback,
+  patch: TransactionLinkBatchSnapshotPatch,
+): AppSnapshot | null {
+  if (!isSnapshotAfterTransactionLinkBatch(snapshot, patch, rollback)) {
+    return null;
+  }
+
+  if (!rollback.links.every(({ item }) => canRepresentTransactionLink(snapshot, item))) {
+    return null;
+  }
+
+  const affectedLinkIds = new Set([
+    ...rollback.addedLinkIds,
+    ...rollback.links.map(({ item }) => item.id),
+  ]);
+
+  return {
+    ...snapshot,
+    transactionLinks: restoreIndexedItems(
+      snapshot.transactionLinks.filter((link) => !affectedLinkIds.has(link.id)),
+      rollback.links,
+    ),
+  };
+}
+
+export function isSnapshotAfterTransactionLinkBatch(
+  snapshot: AppSnapshot,
+  patch: TransactionLinkBatchSnapshotPatch,
+  rollback: OptimisticTransactionLinkBatchRollback,
+): boolean {
+  const deletedLinkIds = new Set(patch.deletedLinkIds);
+  const addedOrUpdatedLinks = [...patch.addedLinks, ...patch.updatedLinks];
+  const addedOrUpdatedLinkIds = new Set(addedOrUpdatedLinks.map((link) => link.id));
+
+  if (snapshot.transactionLinks.some((link) =>
+    deletedLinkIds.has(link.id) && !addedOrUpdatedLinkIds.has(link.id))) {
+    return false;
+  }
+
+  if (!addedOrUpdatedLinks.every((expectedLink) => {
+    const currentLink = snapshot.transactionLinks.find((link) => link.id === expectedLink.id);
+    return Boolean(currentLink) && areTransactionLinksEqual(currentLink as TransactionLink, expectedLink);
+  })) {
+    return false;
+  }
+
+  return rollback.addedLinkIds.every((linkId) =>
+    snapshot.transactionLinks.some((link) => link.id === linkId));
+}
+
 function getRolledBackSettings(
   snapshot: AppSnapshot,
   rollback: OptimisticAddTransactionRollback,
@@ -455,6 +774,57 @@ function canRestoreDeletedLinks(
     (!item.sourceLineId || lineIds.has(item.sourceLineId)) &&
     (!item.targetLineId || lineIds.has(item.targetLineId))
   );
+}
+
+function canRepresentTransactionLink(snapshot: AppSnapshot, link: TransactionLink): boolean {
+  const sourceTransaction = snapshot.transactions.find((transaction) => transaction.id === link.sourceTransactionId);
+  const targetTransaction = snapshot.transactions.find((transaction) => transaction.id === link.targetTransactionId);
+  if (!sourceTransaction || !targetTransaction) {
+    return false;
+  }
+
+  if (link.sourceLineId) {
+    const sourceLine = snapshot.transactionLines.find((line) => line.id === link.sourceLineId);
+    if (!sourceLine || sourceLine.transactionId !== link.sourceTransactionId) {
+      return false;
+    }
+  }
+
+  if (link.targetLineId) {
+    const targetLine = snapshot.transactionLines.find((line) => line.id === link.targetLineId);
+    if (!targetLine || targetLine.transactionId !== link.targetTransactionId) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getTransactionLinksAfterBatch(
+  links: TransactionLink[],
+  patch: TransactionLinkBatchSnapshotPatch,
+): TransactionLink[] {
+  const affectedLinkIds = new Set([
+    ...patch.deletedLinkIds,
+    ...patch.updatedLinks.map((link) => link.id),
+  ]);
+
+  return sortTransactionLinksByCreatedAt([
+    ...links.filter((link) => !affectedLinkIds.has(link.id)),
+    ...patch.updatedLinks,
+    ...patch.addedLinks,
+  ]);
+}
+
+function uniqueIds(ids: string[]): string[] {
+  return [...new Set(ids)];
+}
+
+function areTransactionLinksEqual(
+  left: TransactionLink,
+  right: TransactionLink,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function doesLineMatchInput(
@@ -561,6 +931,13 @@ function doesLinkReferenceAnyLine(link: TransactionLink, lineIds: Set<string>): 
 
 function sortTransactionLinesByCreatedAt(lines: TransactionLine[]): TransactionLine[] {
   return [...lines].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+}
+
+function sortTransactionLinksByCreatedAt(links: TransactionLink[]): TransactionLink[] {
+  return [...links].sort((left, right) => {
+    const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
+    return createdAtComparison || left.id.localeCompare(right.id);
+  });
 }
 
 function fallbackTransactionTitle(kind: NewTransactionInput['kind']): string {

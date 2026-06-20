@@ -373,6 +373,12 @@ export type UpdateTransactionLinkInput = NewTransactionLinkInput & {
   id: string;
 };
 
+export type TransactionLinkBatchInput = {
+  toAdd: NewTransactionLinkInput[];
+  toUpdate: UpdateTransactionLinkInput[];
+  deleteIds: string[];
+};
+
 export type NewBudgetInput = {
   name?: string;
   amountMinor: number;

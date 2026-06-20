@@ -28,6 +28,7 @@ import type {
   NewTransactionInput,
   RainyDayProgress,
   SpendingByCategory,
+  TransactionLinkBatchInput,
   UpcomingBill,
   UpdateAppSettingsInput,
   UpdateCategoryCatalogInput,
@@ -47,19 +48,35 @@ import { createSQLiteFinanceRepository, type FinanceRepository } from '../storag
 import { getDeviceDefaultCurrencyCode } from './deviceCurrency';
 import {
   canPatchSnapshotAfterAddTransaction,
+  canPatchSnapshotAfterAddTransactionLink,
   canPatchSnapshotAfterDeleteTransaction,
   canPatchSnapshotAfterEditTransaction,
+  canPatchSnapshotAfterTransactionLinkBatch,
+  canPatchSnapshotAfterUpdateTransactionLink,
   getRollbackForDeleteTransaction,
+  getRollbackForDeleteTransactionLink,
   getRollbackForEditTransaction,
+  getRollbackForTransactionLinkBatch,
+  getRollbackForUpdateTransactionLink,
   isSnapshotAfterDeleteTransaction,
+  patchSnapshotAfterAddTransactionLink,
   patchSnapshotAfterDeleteTransactionWithRollback,
   patchSnapshotAfterEditTransactionWithRollback,
+  patchSnapshotAfterDeleteTransactionLinkWithRollback,
+  patchSnapshotAfterTransactionLinkBatchWithRollback,
+  patchSnapshotAfterUpdateTransactionLinkWithRollback,
   patchSnapshotAfterAddTransaction,
+  rollbackSnapshotAfterOptimisticAddTransactionLink,
   rollbackSnapshotAfterOptimisticDeleteTransaction,
+  rollbackSnapshotAfterOptimisticDeleteTransactionLink,
   rollbackSnapshotAfterOptimisticEditTransaction,
+  rollbackSnapshotAfterOptimisticTransactionLinkBatch,
+  rollbackSnapshotAfterOptimisticUpdateTransactionLink,
   rollbackSnapshotAfterOptimisticAddTransaction,
   type OptimisticDeleteTransactionRollback,
   type OptimisticEditTransactionRollback,
+  type OptimisticTransactionLinkBatchRollback,
+  type OptimisticTransactionLinkRollback,
 } from './rainproofSnapshotPatches';
 
 type RainproofDerivedData = {
@@ -78,9 +95,10 @@ type RainproofActions = {
   addTransaction(input: NewTransactionInput, addTransactionDefaults?: AddTransactionDefaults): Promise<void>;
   updateTransaction(input: UpdateTransactionInput, options?: { optimistic?: boolean }): Promise<void>;
   deleteTransaction(transactionId: string): Promise<void>;
-  addTransactionLink(input: NewTransactionLinkInput): Promise<void>;
-  updateTransactionLink(input: UpdateTransactionLinkInput): Promise<void>;
-  deleteTransactionLink(linkId: string): Promise<void>;
+  addTransactionLink(input: NewTransactionLinkInput, options?: TransactionLinkMutationOptions): Promise<void>;
+  updateTransactionLink(input: UpdateTransactionLinkInput, options?: TransactionLinkMutationOptions): Promise<void>;
+  deleteTransactionLink(linkId: string, options?: TransactionLinkMutationOptions): Promise<void>;
+  saveTransactionLinkBatch(input: TransactionLinkBatchInput): Promise<void>;
   addBudget(input: NewBudgetInput): Promise<void>;
   updateBudget(input: UpdateBudgetInput): Promise<void>;
   updateBudgetOrder(budgetIds: string[]): Promise<void>;
@@ -122,10 +140,23 @@ type MutationResult = {
 
 type AddTransactionPersistenceRecords = ReturnType<FinanceRepository['prepareAddTransaction']>;
 type UpdateTransactionPersistenceRecords = ReturnType<FinanceRepository['prepareUpdateTransaction']>;
+type AddTransactionLinkPersistenceRecord = ReturnType<FinanceRepository['prepareAddTransactionLink']>;
+type UpdateTransactionLinkPersistenceRecord = ReturnType<FinanceRepository['prepareUpdateTransactionLink']>;
+type TransactionLinkBatchPersistenceRecords = ReturnType<FinanceRepository['prepareTransactionLinkBatch']>;
 type BackgroundWriteQueueRef = {
   current: Promise<void>;
 };
-type OptimisticTransactionActionLabel = 'addTransaction' | 'updateTransaction' | 'deleteTransaction';
+type TransactionLinkMutationOptions = {
+  optimistic?: boolean;
+};
+type OptimisticTransactionActionLabel =
+  | 'addTransaction'
+  | 'updateTransaction'
+  | 'deleteTransaction'
+  | 'addTransactionLink'
+  | 'updateTransactionLink'
+  | 'deleteTransactionLink'
+  | 'saveTransactionLinkBatch';
 
 export type RainproofDataState = {
   snapshot: AppSnapshot | null;
@@ -485,6 +516,286 @@ export function useRainproofData(): RainproofDataState {
     [applySnapshotPatch, refresh],
   );
 
+  const addTransactionLinkOptimistically = useCallback(
+    (input: NewTransactionLinkInput, options: TransactionLinkMutationOptions = {}): Promise<void> => {
+      const repository = repositoryRef.current;
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      const metadata = getTransactionLinkInputPerfMetadata(input);
+      const startedAt = Date.now();
+
+      try {
+        if (options.optimistic === false) {
+          return withFullRefreshActionTiming('addTransactionLink', startedAt, persistAddTransactionLinkWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        const previousSnapshot = snapshotRef.current;
+        if (!previousSnapshot) {
+          return withFullRefreshActionTiming('addTransactionLink', startedAt, persistAddTransactionLinkWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        const optimisticLink = timeDevPerf(
+          'rainproofData.addTransactionLink.optimisticBuild',
+          () => repository.prepareAddTransactionLink(input, previousSnapshot),
+          metadata,
+        );
+        if (!canPatchSnapshotAfterAddTransactionLink(previousSnapshot, optimisticLink)) {
+          return withFullRefreshActionTiming('addTransactionLink', startedAt, persistAddTransactionLinkWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        scheduleOptimisticMutationTask(() => {
+          applyAcceptedOptimisticAddTransactionLink({
+            applySnapshotPatch,
+            input,
+            optimisticLink,
+            refresh,
+            repository,
+            setError,
+            transactionWriteQueueRef,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.addTransactionLink.accepted', startedAt, {
+          ...metadata,
+          refresh: 'optimistic',
+        });
+        logDevPerfDuration('rainproofData.addTransactionLink.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.addTransactionLink.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not link transaction.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
+  const updateTransactionLinkOptimistically = useCallback(
+    (input: UpdateTransactionLinkInput, options: TransactionLinkMutationOptions = {}): Promise<void> => {
+      const repository = repositoryRef.current;
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      const metadata = getTransactionLinkInputPerfMetadata(input);
+      const startedAt = Date.now();
+
+      try {
+        if (options.optimistic === false) {
+          return withFullRefreshActionTiming('updateTransactionLink', startedAt, persistUpdateTransactionLinkWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        const previousSnapshot = snapshotRef.current;
+        const existingLink = previousSnapshot?.transactionLinks.find((link) => link.id === input.id);
+        const rollback = previousSnapshot ? getRollbackForUpdateTransactionLink(previousSnapshot, input.id) : null;
+        if (!previousSnapshot || !existingLink || !rollback) {
+          return withFullRefreshActionTiming('updateTransactionLink', startedAt, persistUpdateTransactionLinkWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        const optimisticLink = timeDevPerf(
+          'rainproofData.updateTransactionLink.optimisticBuild',
+          () => repository.prepareUpdateTransactionLink(input, existingLink, previousSnapshot),
+          metadata,
+        );
+        if (!canPatchSnapshotAfterUpdateTransactionLink(previousSnapshot, optimisticLink, rollback)) {
+          return withFullRefreshActionTiming('updateTransactionLink', startedAt, persistUpdateTransactionLinkWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        scheduleOptimisticMutationTask(() => {
+          applyAcceptedOptimisticUpdateTransactionLink({
+            applySnapshotPatch,
+            input,
+            optimisticLink,
+            refresh,
+            repository,
+            rollback,
+            setError,
+            transactionWriteQueueRef,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.updateTransactionLink.accepted', startedAt, {
+          ...metadata,
+          refresh: 'optimistic',
+        });
+        logDevPerfDuration('rainproofData.updateTransactionLink.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.updateTransactionLink.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not update transaction link.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
+  const deleteTransactionLinkOptimistically = useCallback(
+    (linkId: string, options: TransactionLinkMutationOptions = {}): Promise<void> => {
+      const repository = repositoryRef.current;
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      const startedAt = Date.now();
+
+      try {
+        if (options.optimistic === false) {
+          return withFullRefreshActionTiming('deleteTransactionLink', startedAt, persistDeleteTransactionLinkWithSaving({
+            linkId,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        const previousSnapshot = snapshotRef.current;
+        const rollback = previousSnapshot ? getRollbackForDeleteTransactionLink(previousSnapshot, linkId) : null;
+        if (!previousSnapshot || !rollback) {
+          return withFullRefreshActionTiming('deleteTransactionLink', startedAt, persistDeleteTransactionLinkWithSaving({
+            linkId,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        scheduleOptimisticMutationTask(() => {
+          applyAcceptedOptimisticDeleteTransactionLink({
+            applySnapshotPatch,
+            refresh,
+            repository,
+            rollback,
+            setError,
+            transactionWriteQueueRef,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.deleteTransactionLink.accepted', startedAt, {
+          lineLevel: Boolean(rollback.item.sourceLineId || rollback.item.targetLineId),
+          refresh: 'optimistic',
+        });
+        logDevPerfDuration('rainproofData.deleteTransactionLink.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.deleteTransactionLink.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not unlink transaction.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
+  const saveTransactionLinkBatchOptimistically = useCallback(
+    (input: TransactionLinkBatchInput): Promise<void> => {
+      const repository = repositoryRef.current;
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      const metadata = getTransactionLinkBatchPerfMetadata(input);
+      const startedAt = Date.now();
+
+      try {
+        const previousSnapshot = snapshotRef.current;
+        if (!previousSnapshot) {
+          logDevPerfDuration('rainproofData.saveTransactionLinkBatch.fallback', startedAt, {
+            ...metadata,
+            reason: 'missing-snapshot',
+          });
+          return withFullRefreshActionTiming('saveTransactionLinkBatch', startedAt, persistTransactionLinkBatchWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        const optimisticRecords = timeDevPerf(
+          'rainproofData.saveTransactionLinkBatch.optimisticBuild',
+          () => repository.prepareTransactionLinkBatch(input, previousSnapshot),
+          metadata,
+        );
+        const rollback = getRollbackForTransactionLinkBatch(previousSnapshot, optimisticRecords);
+        const canPatchOptimistically = rollback &&
+          canPatchSnapshotAfterTransactionLinkBatch(previousSnapshot, optimisticRecords, rollback);
+
+        if (!rollback || !canPatchOptimistically) {
+          logDevPerfDuration('rainproofData.saveTransactionLinkBatch.fallback', startedAt, {
+            ...metadata,
+            reason: rollback ? 'unsafe-patch' : 'missing-rollback',
+          });
+          return withFullRefreshActionTiming('saveTransactionLinkBatch', startedAt, persistTransactionLinkBatchWithSaving({
+            input,
+            refresh,
+            repository,
+            setSaving,
+          }));
+        }
+
+        scheduleOptimisticMutationTask(() => {
+          applyAcceptedOptimisticTransactionLinkBatch({
+            applySnapshotPatch,
+            input,
+            optimisticRecords,
+            refresh,
+            repository,
+            rollback,
+            setError,
+            transactionWriteQueueRef,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.saveTransactionLinkBatch.accepted', startedAt, {
+          ...metadata,
+          refresh: 'optimistic',
+        });
+        logDevPerfDuration('rainproofData.saveTransactionLinkBatch.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.saveTransactionLinkBatch.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not save transaction links.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
   const derived = useMemo<RainproofDerivedData>(() => {
     if (!snapshot) {
       return emptyDerived;
@@ -543,18 +854,10 @@ export function useRainproofData(): RainproofDataState {
       addTransaction: addTransactionOptimistically,
       updateTransaction: updateTransactionOptimistically,
       deleteTransaction: deleteTransactionOptimistically,
-      addTransactionLink: (input) =>
-        runMutation((repository) => repository.addTransactionLink(input), { label: 'addTransactionLink', rethrow: true }),
-      updateTransactionLink: (input) =>
-        runMutation((repository) => repository.updateTransactionLink(input), {
-          label: 'updateTransactionLink',
-          rethrow: true,
-        }),
-      deleteTransactionLink: (linkId) =>
-        runMutation((repository) => repository.deleteTransactionLink(linkId), {
-          label: 'deleteTransactionLink',
-          rethrow: true,
-        }),
+      addTransactionLink: addTransactionLinkOptimistically,
+      updateTransactionLink: updateTransactionLinkOptimistically,
+      deleteTransactionLink: deleteTransactionLinkOptimistically,
+      saveTransactionLinkBatch: saveTransactionLinkBatchOptimistically,
       addBudget: (input) => runMutation((repository) => repository.addBudget(input)),
       updateBudget: (input) => runMutation((repository) => repository.updateBudget(input)),
       updateBudgetOrder: (budgetIds) => runMutation((repository) => repository.updateBudgetOrder(budgetIds)),
@@ -610,7 +913,17 @@ export function useRainproofData(): RainproofDataState {
       restoreBackup: (backup) => runMutation((repository) => repository.restoreBackup(backup), { rethrow: true }),
       refresh,
     }),
-    [addTransactionOptimistically, deleteTransactionOptimistically, refresh, runMutation, updateTransactionOptimistically],
+    [
+      addTransactionLinkOptimistically,
+      addTransactionOptimistically,
+      deleteTransactionLinkOptimistically,
+      deleteTransactionOptimistically,
+      refresh,
+      runMutation,
+      saveTransactionLinkBatchOptimistically,
+      updateTransactionLinkOptimistically,
+      updateTransactionOptimistically,
+    ],
   );
 
   return {
@@ -642,6 +955,23 @@ function getNewTransactionInputPerfMetadata(input: NewTransactionInput) {
     split: input.kind !== 'transfer' && input.lines.length > 1,
     transfer: input.kind === 'transfer',
     crossCurrencyTransfer: input.kind === 'transfer' && new Set(input.lines.map((line) => line.currencyCode)).size > 1,
+  };
+}
+
+function getTransactionLinkInputPerfMetadata(input: NewTransactionLinkInput | UpdateTransactionLinkInput) {
+  return {
+    lineLevel: Boolean(input.sourceLineId || input.targetLineId),
+    linkType: input.linkType,
+  };
+}
+
+function getTransactionLinkBatchPerfMetadata(input: TransactionLinkBatchInput) {
+  const linkInputs = [...input.toAdd, ...input.toUpdate];
+  return {
+    adds: input.toAdd.length,
+    deletes: input.deleteIds.length,
+    lineLevel: linkInputs.some((linkInput) => Boolean(linkInput.sourceLineId || linkInput.targetLineId)),
+    updates: input.toUpdate.length,
   };
 }
 
@@ -864,6 +1194,230 @@ function applyAcceptedOptimisticDeleteTransaction({
   });
 }
 
+function applyAcceptedOptimisticAddTransactionLink({
+  applySnapshotPatch,
+  input,
+  optimisticLink,
+  refresh,
+  repository,
+  setError,
+  transactionWriteQueueRef,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  input: NewTransactionLinkInput;
+  optimisticLink: AddTransactionLinkPersistenceRecord;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setError: (message: string) => void;
+  transactionWriteQueueRef: BackgroundWriteQueueRef;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterAddTransactionLink(currentSnapshot, optimisticLink),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistAddTransactionLinkWithFullRefresh({
+      input,
+      refresh,
+      repository,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not link transaction.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.addTransactionLink.optimisticPatch',
+    optimisticPatchStartedAt,
+    getSnapshotPerfCounts(optimisticSnapshot),
+  );
+  setError('');
+
+  enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
+    await persistOptimisticAddTransactionLink({
+      input,
+      optimisticLink,
+      refresh,
+      repository,
+      rollbackPatch: (link) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticAddTransactionLink(currentSnapshot, link),
+      ),
+      setError,
+    });
+  });
+}
+
+function applyAcceptedOptimisticUpdateTransactionLink({
+  applySnapshotPatch,
+  input,
+  optimisticLink,
+  refresh,
+  repository,
+  rollback,
+  setError,
+  transactionWriteQueueRef,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  input: UpdateTransactionLinkInput;
+  optimisticLink: UpdateTransactionLinkPersistenceRecord;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticTransactionLinkRollback;
+  setError: (message: string) => void;
+  transactionWriteQueueRef: BackgroundWriteQueueRef;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterUpdateTransactionLinkWithRollback(currentSnapshot, optimisticLink, rollback),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistUpdateTransactionLinkWithFullRefresh({
+      input,
+      refresh,
+      repository,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not update transaction link.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.updateTransactionLink.optimisticPatch',
+    optimisticPatchStartedAt,
+    getSnapshotPerfCounts(optimisticSnapshot),
+  );
+  setError('');
+
+  enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
+    await persistOptimisticUpdateTransactionLink({
+      input,
+      optimisticLink,
+      refresh,
+      repository,
+      rollback,
+      rollbackPatch: (linkRollback, link) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticUpdateTransactionLink(currentSnapshot, linkRollback, link),
+      ),
+      setError,
+    });
+  });
+}
+
+function applyAcceptedOptimisticDeleteTransactionLink({
+  applySnapshotPatch,
+  refresh,
+  repository,
+  rollback,
+  setError,
+  transactionWriteQueueRef,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticTransactionLinkRollback;
+  setError: (message: string) => void;
+  transactionWriteQueueRef: BackgroundWriteQueueRef;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterDeleteTransactionLinkWithRollback(currentSnapshot, rollback),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistDeleteTransactionLinkWithFullRefresh({
+      linkId: rollback.item.id,
+      refresh,
+      repository,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not unlink transaction.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.deleteTransactionLink.optimisticPatch',
+    optimisticPatchStartedAt,
+    getSnapshotPerfCounts(optimisticSnapshot),
+  );
+  setError('');
+
+  enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
+    await persistOptimisticDeleteTransactionLink({
+      refresh,
+      repository,
+      rollback,
+      rollbackPatch: (linkRollback) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticDeleteTransactionLink(currentSnapshot, linkRollback),
+      ),
+      setError,
+    });
+  });
+}
+
+function applyAcceptedOptimisticTransactionLinkBatch({
+  applySnapshotPatch,
+  input,
+  optimisticRecords,
+  refresh,
+  repository,
+  rollback,
+  setError,
+  transactionWriteQueueRef,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  input: TransactionLinkBatchInput;
+  optimisticRecords: TransactionLinkBatchPersistenceRecords;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticTransactionLinkBatchRollback;
+  setError: (message: string) => void;
+  transactionWriteQueueRef: BackgroundWriteQueueRef;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterTransactionLinkBatchWithRollback(currentSnapshot, optimisticRecords, rollback),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistTransactionLinkBatchWithFullRefresh({
+      input,
+      refresh,
+      repository,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not save transaction links.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.saveTransactionLinkBatch.optimisticPatch',
+    optimisticPatchStartedAt,
+    {
+      ...getSnapshotPerfCounts(optimisticSnapshot),
+      addedLinks: optimisticRecords.addedLinks.length,
+      deletedLinks: optimisticRecords.deletedLinkIds.length,
+      updatedLinks: optimisticRecords.updatedLinks.length,
+    },
+  );
+  setError('');
+
+  enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
+    await persistOptimisticTransactionLinkBatch({
+      input,
+      optimisticRecords,
+      refresh,
+      repository,
+      rollback,
+      rollbackPatch: (batchRollback, records) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticTransactionLinkBatch(currentSnapshot, batchRollback, records),
+      ),
+      setError,
+    });
+  });
+}
+
 async function persistDeleteTransactionWithSaving({
   refresh,
   repository,
@@ -901,6 +1455,373 @@ async function persistDeleteTransactionWithFullRefresh({
     () => repository.deleteTransaction(transactionId),
   );
   await refresh();
+}
+
+async function persistAddTransactionLinkWithSaving({
+  input,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  input: NewTransactionLinkInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistAddTransactionLinkWithFullRefresh({
+      input,
+      refresh,
+      repository,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistAddTransactionLinkWithFullRefresh({
+  input,
+  refresh,
+  repository,
+}: {
+  input: NewTransactionLinkInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await timeDevPerfAsync(
+    'rainproofData.addTransactionLink.repositoryAdd',
+    () => repository.addTransactionLink(input),
+    getTransactionLinkInputPerfMetadata(input),
+  );
+  await refresh();
+}
+
+async function persistUpdateTransactionLinkWithSaving({
+  input,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  input: UpdateTransactionLinkInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistUpdateTransactionLinkWithFullRefresh({
+      input,
+      refresh,
+      repository,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistUpdateTransactionLinkWithFullRefresh({
+  input,
+  refresh,
+  repository,
+}: {
+  input: UpdateTransactionLinkInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await timeDevPerfAsync(
+    'rainproofData.updateTransactionLink.repositoryUpdate',
+    () => repository.updateTransactionLink(input),
+    getTransactionLinkInputPerfMetadata(input),
+  );
+  await refresh();
+}
+
+async function persistDeleteTransactionLinkWithSaving({
+  linkId,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  linkId: string;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistDeleteTransactionLinkWithFullRefresh({
+      linkId,
+      refresh,
+      repository,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistDeleteTransactionLinkWithFullRefresh({
+  linkId,
+  refresh,
+  repository,
+}: {
+  linkId: string;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await timeDevPerfAsync(
+    'rainproofData.deleteTransactionLink.repositoryDelete',
+    () => repository.deleteTransactionLink(linkId),
+  );
+  await refresh();
+}
+
+async function persistOptimisticAddTransactionLink({
+  input,
+  optimisticLink,
+  refresh,
+  repository,
+  rollbackPatch,
+  setError,
+}: {
+  input: NewTransactionLinkInput;
+  optimisticLink: AddTransactionLinkPersistenceRecord;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollbackPatch: (link: AddTransactionLinkPersistenceRecord) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    const persistedLink = await timeDevPerfAsync(
+      'rainproofData.addTransactionLink.backgroundWrite',
+      () => repository.addTransactionLink(input, optimisticLink),
+      getTransactionLinkInputPerfMetadata(input),
+    );
+
+    const reconcileStartedAt = Date.now();
+    if (areTransactionLinkPersistenceRecordsEqual(persistedLink, optimisticLink)) {
+      logDevPerfDuration('rainproofData.addTransactionLink.reconcile', reconcileStartedAt, { refresh: 'none' });
+      return;
+    }
+
+    await refresh();
+    logDevPerfDuration('rainproofData.addTransactionLink.reconcile', reconcileStartedAt, { refresh: 'full' });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not link transaction.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(optimisticLink);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration(
+        'rainproofData.addTransactionLink.rollback',
+        rollbackStartedAt,
+        {
+          ...getSnapshotPerfCounts(rolledBackSnapshot),
+          refresh: 'patched',
+        },
+      );
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.addTransactionLink.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
+}
+
+async function persistOptimisticUpdateTransactionLink({
+  input,
+  optimisticLink,
+  refresh,
+  repository,
+  rollback,
+  rollbackPatch,
+  setError,
+}: {
+  input: UpdateTransactionLinkInput;
+  optimisticLink: UpdateTransactionLinkPersistenceRecord;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticTransactionLinkRollback;
+  rollbackPatch: (
+    rollback: OptimisticTransactionLinkRollback,
+    link: UpdateTransactionLinkPersistenceRecord,
+  ) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    const persistedLink = await timeDevPerfAsync(
+      'rainproofData.updateTransactionLink.backgroundWrite',
+      () => repository.updateTransactionLink(input, optimisticLink),
+      getTransactionLinkInputPerfMetadata(input),
+    );
+
+    const reconcileStartedAt = Date.now();
+    if (areTransactionLinkPersistenceRecordsEqual(persistedLink, optimisticLink)) {
+      logDevPerfDuration('rainproofData.updateTransactionLink.reconcile', reconcileStartedAt, { refresh: 'none' });
+      return;
+    }
+
+    await refresh();
+    logDevPerfDuration('rainproofData.updateTransactionLink.reconcile', reconcileStartedAt, { refresh: 'full' });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not update transaction link.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(rollback, optimisticLink);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration(
+        'rainproofData.updateTransactionLink.rollback',
+        rollbackStartedAt,
+        {
+          ...getSnapshotPerfCounts(rolledBackSnapshot),
+          refresh: 'patched',
+        },
+      );
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.updateTransactionLink.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
+}
+
+async function persistOptimisticDeleteTransactionLink({
+  refresh,
+  repository,
+  rollback,
+  rollbackPatch,
+  setError,
+}: {
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticTransactionLinkRollback;
+  rollbackPatch: (rollback: OptimisticTransactionLinkRollback) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    await timeDevPerfAsync(
+      'rainproofData.deleteTransactionLink.backgroundWrite',
+      () => repository.deleteTransactionLink(rollback.item.id),
+      {
+        lineLevel: Boolean(rollback.item.sourceLineId || rollback.item.targetLineId),
+      },
+    );
+
+    const reconcileStartedAt = Date.now();
+    logDevPerfDuration('rainproofData.deleteTransactionLink.reconcile', reconcileStartedAt, { refresh: 'none' });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not unlink transaction.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(rollback);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration(
+        'rainproofData.deleteTransactionLink.rollback',
+        rollbackStartedAt,
+        {
+          ...getSnapshotPerfCounts(rolledBackSnapshot),
+          refresh: 'patched',
+        },
+      );
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.deleteTransactionLink.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
+}
+
+async function persistTransactionLinkBatchWithSaving({
+  input,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  input: TransactionLinkBatchInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistTransactionLinkBatchWithFullRefresh({
+      input,
+      refresh,
+      repository,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistTransactionLinkBatchWithFullRefresh({
+  input,
+  refresh,
+  repository,
+}: {
+  input: TransactionLinkBatchInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await timeDevPerfAsync(
+    'rainproofData.saveTransactionLinkBatch.repositorySave',
+    () => repository.saveTransactionLinkBatch(input),
+    getTransactionLinkBatchPerfMetadata(input),
+  );
+  await refresh();
+}
+
+async function persistOptimisticTransactionLinkBatch({
+  input,
+  optimisticRecords,
+  refresh,
+  repository,
+  rollback,
+  rollbackPatch,
+  setError,
+}: {
+  input: TransactionLinkBatchInput;
+  optimisticRecords: TransactionLinkBatchPersistenceRecords;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticTransactionLinkBatchRollback;
+  rollbackPatch: (
+    rollback: OptimisticTransactionLinkBatchRollback,
+    records: TransactionLinkBatchPersistenceRecords,
+  ) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    const persistedRecords = await timeDevPerfAsync(
+      'rainproofData.saveTransactionLinkBatch.backgroundWrite',
+      () => repository.saveTransactionLinkBatch(input, optimisticRecords),
+      getTransactionLinkBatchPerfMetadata(input),
+    );
+
+    const reconcileStartedAt = Date.now();
+    if (areTransactionLinkBatchPersistenceRecordsEqual(persistedRecords, optimisticRecords)) {
+      logDevPerfDuration('rainproofData.saveTransactionLinkBatch.reconcile', reconcileStartedAt, { refresh: 'none' });
+      return;
+    }
+
+    await refresh();
+    logDevPerfDuration('rainproofData.saveTransactionLinkBatch.reconcile', reconcileStartedAt, { refresh: 'full' });
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not save transaction links.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(rollback, optimisticRecords);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration(
+        'rainproofData.saveTransactionLinkBatch.rollback',
+        rollbackStartedAt,
+        {
+          ...getSnapshotPerfCounts(rolledBackSnapshot),
+          refresh: 'patched',
+        },
+      );
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.saveTransactionLinkBatch.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
 }
 
 async function persistUpdateTransactionWithSaving({
@@ -1250,4 +2171,18 @@ function areUpdateTransactionPersistenceRecordsEqual(
     JSON.stringify(left.removedLineIds) === JSON.stringify(right.removedLineIds) &&
     JSON.stringify(left.insertedLineIds) === JSON.stringify(right.insertedLineIds) &&
     JSON.stringify(left.updatedLineIds) === JSON.stringify(right.updatedLineIds);
+}
+
+function areTransactionLinkPersistenceRecordsEqual(
+  left: AddTransactionLinkPersistenceRecord | UpdateTransactionLinkPersistenceRecord,
+  right: AddTransactionLinkPersistenceRecord | UpdateTransactionLinkPersistenceRecord,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function areTransactionLinkBatchPersistenceRecordsEqual(
+  left: TransactionLinkBatchPersistenceRecords,
+  right: TransactionLinkBatchPersistenceRecords,
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }

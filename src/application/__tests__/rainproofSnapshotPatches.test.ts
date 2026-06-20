@@ -1,11 +1,22 @@
 import {
   getRollbackForDeleteTransaction,
+  getRollbackForDeleteTransactionLink,
   getRollbackForEditTransaction,
+  getRollbackForTransactionLinkBatch,
+  getRollbackForUpdateTransactionLink,
+  patchSnapshotAfterTransactionLinkBatchWithRollback,
   patchSnapshotAfterAddTransaction,
+  patchSnapshotAfterAddTransactionLink,
+  patchSnapshotAfterDeleteTransactionLinkWithRollback,
   patchSnapshotAfterDeleteTransaction,
   patchSnapshotAfterEditTransaction,
+  patchSnapshotAfterUpdateTransactionLinkWithRollback,
+  rollbackSnapshotAfterOptimisticAddTransactionLink,
+  rollbackSnapshotAfterOptimisticDeleteTransactionLink,
   rollbackSnapshotAfterOptimisticDeleteTransaction,
   rollbackSnapshotAfterOptimisticEditTransaction,
+  rollbackSnapshotAfterOptimisticTransactionLinkBatch,
+  rollbackSnapshotAfterOptimisticUpdateTransactionLink,
   rollbackSnapshotAfterOptimisticAddTransaction,
 } from '../rainproofSnapshotPatches';
 import type {
@@ -565,6 +576,201 @@ describe('patchSnapshotAfterEditTransaction', () => {
   });
 });
 
+describe('transaction link snapshot patches', () => {
+  it('patches and rolls back a parent-level link create', () => {
+    const snapshot = createLinkSnapshot();
+    const link = transactionLink('link-new', 'txn-source', 'txn-existing');
+    const patched = patchSnapshotAfterAddTransactionLink(snapshot, link);
+
+    expect(patched?.transactionLinks).toEqual([link]);
+
+    const rolledBack = rollbackSnapshotAfterOptimisticAddTransactionLink(patched!, link);
+    expect(rolledBack?.transactionLinks).toEqual([]);
+  });
+
+  it('patches and rolls back a split-line link create without marking the parent identity', () => {
+    const snapshot = createLinkSnapshot();
+    const sourceLine = snapshot.transactionLines.find((line) => line.transactionId === 'txn-source')!;
+    const targetLine = snapshot.transactionLines.find((line) => line.transactionId === 'txn-existing')!;
+    const link = transactionLink('link-line-new', 'txn-source', 'txn-existing', sourceLine.id, targetLine.id);
+    const patched = patchSnapshotAfterAddTransactionLink(snapshot, link);
+
+    expect(patched?.transactionLinks[0]).toEqual(expect.objectContaining({
+      sourceLineId: sourceLine.id,
+      targetLineId: targetLine.id,
+    }));
+
+    const rolledBack = rollbackSnapshotAfterOptimisticAddTransactionLink(patched!, link);
+    expect(rolledBack?.transactionLinks).toEqual([]);
+  });
+
+  it('patches and rolls back a link update when the current link is unchanged', () => {
+    const existing = transactionLink('link-existing', 'txn-source', 'txn-existing');
+    const snapshot = {
+      ...createLinkSnapshot(),
+      transactionLinks: [existing],
+    };
+    const rollback = getRollbackForUpdateTransactionLink(snapshot, existing.id);
+    const updated = {
+      ...existing,
+      amountMinor: 500,
+      linkType: 'refund' as const,
+      updatedAt: '2026-06-02T12:00:00.000Z',
+    };
+    const patched = patchSnapshotAfterUpdateTransactionLinkWithRollback(snapshot, updated, rollback!);
+
+    expect(patched?.transactionLinks).toEqual([updated]);
+
+    const rolledBack = rollbackSnapshotAfterOptimisticUpdateTransactionLink(patched!, rollback!, updated);
+    expect(rolledBack?.transactionLinks).toEqual([existing]);
+  });
+
+  it('patches and rolls back a link delete when counterpart records still exist', () => {
+    const existing = transactionLink('link-existing', 'txn-source', 'txn-existing');
+    const snapshot = {
+      ...createLinkSnapshot(),
+      transactionLinks: [existing],
+    };
+    const rollback = getRollbackForDeleteTransactionLink(snapshot, existing.id);
+    const patched = patchSnapshotAfterDeleteTransactionLinkWithRollback(snapshot, rollback!);
+
+    expect(patched?.transactionLinks).toEqual([]);
+
+    const rolledBack = rollbackSnapshotAfterOptimisticDeleteTransactionLink(patched!, rollback!);
+    expect(rolledBack?.transactionLinks).toEqual([existing]);
+  });
+
+  it('falls back from link rollback when optimistic state changed', () => {
+    const existing = transactionLink('link-existing', 'txn-source', 'txn-existing');
+    const snapshot = {
+      ...createLinkSnapshot(),
+      transactionLinks: [existing],
+    };
+    const rollback = getRollbackForUpdateTransactionLink(snapshot, existing.id);
+    const updated = {
+      ...existing,
+      amountMinor: 500,
+      updatedAt: '2026-06-02T12:00:00.000Z',
+    };
+    const patched = patchSnapshotAfterUpdateTransactionLinkWithRollback(snapshot, updated, rollback!);
+
+    expect(
+      rollbackSnapshotAfterOptimisticUpdateTransactionLink({
+        ...patched!,
+        transactionLinks: patched!.transactionLinks.map((link) => ({ ...link, amountMinor: 700 })),
+      }, rollback!, updated),
+    ).toBeNull();
+  });
+});
+
+describe('transaction link batch snapshot patches', () => {
+  it('patches and rolls back multiple allocation link adds as one batch', () => {
+    const snapshot = createLinkSnapshot();
+    const patch = {
+      addedLinks: [
+        transactionLink('link-add-1', 'txn-source', 'txn-existing'),
+        transactionLink('link-add-2', 'txn-source', 'txn-extra-expense'),
+      ],
+      deletedLinkIds: [],
+      updatedLinks: [],
+    };
+    const rollback = getRollbackForTransactionLinkBatch(snapshot, patch);
+    const patched = patchSnapshotAfterTransactionLinkBatchWithRollback(snapshot, patch, rollback!);
+
+    expect(patched?.transactionLinks.map((link) => link.id)).toEqual(['link-add-1', 'link-add-2']);
+
+    const rolledBack = rollbackSnapshotAfterOptimisticTransactionLinkBatch(patched!, rollback!, patch);
+    expect(rolledBack?.transactionLinks).toEqual([]);
+  });
+
+  it('patches and rolls back mixed allocation add update and delete changes', () => {
+    const keepLink = transactionLink('link-keep', 'txn-source', 'txn-extra-expense');
+    const updateLink = transactionLink('link-update', 'txn-source', 'txn-existing');
+    const deleteLink = transactionLink('link-delete', 'txn-source', 'txn-delete');
+    const snapshot = {
+      ...createLinkSnapshot(),
+      transactionLinks: [keepLink, updateLink, deleteLink],
+    };
+    const updatedLink = {
+      ...updateLink,
+      amountMinor: 500,
+      linkType: 'refund' as const,
+      updatedAt: '2026-06-02T12:00:00.000Z',
+    };
+    const patch = {
+      addedLinks: [transactionLink('link-add', 'txn-source', 'txn-extra-expense')],
+      deletedLinkIds: ['link-delete'],
+      updatedLinks: [updatedLink],
+    };
+    const rollback = getRollbackForTransactionLinkBatch(snapshot, patch);
+    const patched = patchSnapshotAfterTransactionLinkBatchWithRollback(snapshot, patch, rollback!);
+
+    expect(patched?.transactionLinks).toEqual(expect.arrayContaining([keepLink, updatedLink, patch.addedLinks[0]]));
+    expect(patched?.transactionLinks.some((link) => link.id === 'link-delete')).toBe(false);
+
+    const rolledBack = rollbackSnapshotAfterOptimisticTransactionLinkBatch(patched!, rollback!, patch);
+    expect(rolledBack?.transactionLinks).toEqual([keepLink, updateLink, deleteLink]);
+  });
+
+  it('patches split-line allocation links without changing their line identity', () => {
+    const snapshot = createLinkSnapshot();
+    const sourceLine = snapshot.transactionLines.find((line) => line.transactionId === 'txn-source')!;
+    const targetLine = snapshot.transactionLines.find((line) => line.transactionId === 'txn-existing')!;
+    const patch = {
+      addedLinks: [transactionLink('link-split-add', 'txn-source', 'txn-existing', sourceLine.id, targetLine.id)],
+      deletedLinkIds: [],
+      updatedLinks: [],
+    };
+    const rollback = getRollbackForTransactionLinkBatch(snapshot, patch);
+    const patched = patchSnapshotAfterTransactionLinkBatchWithRollback(snapshot, patch, rollback!);
+
+    expect(patched?.transactionLinks[0]).toEqual(expect.objectContaining({
+      sourceLineId: sourceLine.id,
+      targetLineId: targetLine.id,
+    }));
+  });
+
+  it('falls back from batch rollback when optimistic batch state changed', () => {
+    const snapshot = createLinkSnapshot();
+    const patch = {
+      addedLinks: [transactionLink('link-add', 'txn-source', 'txn-existing')],
+      deletedLinkIds: [],
+      updatedLinks: [],
+    };
+    const rollback = getRollbackForTransactionLinkBatch(snapshot, patch);
+    const patched = patchSnapshotAfterTransactionLinkBatchWithRollback(snapshot, patch, rollback!);
+
+    expect(
+      rollbackSnapshotAfterOptimisticTransactionLinkBatch({
+        ...patched!,
+        transactionLinks: patched!.transactionLinks.map((link) => ({ ...link, amountMinor: 700 })),
+      }, rollback!, patch),
+    ).toBeNull();
+  });
+
+  it('falls back from batch rollback when original linked items are no longer present', () => {
+    const existing = transactionLink('link-update', 'txn-source', 'txn-existing');
+    const snapshot = {
+      ...createLinkSnapshot(),
+      transactionLinks: [existing],
+    };
+    const patch = {
+      addedLinks: [],
+      deletedLinkIds: [],
+      updatedLinks: [{ ...existing, amountMinor: 500 }],
+    };
+    const rollback = getRollbackForTransactionLinkBatch(snapshot, patch);
+    const patched = patchSnapshotAfterTransactionLinkBatchWithRollback(snapshot, patch, rollback!);
+
+    expect(
+      rollbackSnapshotAfterOptimisticTransactionLinkBatch({
+        ...patched!,
+        transactions: patched!.transactions.filter((transaction) => transaction.id !== 'txn-existing'),
+      }, rollback!, patch),
+    ).toBeNull();
+  });
+});
+
 function createSnapshot(): AppSnapshot {
   return {
     defaultCurrencyCode: 'AUD',
@@ -680,6 +886,40 @@ function createLinkedEditSnapshot(
       transactionLink('link-parent', sourceTransaction.id, 'txn-edit'),
       transactionLink('link-line', sourceTransaction.id, 'txn-edit', sourceLine.id, firstEditLine?.id ?? null),
     ],
+  };
+}
+
+function createLinkSnapshot(): AppSnapshot {
+  const baseSnapshot = createSnapshot();
+  const sourceTransaction = transaction('txn-source', 'income');
+  const extraExpenseTransaction = transaction('txn-extra-expense', 'expense');
+  const deleteExpenseTransaction = transaction('txn-delete', 'expense');
+  const sourceLine = transactionLine('line-source', {
+    accountId: 'aud-checking',
+    amountMinor: 1000,
+    currencyCode: 'AUD',
+    categoryId: 'income',
+    subcategoryId: 'reimbursement',
+  }, sourceTransaction.id);
+  const extraExpenseLine = transactionLine('line-extra-expense', {
+    accountId: 'aud-checking',
+    amountMinor: -1000,
+    currencyCode: 'AUD',
+    categoryId: 'food',
+    subcategoryId: 'restaurants',
+  }, extraExpenseTransaction.id);
+  const deleteExpenseLine = transactionLine('line-delete-expense', {
+    accountId: 'aud-checking',
+    amountMinor: -1000,
+    currencyCode: 'AUD',
+    categoryId: 'food',
+    subcategoryId: 'groceries',
+  }, deleteExpenseTransaction.id);
+
+  return {
+    ...baseSnapshot,
+    transactions: [sourceTransaction, extraExpenseTransaction, deleteExpenseTransaction, ...baseSnapshot.transactions],
+    transactionLines: [sourceLine, extraExpenseLine, deleteExpenseLine, ...baseSnapshot.transactionLines],
   };
 }
 

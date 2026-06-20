@@ -15,6 +15,7 @@ import { FormError } from '../../components/ui';
 import type {
   AppSnapshot,
   NewTransactionLinkInput,
+  TransactionLinkBatchInput,
   UpdateTransactionLinkInput,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -24,9 +25,10 @@ import { IncomeLinkManager } from './IncomeLinkManager';
 type LinkTransactionScreenProps = {
   snapshot: AppSnapshot;
   transactionId: string;
-  onAddTransactionLink: (input: NewTransactionLinkInput) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string) => Promise<void>;
+  onAddTransactionLink: (input: NewTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
+  onSaveTransactionLinkBatch: (input: TransactionLinkBatchInput) => Promise<void>;
   onBack: () => void;
   showHeader?: boolean;
 };
@@ -37,6 +39,7 @@ export function LinkTransactionScreen({
   onAddTransactionLink,
   onUpdateTransactionLink,
   onDeleteTransactionLink,
+  onSaveTransactionLinkBatch,
   onBack,
   showHeader = true,
 }: LinkTransactionScreenProps) {
@@ -81,9 +84,8 @@ export function LinkTransactionScreen({
             <IncomeLinkManager
               snapshot={snapshot}
               transaction={transaction}
-              onAddTransactionLink={onAddTransactionLink}
-              onUpdateTransactionLink={onUpdateTransactionLink}
-              onDeleteTransactionLink={onDeleteTransactionLink}
+              onSaveTransactionLinkBatch={onSaveTransactionLinkBatch}
+              onDone={onBack}
               onError={setError}
             />
           ) : transaction.kind === 'expense' ? (

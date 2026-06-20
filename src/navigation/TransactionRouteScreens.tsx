@@ -100,6 +100,7 @@ export function LinkTransactionRouteScreen() {
         onAddTransactionLink={actions.addTransactionLink}
         onUpdateTransactionLink={actions.updateTransactionLink}
         onDeleteTransactionLink={actions.deleteTransactionLink}
+        onSaveTransactionLinkBatch={actions.saveTransactionLinkBatch}
         onBack={() => navigation.goBack()}
       />
     </ComposerRouteScaffold>

@@ -16,10 +16,9 @@ import {
 } from '../../domain/transactionLinking';
 import type {
   AppSnapshot,
-  NewTransactionLinkInput,
   Transaction,
+  TransactionLinkBatchInput,
   TransactionLinkType,
-  UpdateTransactionLinkInput,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { InlineField } from './TransactionFormComponents';
@@ -36,18 +35,16 @@ import {
 type IncomeLinkManagerProps = {
   snapshot: AppSnapshot;
   transaction: Transaction;
-  onAddTransactionLink: (input: NewTransactionLinkInput) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string) => Promise<void>;
+  onSaveTransactionLinkBatch: (input: TransactionLinkBatchInput) => Promise<void>;
+  onDone: () => void;
   onError: (message: string) => void;
 };
 
 export function IncomeLinkManager({
   snapshot,
   transaction,
-  onAddTransactionLink,
-  onUpdateTransactionLink,
-  onDeleteTransactionLink,
+  onSaveTransactionLinkBatch,
+  onDone,
   onError,
 }: IncomeLinkManagerProps) {
   const [linkType, setLinkType] = useState<TransactionLinkType>('reimbursement');
@@ -147,6 +144,7 @@ export function IncomeLinkManager({
 
   async function saveAllocations() {
     setSaving(true);
+    let shouldClose = false;
     try {
       const changes = getTransactionLinkAllocationChanges({
         sourceTransactionId: transaction.id,
@@ -154,20 +152,16 @@ export function IncomeLinkManager({
         allocations,
       });
 
-      for (const linkId of changes.deleteIds) {
-        await onDeleteTransactionLink(linkId);
-      }
-      for (const input of changes.toUpdate) {
-        await onUpdateTransactionLink(input);
-      }
-      for (const input of changes.toAdd) {
-        await onAddTransactionLink(input);
-      }
+      await onSaveTransactionLinkBatch(changes);
       onError('');
+      shouldClose = true;
     } catch (caught) {
       onError(caught instanceof Error ? caught.message : 'Could not save transaction links.');
     } finally {
       setSaving(false);
+      if (shouldClose) {
+        onDone();
+      }
     }
   }
 

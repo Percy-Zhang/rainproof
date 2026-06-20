@@ -1086,6 +1086,317 @@ describe('SQLite finance repository transactions and links', () => {
     });
   });
 
+  it('persists prepared transaction link records exactly', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Prepared link expense',
+        lines: [{ accountId: everyday.id, amountMinor: -6000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Prepared link income',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const addInput = {
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'reimbursement' as const,
+        amountMinor: 3000,
+        currencyCode: 'AUD' as const,
+      };
+      const preparedAdd = repository.prepareAddTransactionLink(addInput, await repository.getSnapshot());
+
+      const persistedAdd = await repository.addTransactionLink(addInput, preparedAdd);
+      expect(persistedAdd).toEqual(preparedAdd);
+      expect(await repository.getTransactionLinks()).toEqual([preparedAdd]);
+
+      const updateInput = {
+        id: preparedAdd.id,
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'refund' as const,
+        amountMinor: 2000,
+        currencyCode: 'AUD' as const,
+      };
+      const preparedUpdate = repository.prepareUpdateTransactionLink(
+        updateInput,
+        preparedAdd,
+        await repository.getSnapshot(),
+      );
+
+      const persistedUpdate = await repository.updateTransactionLink(updateInput, preparedUpdate);
+      expect(persistedUpdate).toEqual(preparedUpdate);
+      expect(await repository.getTransactionLinks()).toEqual([preparedUpdate]);
+    });
+  });
+
+  it('validates parent-level transaction links with targeted reads', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Targeted link expense',
+        lines: [{ accountId: everyday.id, amountMinor: -6000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Targeted link income',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const originalGetAllAsync = db.getAllAsync.bind(db);
+      const broadReads: string[] = [];
+
+      db.getAllAsync = async (source: string, ...params: unknown[]) => {
+        const normalizedSource = source.replace(/\s+/g, ' ').trim();
+        if (
+          normalizedSource === 'SELECT * FROM transactions' ||
+          normalizedSource === 'SELECT * FROM transaction_lines' ||
+          normalizedSource === 'SELECT * FROM transaction_links'
+        ) {
+          broadReads.push(normalizedSource);
+          throw new Error(`Unexpected broad validation read: ${normalizedSource}`);
+        }
+
+        return originalGetAllAsync(source, ...params);
+      };
+
+      try {
+        await repository.addTransactionLink({
+          sourceTransactionId: income.id,
+          targetTransactionId: expense.id,
+          linkType: 'reimbursement',
+          amountMinor: 3000,
+          currencyCode: 'AUD',
+        });
+      } finally {
+        db.getAllAsync = originalGetAllAsync;
+      }
+
+      expect(broadReads).toEqual([]);
+      expect(await repository.getTransactionLinks()).toHaveLength(1);
+    });
+  });
+
+  it('keeps targeted transaction link validation behavior for invalid lines and duplicates', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Targeted validation expense',
+        lines: [{ accountId: everyday.id, amountMinor: -6000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Targeted validation income',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const otherIncome = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Other income line',
+        lines: [{ accountId: everyday.id, amountMinor: 1000, categoryId: 'income', subcategoryId: 'refund' }],
+      });
+      const snapshot = await repository.getSnapshot();
+      const otherIncomeLine = getLineForTransaction(snapshot, otherIncome.id);
+
+      await expect(
+        repository.addTransactionLink({
+          sourceTransactionId: income.id,
+          sourceLineId: otherIncomeLine.id,
+          targetTransactionId: expense.id,
+          linkType: 'reimbursement',
+          amountMinor: 1000,
+          currencyCode: 'AUD',
+        }),
+      ).rejects.toThrow('Source transaction line does not belong to the source transaction.');
+
+      await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'reimbursement',
+        amountMinor: 1000,
+        currencyCode: 'AUD',
+      });
+
+      await expect(
+        repository.addTransactionLink({
+          sourceTransactionId: income.id,
+          targetTransactionId: expense.id,
+          linkType: 'reimbursement',
+          amountMinor: 1000,
+          currencyCode: 'AUD',
+        }),
+      ).rejects.toThrow('This transaction link already exists.');
+    });
+  });
+
+  it('saves transaction link batches atomically for allocation add update and delete plans', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Batch allocation income',
+        lines: [{ accountId: everyday.id, amountMinor: 7000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const firstExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Batch first expense',
+        lines: [{ accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const secondExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Batch second expense',
+        lines: [{ accountId: everyday.id, amountMinor: -2000, categoryId: 'food-dining', subcategoryId: 'groceries' }],
+      });
+      const thirdExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Batch third expense',
+        lines: [{ accountId: everyday.id, amountMinor: -2000, categoryId: 'transport', subcategoryId: 'fuel' }],
+      });
+
+      const updateLink = await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: firstExpense.id,
+        linkType: 'reimbursement',
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+      });
+      await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: secondExpense.id,
+        linkType: 'refund',
+        amountMinor: 2000,
+        currencyCode: 'AUD',
+      });
+      const deleteLink = (await repository.getTransactionLinks()).find((link) => link.targetTransactionId === secondExpense.id)!;
+
+      const batch = {
+        deleteIds: [deleteLink.id],
+        toUpdate: [{
+          id: updateLink.id,
+          sourceTransactionId: income.id,
+          targetTransactionId: firstExpense.id,
+          linkType: 'shared_expense_contribution' as const,
+          amountMinor: 2500,
+          currencyCode: 'AUD' as const,
+        }],
+        toAdd: [{
+          sourceTransactionId: income.id,
+          targetTransactionId: thirdExpense.id,
+          linkType: 'reimbursement' as const,
+          amountMinor: 2000,
+          currencyCode: 'AUD' as const,
+        }],
+      };
+      const prepared = repository.prepareTransactionLinkBatch(batch, await repository.getSnapshot());
+
+      const persisted = await repository.saveTransactionLinkBatch(batch, prepared);
+      const links = await repository.getTransactionLinks();
+
+      expect(persisted).toEqual(prepared);
+      expect(links).toEqual(expect.arrayContaining([
+        prepared.updatedLinks[0],
+        prepared.addedLinks[0],
+      ]));
+      expect(links.some((link) => link.id === deleteLink.id)).toBe(false);
+    });
+  });
+
+  it('saves split-line transaction link batches', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Batch split income',
+        lines: [
+          { accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' },
+          { accountId: everyday.id, amountMinor: 2000, categoryId: 'income', subcategoryId: 'refund' },
+        ],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Batch split expense',
+        lines: [
+          { accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' },
+          { accountId: everyday.id, amountMinor: -2000, categoryId: 'food-dining', subcategoryId: 'groceries' },
+        ],
+      });
+      const snapshot = await repository.getSnapshot();
+      const incomeLine = getLineBySubcategory(snapshot, income.id, 'reimbursement');
+      const expenseLine = getLineBySubcategory(snapshot, expense.id, 'restaurants');
+
+      await repository.saveTransactionLinkBatch({
+        deleteIds: [],
+        toUpdate: [],
+        toAdd: [{
+          sourceTransactionId: income.id,
+          sourceLineId: incomeLine.id,
+          targetTransactionId: expense.id,
+          targetLineId: expenseLine.id,
+          linkType: 'reimbursement',
+          amountMinor: 3000,
+          currencyCode: 'AUD',
+        }],
+      });
+
+      expect(await repository.getTransactionLinks()).toEqual([
+        expect.objectContaining({
+          sourceLineId: incomeLine.id,
+          targetLineId: expenseLine.id,
+        }),
+      ]);
+    });
+  });
+
+  it('rejects conflicting transaction link batches without partial deletes', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Rejected batch income',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Rejected batch expense',
+        lines: [{ accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const existingLink = await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'reimbursement',
+        amountMinor: 1000,
+        currencyCode: 'AUD',
+      });
+
+      await expect(
+        repository.saveTransactionLinkBatch({
+          deleteIds: [existingLink.id],
+          toUpdate: [],
+          toAdd: [
+            {
+              sourceTransactionId: income.id,
+              targetTransactionId: expense.id,
+              linkType: 'refund',
+              amountMinor: 1000,
+              currencyCode: 'AUD',
+            },
+            {
+              sourceTransactionId: income.id,
+              targetTransactionId: expense.id,
+              linkType: 'refund',
+              amountMinor: 1000,
+              currencyCode: 'AUD',
+            },
+          ],
+        }),
+      ).rejects.toThrow('This transaction link already exists.');
+
+      expect(await repository.getTransactionLinks()).toEqual([existingLink]);
+    });
+  });
+
   it('persists line-level transaction link references and allows multiple links from one source transaction', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday' });

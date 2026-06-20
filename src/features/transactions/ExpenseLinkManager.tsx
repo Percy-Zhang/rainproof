@@ -27,9 +27,9 @@ import {
 type ExpenseLinkManagerProps = {
   snapshot: AppSnapshot;
   transaction: Transaction;
-  onAddTransactionLink: (input: NewTransactionLinkInput) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string) => Promise<void>;
+  onAddTransactionLink: (input: NewTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
   onError: (message: string) => void;
 };
 

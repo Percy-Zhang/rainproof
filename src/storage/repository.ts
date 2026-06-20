@@ -12,6 +12,7 @@ import type {
   NewTransactionInput,
   NewTransactionLinkInput,
   Transaction,
+  TransactionLinkBatchInput,
   TransactionLink,
   TransactionLine,
   UpdateAccountInput,
@@ -72,12 +73,17 @@ import {
 import { getSnapshotStorage } from './snapshotStorage';
 import {
   addTransactionLinkStorage,
+  createAddTransactionLinkStorageRecord,
+  createTransactionLinkBatchStorageRecords,
+  createUpdateTransactionLinkStorageRecord,
   deleteTransactionLinkStorage,
   getTransactionLinksForSourceTransactionStorage,
   getTransactionLinksForTargetTransactionStorage,
   getTransactionLinksForTransactionStorage,
   getTransactionLinksStorage,
   removeTransactionLinksForTransactionStorage,
+  saveTransactionLinkBatchStorage,
+  type TransactionLinkBatchStorageRecords,
   updateTransactionLinkStorage,
 } from './transactionLinkStorage';
 import {
@@ -116,9 +122,26 @@ export type FinanceRepository = {
   ): UpdateTransactionStorageResult;
   updateTransaction(input: UpdateTransactionInput, records?: UpdateTransactionStorageResult): Promise<UpdateTransactionStorageResult>;
   deleteTransaction(transactionId: string): Promise<void>;
-  addTransactionLink(input: NewTransactionLinkInput): Promise<void>;
-  updateTransactionLink(input: UpdateTransactionLinkInput): Promise<void>;
+  prepareAddTransactionLink(
+    input: NewTransactionLinkInput,
+    validationState: Pick<AppSnapshot, 'transactions' | 'transactionLines' | 'transactionLinks'>,
+  ): TransactionLink;
+  addTransactionLink(input: NewTransactionLinkInput, record?: TransactionLink): Promise<TransactionLink>;
+  prepareUpdateTransactionLink(
+    input: UpdateTransactionLinkInput,
+    existingLink: TransactionLink,
+    validationState: Pick<AppSnapshot, 'transactions' | 'transactionLines' | 'transactionLinks'>,
+  ): TransactionLink;
+  updateTransactionLink(input: UpdateTransactionLinkInput, record?: TransactionLink): Promise<TransactionLink>;
   deleteTransactionLink(linkId: string): Promise<void>;
+  prepareTransactionLinkBatch(
+    input: TransactionLinkBatchInput,
+    validationState: Pick<AppSnapshot, 'transactions' | 'transactionLines' | 'transactionLinks'>,
+  ): TransactionLinkBatchStorageRecords;
+  saveTransactionLinkBatch(
+    input: TransactionLinkBatchInput,
+    records?: TransactionLinkBatchStorageRecords,
+  ): Promise<TransactionLinkBatchStorageRecords>;
   getTransactionLinks(): Promise<TransactionLink[]>;
   getTransactionLinksForSourceTransaction(transactionId: string): Promise<TransactionLink[]>;
   getTransactionLinksForTargetTransaction(transactionId: string): Promise<TransactionLink[]>;
@@ -232,16 +255,57 @@ class SQLiteFinanceRepository implements FinanceRepository {
     return deleteTransactionStorage(this.db, transactionId);
   }
 
-  async addTransactionLink(input: NewTransactionLinkInput): Promise<void> {
-    return addTransactionLinkStorage(this.db, input);
+  prepareAddTransactionLink(
+    input: NewTransactionLinkInput,
+    validationState: Pick<AppSnapshot, 'transactions' | 'transactionLines' | 'transactionLinks'>,
+  ): TransactionLink {
+    return createAddTransactionLinkStorageRecord(input, {
+      transactions: validationState.transactions,
+      lines: validationState.transactionLines,
+      links: validationState.transactionLinks,
+    });
   }
 
-  async updateTransactionLink(input: UpdateTransactionLinkInput): Promise<void> {
-    return updateTransactionLinkStorage(this.db, input);
+  async addTransactionLink(input: NewTransactionLinkInput, record?: TransactionLink): Promise<TransactionLink> {
+    return addTransactionLinkStorage(this.db, input, record);
+  }
+
+  prepareUpdateTransactionLink(
+    input: UpdateTransactionLinkInput,
+    existingLink: TransactionLink,
+    validationState: Pick<AppSnapshot, 'transactions' | 'transactionLines' | 'transactionLinks'>,
+  ): TransactionLink {
+    return createUpdateTransactionLinkStorageRecord(input, existingLink, {
+      transactions: validationState.transactions,
+      lines: validationState.transactionLines,
+      links: validationState.transactionLinks,
+    });
+  }
+
+  async updateTransactionLink(input: UpdateTransactionLinkInput, record?: TransactionLink): Promise<TransactionLink> {
+    return updateTransactionLinkStorage(this.db, input, record);
   }
 
   async deleteTransactionLink(linkId: string): Promise<void> {
     return deleteTransactionLinkStorage(this.db, linkId);
+  }
+
+  prepareTransactionLinkBatch(
+    input: TransactionLinkBatchInput,
+    validationState: Pick<AppSnapshot, 'transactions' | 'transactionLines' | 'transactionLinks'>,
+  ): TransactionLinkBatchStorageRecords {
+    return createTransactionLinkBatchStorageRecords(input, {
+      transactions: validationState.transactions,
+      lines: validationState.transactionLines,
+      links: validationState.transactionLinks,
+    });
+  }
+
+  async saveTransactionLinkBatch(
+    input: TransactionLinkBatchInput,
+    records?: TransactionLinkBatchStorageRecords,
+  ): Promise<TransactionLinkBatchStorageRecords> {
+    return saveTransactionLinkBatchStorage(this.db, input, records);
   }
 
   async getTransactionLinks(): Promise<TransactionLink[]> {

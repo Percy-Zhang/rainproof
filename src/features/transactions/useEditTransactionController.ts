@@ -58,8 +58,8 @@ type UseEditTransactionControllerOptions = {
   transactionId: string;
   onUpdateTransaction: (input: UpdateTransactionInput, options?: { optimistic?: boolean }) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string) => Promise<void>;
+  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
@@ -404,13 +404,13 @@ export function useEditTransactionController({
       logDevPerfDuration('editTransactionController.updateAccepted', saveStartedAt);
 
       if (linkSavePlan.sourceLinkUpdate) {
-        await onUpdateTransactionLink(linkSavePlan.sourceLinkUpdate);
+        await onUpdateTransactionLink(linkSavePlan.sourceLinkUpdate, { optimistic: false });
       } else if (linkSavePlan.sourceLinkDeleteId) {
-        await onDeleteTransactionLink(linkSavePlan.sourceLinkDeleteId);
+        await onDeleteTransactionLink(linkSavePlan.sourceLinkDeleteId, { optimistic: false });
       }
 
       for (const targetLinkId of linkSavePlan.targetLinkDeleteIds) {
-        await onDeleteTransactionLink(targetLinkId);
+        await onDeleteTransactionLink(targetLinkId, { optimistic: false });
       }
 
       logDevPerfDuration('editTransactionController.closeRequested', saveStartedAt);

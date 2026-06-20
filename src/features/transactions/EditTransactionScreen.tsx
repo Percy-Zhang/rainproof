@@ -39,10 +39,10 @@ import { useEditTransactionController } from './useEditTransactionController';
 type EditTransactionScreenProps = {
   snapshot: AppSnapshot;
   transactionId: string;
-  onUpdateTransaction: (input: UpdateTransactionInput) => Promise<void>;
+  onUpdateTransaction: (input: UpdateTransactionInput, options?: { optimistic?: boolean }) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string) => Promise<void>;
+  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
   onOpenTransactionLink: () => void;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
