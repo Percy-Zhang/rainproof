@@ -16,8 +16,8 @@ export const transactionsScreenStyles = StyleSheet.create({
     paddingBottom: spacing.sm,
     zIndex: 5,
   },
-  scrollContent: {
-    gap: spacing.md,
+  listArea: {
+    flex: 1,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
@@ -31,10 +31,30 @@ export const transactionsScreenStyles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-  cardTitle: {
+  transactionListCard: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: 0,
+    paddingBottom: 0,
+  },
+  transactionSectionList: {
+    flex: 1,
+  },
+  transactionSectionListContent: {
+    paddingBottom: spacing.md,
+  },
+  transactionSectionListTitle: {
     color: colors.ink,
     fontSize: typography.h3,
     fontWeight: '800',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+  transactionContentInset: {
+    paddingHorizontal: spacing.lg,
+  },
+  transactionRowInset: {
+    paddingHorizontal: spacing.lg,
   },
   searchInput: {
     backgroundColor: colors.surface,
@@ -90,33 +110,31 @@ export const transactionsScreenStyles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '900',
   },
-  groups: {
-    gap: spacing.md,
-  },
-  group: {
-    gap: 0,
+  transactionGroupSpacer: {
+    height: spacing.md,
   },
   groupBreak: {
+    alignItems: 'center',
     backgroundColor: colors.surfaceMuted,
     flexDirection: 'row',
     gap: spacing.sm,
     justifyContent: 'space-between',
-    marginHorizontal: -spacing.lg,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
   },
   groupTitle: {
     color: colors.ink,
+    flex: 1,
     fontSize: typography.small,
     fontWeight: '900',
+    minWidth: 0,
   },
   groupTotal: {
     color: colors.primaryDark,
+    flexShrink: 0,
     fontSize: typography.small,
     fontWeight: '900',
-  },
-  transactionRows: {
-    gap: 0,
+    textAlign: 'right',
   },
   emptyText: {
     color: colors.muted,

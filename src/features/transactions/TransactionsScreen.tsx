@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { InteractionManager, Keyboard, Platform, ScrollView, TextInput, View } from 'react-native';
+import { InteractionManager, Keyboard, Platform, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CompactAccountSelector } from '../../components/CompactAccountSelector';
@@ -86,14 +86,11 @@ export function TransactionsScreen({
         />
       </View>
 
-      <ScrollView
-        contentContainerStyle={[styles.scrollContent, { paddingBottom: viewModel.bottomPadding }]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-      >
+      <View style={styles.listArea}>
         <TransactionsListCard
           accounts={snapshot.accounts}
           balanceAfterByEntryId={viewModel.balanceAfterByEntryId}
+          bottomPadding={viewModel.bottomPadding}
           categories={viewModel.categories}
           contextAccountId={contextAccountId}
           emptyMessage={viewModel.emptyMessage}
@@ -102,7 +99,7 @@ export function TransactionsScreen({
           onOpenTransaction={onOpenTransaction}
           showCurrencyCodes={viewModel.showCurrencyCodes}
         />
-      </ScrollView>
+      </View>
 
       <TransactionsBottomControls
         datePickerTarget={viewModel.datePickerTarget}

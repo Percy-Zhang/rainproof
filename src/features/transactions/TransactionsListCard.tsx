@@ -1,4 +1,5 @@
-import { Text, View } from 'react-native';
+import { useMemo } from 'react';
+import { SectionList, Text, View } from 'react-native';
 
 import { Card } from '../../components/ui';
 import {
@@ -6,13 +7,19 @@ import {
   getTransactionGroupCurrencyTotals,
   type TransactionDisplayGroup,
 } from '../../domain/transactionList';
+import type { TransactionDisplayEntry } from '../../domain/aggregates';
 import type { Account, CategoryDefinition } from '../../domain/types';
 import { transactionsScreenStyles as styles } from './TransactionsScreenStyles';
 import { TransactionListItem } from './TransactionListItems';
 
+type TransactionDisplaySection = TransactionDisplayGroup & {
+  data: TransactionDisplayEntry[];
+};
+
 export function TransactionsListCard({
   accounts,
   balanceAfterByEntryId,
+  bottomPadding,
   categories,
   contextAccountId,
   emptyMessage,
@@ -23,6 +30,7 @@ export function TransactionsListCard({
 }: {
   accounts: Account[];
   balanceAfterByEntryId: Record<string, number>;
+  bottomPadding: number;
   categories: CategoryDefinition[];
   contextAccountId?: string;
   emptyMessage: string;
@@ -31,30 +39,57 @@ export function TransactionsListCard({
   onOpenTransaction: (transactionId: string) => void;
   showCurrencyCodes: boolean;
 }) {
-  return (
-    <Card testID="transaction-list-card">
-      <Text style={styles.cardTitle}>Transactions</Text>
+  const sections = useMemo<TransactionDisplaySection[]>(
+    () => groups.map((group) => ({ ...group, data: group.entries })),
+    [groups],
+  );
+  const lastSectionKey = sections.length ? sections[sections.length - 1].key : undefined;
 
-      {groups.length ? (
-        <View style={styles.groups}>
-          {groups.map((group) => (
-            <TransactionGroupSection
-              key={group.key}
+  return (
+    <Card testID="transaction-list-card" style={styles.transactionListCard}>
+      <SectionList<TransactionDisplayEntry, TransactionDisplaySection>
+        sections={sections}
+        keyExtractor={(entry) => entry.id}
+        style={styles.transactionSectionList}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        stickySectionHeadersEnabled={false}
+        initialNumToRender={12}
+        maxToRenderPerBatch={12}
+        windowSize={7}
+        contentContainerStyle={[styles.transactionSectionListContent, { paddingBottom: bottomPadding }]}
+        ListHeaderComponent={<Text style={styles.transactionSectionListTitle}>Transactions</Text>}
+        ListEmptyComponent={
+          isLoading ? (
+            <TransactionsListSkeleton />
+          ) : (
+            <Text style={[styles.transactionContentInset, styles.emptyText]}>{emptyMessage}</Text>
+          )
+        }
+        renderSectionHeader={({ section }) => (
+          <GroupBreak
+            group={section}
+            showCurrencyCodes={showCurrencyCodes}
+          />
+        )}
+        renderSectionFooter={({ section }) => (
+          section.key === lastSectionKey ? null : <View style={styles.transactionGroupSpacer} />
+        )}
+        renderItem={({ item, index }) => (
+          <View style={styles.transactionRowInset}>
+            <TransactionListItem
+              entry={item}
               accounts={accounts}
-              balanceAfterByEntryId={balanceAfterByEntryId}
               categories={categories}
+              balanceAfterMinor={balanceAfterByEntryId[item.id] ?? 0}
               contextAccountId={contextAccountId}
-              group={group}
-              onOpenTransaction={onOpenTransaction}
+              firstInGroup={index === 0}
               showCurrencyCodes={showCurrencyCodes}
+              onPress={() => onOpenTransaction(item.transaction.id)}
             />
-          ))}
-        </View>
-      ) : isLoading ? (
-        <TransactionsListSkeleton />
-      ) : (
-        <Text style={styles.emptyText}>{emptyMessage}</Text>
-      )}
+          </View>
+        )}
+      />
     </Card>
   );
 }
@@ -64,7 +99,7 @@ function TransactionsListSkeleton() {
     <View
       accessible
       accessibilityLabel="Loading transactions"
-      style={styles.transactionSkeleton}
+      style={[styles.transactionContentInset, styles.transactionSkeleton]}
       testID="transactions-list-skeleton"
     >
       {[0, 1, 2].map((rowIndex) => (
@@ -81,48 +116,6 @@ function TransactionsListSkeleton() {
   );
 }
 
-function TransactionGroupSection({
-  accounts,
-  balanceAfterByEntryId,
-  categories,
-  contextAccountId,
-  group,
-  onOpenTransaction,
-  showCurrencyCodes,
-}: {
-  accounts: Account[];
-  balanceAfterByEntryId: Record<string, number>;
-  categories: CategoryDefinition[];
-  contextAccountId?: string;
-  group: TransactionDisplayGroup;
-  onOpenTransaction: (transactionId: string) => void;
-  showCurrencyCodes: boolean;
-}) {
-  return (
-    <View style={styles.group}>
-      <GroupBreak
-        group={group}
-        showCurrencyCodes={showCurrencyCodes}
-      />
-      <View style={styles.transactionRows}>
-        {group.entries.map((entry, index) => (
-          <TransactionListItem
-            key={entry.id}
-            entry={entry}
-            accounts={accounts}
-            categories={categories}
-            balanceAfterMinor={balanceAfterByEntryId[entry.id] ?? 0}
-            contextAccountId={contextAccountId}
-            firstInGroup={index === 0}
-            showCurrencyCodes={showCurrencyCodes}
-            onPress={() => onOpenTransaction(entry.transaction.id)}
-          />
-        ))}
-      </View>
-    </View>
-  );
-}
-
 function GroupBreak({
   group,
   showCurrencyCodes,
@@ -134,8 +127,12 @@ function GroupBreak({
 
   return (
     <View style={styles.groupBreak}>
-      <Text style={styles.groupTitle}>{group.label}</Text>
-      <Text style={styles.groupTotal}>Total: {formatTransactionCurrencyTotals(netTotals, showCurrencyCodes)}</Text>
+      <Text numberOfLines={1} style={styles.groupTitle}>
+        {group.label}
+      </Text>
+      <Text numberOfLines={1} style={styles.groupTotal}>
+        Total: {formatTransactionCurrencyTotals(netTotals, showCurrencyCodes)}
+      </Text>
     </View>
   );
 }
