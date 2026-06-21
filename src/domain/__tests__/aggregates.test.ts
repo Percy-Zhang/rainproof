@@ -3,6 +3,7 @@ import {
   getAccountBalances,
   getAccountBalancesAt,
   getBalanceAfterDisplayEntries,
+  getBalanceAfterDisplayEntriesForEntries,
   getBudgetUsage,
   getCashFlowSummary,
   getRainyDayProgress,
@@ -1068,6 +1069,49 @@ describe('aggregates', () => {
     expect(balances.txn_food).toBe(30800);
     expect(balances['txn_transfer:line_transfer_out']).toBe(25800);
     expect(balances['txn_transfer:line_transfer_in']).toBe(25000);
+  });
+
+  it('calculates balances only for selected visible display entries', () => {
+    const splitTransaction = makeTransaction('txn_split', 'expense');
+    const allTransactions = [...transactions, splitTransaction];
+    const allLines = [
+      ...lines,
+      makeLine({
+        id: 'line_split_food',
+        transactionId: 'txn_split',
+        amountMinor: -1200,
+        categoryId: 'food',
+      }),
+      makeLine({
+        id: 'line_split_home',
+        transactionId: 'txn_split',
+        amountMinor: -800,
+        categoryId: 'shopping',
+      }),
+    ];
+    const fullBalances = getBalanceAfterDisplayEntries({
+      accounts,
+      transactions: allTransactions,
+      lines: allLines,
+    });
+    const entries = getTransactionDisplayEntries({
+      transactions: allTransactions,
+      lines: allLines,
+      currencyCode: 'AUD',
+    });
+    const visibleEntries = entries.filter((entry) =>
+      ['txn_food', 'txn_transfer:line_transfer_out', 'txn_split'].includes(entry.id));
+
+    expect(getBalanceAfterDisplayEntriesForEntries({
+      accounts,
+      transactions: allTransactions,
+      lines: allLines,
+      entries: visibleEntries,
+    })).toEqual({
+      txn_food: fullBalances.txn_food,
+      'txn_transfer:line_transfer_out': fullBalances['txn_transfer:line_transfer_out'],
+      txn_split: fullBalances.txn_split,
+    });
   });
 
   it('calculates selected account balances before a group boundary', () => {

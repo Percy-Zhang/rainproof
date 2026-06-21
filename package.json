@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "jest --runInBand",
     "perf:large-data": "node scripts/run-large-dataset-perf.js",
-    "expo:check": "npx expo install --check"
+    "expo:check": "npx expo install --check",
+    "verify:local": "node scripts/run-local-verification.js"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.3",

@@ -1,13 +1,14 @@
 import {
   compareTransactionDisplayEntriesDescending,
   getAccountBalances,
-  getBalanceAfterDisplayEntries,
+  getBalanceAfterDisplayEntriesForEntries,
   getCashFlowSummary,
   getRainyDayProgress,
   getSpendingByCategory,
   getTransactionDisplayEntries,
   getUpcomingBills,
   groupBalancesByCurrency,
+  type TransactionDisplayEntry,
 } from '../../domain/aggregates';
 import { getBudgetUsagesForPeriods } from '../../domain/budgetUsage';
 import { defaultCategories } from '../../domain/categories';
@@ -469,30 +470,40 @@ function measureGlobalDerived(snapshot: AppSnapshot) {
 }
 
 function measureTransactionsViewModel(snapshot: AppSnapshot) {
+  const range = getDateRangeForPreset('last_month', DATASET_ANCHOR_DATE);
+  let displayEntries: TransactionDisplayEntry[] = [];
+  let visibleEntries = displayEntries;
+
   return measureSections({
-    balanceAfter: () =>
-      getBalanceAfterDisplayEntries({
-        accounts: snapshot.accounts,
-        transactions: snapshot.transactions,
-        lines: snapshot.transactionLines,
-      }),
-    groups: () => {
-      const range = getDateRangeForPreset('last_month', DATASET_ANCHOR_DATE);
-      const entries = getTransactionDisplayEntries({
-        transactions: snapshot.transactions,
+    entries: () => {
+      const transactionsInRange = snapshot.transactions.filter((transaction) =>
+        isWithinDateRange(transaction.datetime, range));
+      displayEntries = getTransactionDisplayEntries({
+        transactions: transactionsInRange,
         lines: snapshot.transactionLines,
         transactionLinks: snapshot.transactionLinks,
         accountIds: snapshot.accounts.filter((account) => !account.isArchived).map((account) => account.id),
-      }).filter((entry) => isWithinDateRange(entry.transaction.datetime, range));
+      });
+      return displayEntries;
+    },
+    filterSearch: () => {
       const searchedEntries = filterTransactionDisplayEntriesBySearch({
-        entries,
+        entries: displayEntries,
         query: '',
         accounts: snapshot.accounts,
         categories: snapshot.categories ?? defaultCategories,
-      }).sort(compareTransactionDisplayEntriesDescending);
-
-      return groupTransactionDisplayEntries(searchedEntries, getTransactionGroupGranularity(range));
+      });
+      visibleEntries = [...searchedEntries].sort(compareTransactionDisplayEntriesDescending);
+      return visibleEntries;
     },
+    balanceAfter: () =>
+      getBalanceAfterDisplayEntriesForEntries({
+        accounts: snapshot.accounts,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        entries: visibleEntries,
+      }),
+    groups: () => groupTransactionDisplayEntries(visibleEntries, getTransactionGroupGranularity(range)),
   });
 }
 

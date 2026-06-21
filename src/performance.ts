@@ -19,6 +19,10 @@ export function logDevPerfDuration(label: string, startedAt: number, metadata: P
 }
 
 export function timeDevPerf<T>(label: string, run: () => T, metadata?: PerfMetadataInput<T>): T {
+  if (!isDevPerfLoggingEnabled()) {
+    return run();
+  }
+
   const startedAt = Date.now();
 
   try {
@@ -36,6 +40,10 @@ export async function timeDevPerfAsync<T>(
   run: () => Promise<T>,
   metadata?: PerfMetadataInput<T>,
 ): Promise<T> {
+  if (!isDevPerfLoggingEnabled()) {
+    return run();
+  }
+
   const startedAt = Date.now();
 
   try {

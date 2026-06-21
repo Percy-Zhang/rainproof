@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Keyboard, Platform, ScrollView, TextInput, View } from 'react-native';
+import { InteractionManager, Keyboard, Platform, ScrollView, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { CompactAccountSelector } from '../../components/CompactAccountSelector';
@@ -43,8 +43,10 @@ export function TransactionsScreen({
   const insets = useSafeAreaInsets();
   const [searchFocused, setSearchFocused] = useState(false);
   const keyboardVisible = useKeyboardVisible();
+  const listReady = useDeferredTransactionListReady();
   const viewModel = useTransactionsViewModel({
     bottomInset: insets.bottom,
+    deferListDerivation: !listReady,
     defaultSelectedAccountIds,
     onPeriodStateChange,
     periodState,
@@ -96,6 +98,7 @@ export function TransactionsScreen({
           contextAccountId={contextAccountId}
           emptyMessage={viewModel.emptyMessage}
           groups={viewModel.groups}
+          isLoading={viewModel.isListDeferred}
           onOpenTransaction={onOpenTransaction}
           showCurrencyCodes={viewModel.showCurrencyCodes}
         />
@@ -112,6 +115,26 @@ export function TransactionsScreen({
       />
     </View>
   );
+}
+
+function useDeferredTransactionListReady(): boolean {
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (!cancelled) {
+        setReady(true);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      task.cancel?.();
+    };
+  }, []);
+
+  return ready;
 }
 
 function useKeyboardVisible(): boolean {

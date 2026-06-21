@@ -17,6 +17,7 @@ export function TransactionsListCard({
   contextAccountId,
   emptyMessage,
   groups,
+  isLoading,
   onOpenTransaction,
   showCurrencyCodes,
 }: {
@@ -26,6 +27,7 @@ export function TransactionsListCard({
   contextAccountId?: string;
   emptyMessage: string;
   groups: TransactionDisplayGroup[];
+  isLoading?: boolean;
   onOpenTransaction: (transactionId: string) => void;
   showCurrencyCodes: boolean;
 }) {
@@ -48,10 +50,34 @@ export function TransactionsListCard({
             />
           ))}
         </View>
+      ) : isLoading ? (
+        <TransactionsListSkeleton />
       ) : (
         <Text style={styles.emptyText}>{emptyMessage}</Text>
       )}
     </Card>
+  );
+}
+
+function TransactionsListSkeleton() {
+  return (
+    <View
+      accessible
+      accessibilityLabel="Loading transactions"
+      style={styles.transactionSkeleton}
+      testID="transactions-list-skeleton"
+    >
+      {[0, 1, 2].map((rowIndex) => (
+        <View key={rowIndex} style={styles.transactionSkeletonRow}>
+          <View style={styles.transactionSkeletonIcon} />
+          <View style={styles.transactionSkeletonBody}>
+            <View style={styles.transactionSkeletonLineWide} />
+            <View style={styles.transactionSkeletonLine} />
+          </View>
+          <View style={styles.transactionSkeletonAmount} />
+        </View>
+      ))}
+    </View>
   );
 }
 

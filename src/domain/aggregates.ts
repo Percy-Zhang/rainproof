@@ -1,7 +1,6 @@
 import { isWithinDateRange } from './dates';
 import { getLinkedStatsAdjustments } from './linkedStats';
 import { getUpcomingRecurringItems } from './recurringItems';
-import { getTransactionDisplayLinkStatus } from './transactionLinks';
 import type {
   Account,
   AccountBalance,
@@ -248,20 +247,25 @@ export function getTransactionDisplayEntries({
   }
 
   const accountFilter = accountIds?.length ? new Set(accountIds) : null;
+  const transactionIds = new Set(transactions.map((transaction) => transaction.id));
   const linesByTransaction = new Map<string, TransactionLine[]>();
+  const linkLookups = getTransactionDisplayLinkLookups(transactionLinks);
 
   for (const line of lines) {
     if (
+      !transactionIds.has(line.transactionId) ||
       (currencyCode && line.currencyCode !== currencyCode) ||
       (accountFilter && !accountFilter.has(line.accountId))
     ) {
       continue;
     }
 
-    linesByTransaction.set(line.transactionId, [
-      ...(linesByTransaction.get(line.transactionId) ?? []),
-      line,
-    ]);
+    const existingLines = linesByTransaction.get(line.transactionId);
+    if (existingLines) {
+      existingLines.push(line);
+    } else {
+      linesByTransaction.set(line.transactionId, [line]);
+    }
   }
 
   return transactions.flatMap((transaction) => {
@@ -272,10 +276,10 @@ export function getTransactionDisplayEntries({
 
     if (transaction.kind === 'transfer') {
       return visibleLines.map((line) => {
-        const linkStatus = getTransactionDisplayLinkStatus({
+        const linkStatus = getTransactionDisplayLinkStatusFromLookups({
           transactionId: transaction.id,
           lineIds: [line.id],
-          links: transactionLinks,
+          linkLookups,
           showLineLevel: false,
         });
         return {
@@ -292,10 +296,10 @@ export function getTransactionDisplayEntries({
     }
 
     const entryCurrencyCode = currencyCode ?? visibleLines[0].currencyCode;
-    const linkStatus = getTransactionDisplayLinkStatus({
+    const linkStatus = getTransactionDisplayLinkStatusFromLookups({
       transactionId: transaction.id,
       lineIds: visibleLines.map((line) => line.id),
-      links: transactionLinks,
+      linkLookups,
       showLineLevel: visibleLines.length > 1,
     });
     return [
@@ -313,6 +317,66 @@ export function getTransactionDisplayEntries({
       },
     ];
   });
+}
+
+export function getBalanceAfterDisplayEntriesForEntries({
+  accounts,
+  transactions,
+  lines,
+  entries,
+}: {
+  accounts: Account[];
+  transactions: Transaction[];
+  lines: TransactionLine[];
+  entries: TransactionDisplayEntry[];
+}): Record<string, number> {
+  if (!entries.length) {
+    return {};
+  }
+
+  const neededEntryIds = new Set(entries.map((entry) => entry.id));
+  const neededTransactionIds = new Set(entries.map((entry) => entry.transaction.id));
+  const transactionOrderById = new Map(transactions.map((transaction, index) => [transaction.id, index]));
+  const balances = new Map(accounts.map((account) => [account.id, account.openingBalanceMinor]));
+  const balancesByEntryId: Record<string, number> = {};
+  const linesByTransaction = new Map<string, TransactionLine[]>();
+
+  for (const line of lines) {
+    const existingLines = linesByTransaction.get(line.transactionId);
+    if (existingLines) {
+      existingLines.push(line);
+    } else {
+      linesByTransaction.set(line.transactionId, [line]);
+    }
+  }
+
+  const sortedTransactions = [...transactions].sort((left, right) =>
+    compareTransactionsAscendingWithOrder(left, right, transactionOrderById));
+  const seenNeededTransactionIds = new Set<string>();
+
+  for (const transaction of sortedTransactions) {
+    const transactionLines = linesByTransaction.get(transaction.id) ?? [];
+    transactionLines.sort((left, right) => left.id.localeCompare(right.id));
+
+    for (const line of transactionLines) {
+      const nextBalance = (balances.get(line.accountId) ?? 0) + line.amountMinor;
+      balances.set(line.accountId, nextBalance);
+
+      const entryId = transaction.kind === 'transfer' ? `${transaction.id}:${line.id}` : transaction.id;
+      if (neededEntryIds.has(entryId)) {
+        balancesByEntryId[entryId] = nextBalance;
+      }
+    }
+
+    if (neededTransactionIds.has(transaction.id)) {
+      seenNeededTransactionIds.add(transaction.id);
+      if (seenNeededTransactionIds.size === neededTransactionIds.size) {
+        break;
+      }
+    }
+  }
+
+  return balancesByEntryId;
 }
 
 export function getBalanceAfterDisplayEntries({
@@ -362,6 +426,77 @@ export function getBalanceAfterDisplayEntries({
   }
 
   return balancesByEntryId;
+}
+
+type TransactionDisplayLinkLookups = {
+  linkedLineIds: Set<string>;
+  parentLinkedTransactionIds: Set<string>;
+};
+
+function getTransactionDisplayLinkLookups(links: TransactionLink[]): TransactionDisplayLinkLookups {
+  const linkedLineIds = new Set<string>();
+  const parentLinkedTransactionIds = new Set<string>();
+
+  for (const link of links) {
+    const sourceLineId = normalizeOptionalLinkLineId(link.sourceLineId);
+    const targetLineId = normalizeOptionalLinkLineId(link.targetLineId);
+
+    if (sourceLineId) {
+      linkedLineIds.add(sourceLineId);
+    } else {
+      parentLinkedTransactionIds.add(link.sourceTransactionId);
+    }
+
+    if (targetLineId) {
+      linkedLineIds.add(targetLineId);
+    } else {
+      parentLinkedTransactionIds.add(link.targetTransactionId);
+    }
+  }
+
+  return { linkedLineIds, parentLinkedTransactionIds };
+}
+
+function getTransactionDisplayLinkStatusFromLookups({
+  transactionId,
+  lineIds,
+  linkLookups,
+  showLineLevel,
+}: {
+  transactionId: string;
+  lineIds: string[];
+  linkLookups: TransactionDisplayLinkLookups;
+  showLineLevel: boolean;
+}): { isParentLinked: boolean; linkedLineIds: string[] } {
+  const linkedLineIds = lineIds.filter((lineId) => linkLookups.linkedLineIds.has(lineId));
+  return {
+    isParentLinked:
+      linkLookups.parentLinkedTransactionIds.has(transactionId) || (!showLineLevel && linkedLineIds.length > 0),
+    linkedLineIds: showLineLevel ? linkedLineIds : [],
+  };
+}
+
+function normalizeOptionalLinkLineId(value?: string | null): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed || null;
+}
+
+function compareTransactionsAscendingWithOrder(
+  left: Transaction,
+  right: Transaction,
+  transactionOrderById: Map<string, number>,
+): number {
+  const datetimeDiff = new Date(left.datetime).getTime() - new Date(right.datetime).getTime();
+  if (datetimeDiff !== 0) {
+    return datetimeDiff;
+  }
+
+  const orderDiff = (transactionOrderById.get(left.id) ?? 0) - (transactionOrderById.get(right.id) ?? 0);
+  if (orderDiff !== 0) {
+    return orderDiff;
+  }
+
+  return left.id.localeCompare(right.id);
 }
 
 export function getAccountBalancesAt({

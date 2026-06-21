@@ -122,6 +122,46 @@ export const transactionsScreenStyles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.body,
   },
+  transactionSkeleton: {
+    gap: spacing.sm,
+  },
+  transactionSkeletonRow: {
+    alignItems: 'center',
+    borderTopColor: colors.faint,
+    borderTopWidth: 1,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    minHeight: 62,
+    paddingVertical: spacing.sm,
+  },
+  transactionSkeletonIcon: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 18,
+    height: 36,
+    width: 36,
+  },
+  transactionSkeletonBody: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  transactionSkeletonLineWide: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 4,
+    height: 12,
+    width: '72%',
+  },
+  transactionSkeletonLine: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 4,
+    height: 10,
+    width: '48%',
+  },
+  transactionSkeletonAmount: {
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 4,
+    height: 12,
+    width: 72,
+  },
   pressed: {
     opacity: 0.78,
   },

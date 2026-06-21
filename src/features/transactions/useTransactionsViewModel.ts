@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 import {
   compareTransactionDisplayEntriesDescending,
-  getBalanceAfterDisplayEntries,
+  getBalanceAfterDisplayEntriesForEntries,
   getTransactionDisplayEntries,
 } from '../../domain/aggregates';
 import { getInitialSelectedAccountIds, getSelectableAccounts, getSelectableAccountIds } from '../../domain/accountSelection';
@@ -13,6 +13,7 @@ import { getDateRangeForPreset, getInclusiveDateRange, isWithinDateRange, toDate
 import {
   filterTransactionDisplayEntriesBySearch,
   groupTransactionDisplayEntries,
+  type TransactionDisplayGroup,
 } from '../../domain/transactionList';
 import { getTransactionGroupGranularity } from '../../domain/transactionGrouping';
 import type { AppSnapshot } from '../../domain/types';
@@ -20,6 +21,19 @@ import { timeDevPerf } from '../../performance';
 import type { PeriodCarouselOption, PeriodOption } from './PeriodCarousel';
 
 type RangeMode = 'preset' | 'custom';
+
+type CachedTransactionsListDerivation = {
+  accounts: AppSnapshot['accounts'];
+  balanceAfterByEntryId: Record<string, number>;
+  cacheKey: string;
+  categories: AppSnapshot['categories'];
+  groups: TransactionDisplayGroup[];
+  transactionLines: AppSnapshot['transactionLines'];
+  transactionLinks: AppSnapshot['transactionLinks'];
+  transactions: AppSnapshot['transactions'];
+};
+
+let cachedTransactionsListDerivation: CachedTransactionsListDerivation | null = null;
 
 export type TransactionDatePickerTarget = 'start' | 'end';
 
@@ -41,12 +55,14 @@ export function createDefaultTransactionPeriodState(): TransactionPeriodState {
 
 export function useTransactionsViewModel({
   bottomInset,
+  deferListDerivation = false,
   defaultSelectedAccountIds,
   onPeriodStateChange,
   periodState,
   snapshot,
 }: {
   bottomInset: number;
+  deferListDerivation?: boolean;
   defaultSelectedAccountIds?: string[];
   onPeriodStateChange: (periodState: TransactionPeriodState) => void;
   periodState: TransactionPeriodState;
@@ -71,62 +87,147 @@ export function useTransactionsViewModel({
         : getDateRangeForPreset(preset),
     [customEndDate, customStartDate, preset, rangeMode],
   );
+  const cacheKey = getTransactionsListCacheKey({
+    endIso: range.endIso,
+    searchQuery,
+    selectedAccountIds,
+    startIso: range.startIso,
+  });
+  const cachedListDerivation = useMemo(
+    () =>
+      deferListDerivation
+        ? getCachedTransactionsListDerivation({
+          accounts: snapshot.accounts,
+          cacheKey,
+          categories,
+          transactionLines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          transactions: snapshot.transactions,
+        })
+        : null,
+    [
+      cacheKey,
+      categories,
+      deferListDerivation,
+      snapshot.accounts,
+      snapshot.transactionLines,
+      snapshot.transactionLinks,
+      snapshot.transactions,
+    ],
+  );
+  const displayEntries = useMemo(() => {
+    return timeDevPerf(
+      'transactionsViewModel.entries',
+      () => {
+        if (deferListDerivation) {
+          return [];
+        }
+
+        return deriveTransactionDisplayEntries({
+          accountIds: selectedAccountIds,
+          range,
+          snapshot,
+        });
+      },
+      (entries) => ({
+        selectedAccounts: selectedAccountIds.length,
+        transactions: snapshot.transactions.length,
+        visibleTransactions: new Set(entries.map((entry) => entry.transaction.id)).size,
+        lines: snapshot.transactionLines.length,
+        links: snapshot.transactionLinks.length,
+        entries: entries.length,
+      }),
+    );
+  }, [
+    deferListDerivation,
+    range,
+    selectedAccountIds,
+    snapshot.transactionLines,
+    snapshot.transactionLinks,
+    snapshot.transactions,
+  ]);
+  const visibleEntries = useMemo(() => {
+    return timeDevPerf(
+      'transactionsViewModel.filterSearch',
+      () => {
+        return deriveVisibleTransactionEntries({
+          entries: displayEntries,
+          categories,
+          searchQuery,
+          snapshot,
+        });
+      },
+      (entries) => ({
+        accounts: snapshot.accounts.length,
+        entries: displayEntries.length,
+        searchedEntries: entries.length,
+      }),
+    );
+  }, [
+    categories,
+    displayEntries,
+    searchQuery,
+    snapshot.accounts,
+  ]);
   const balanceAfterByEntryId = useMemo(
     () =>
       timeDevPerf(
         'transactionsViewModel.balanceAfter',
         () =>
-          getBalanceAfterDisplayEntries({
-            accounts: snapshot.accounts,
-            transactions: snapshot.transactions,
-            lines: snapshot.transactionLines,
+          deriveBalanceAfterByEntryId({
+            entries: visibleEntries,
+            snapshot,
           }),
         {
           accounts: snapshot.accounts.length,
           transactions: snapshot.transactions.length,
           lines: snapshot.transactionLines.length,
+          entries: visibleEntries.length,
         },
       ),
-    [snapshot.accounts, snapshot.transactionLines, snapshot.transactions],
+    [snapshot.accounts, snapshot.transactionLines, snapshot.transactions, visibleEntries],
   );
   const groups = useMemo(() => {
     return timeDevPerf(
       'transactionsViewModel.groups',
-      () => {
-        const entries = getTransactionDisplayEntries({
-          transactions: snapshot.transactions,
-          lines: snapshot.transactionLines,
-          transactionLinks: snapshot.transactionLinks,
-          accountIds: selectedAccountIds,
-        }).filter((entry) => isWithinDateRange(entry.transaction.datetime, range));
-        const searchedEntries = filterTransactionDisplayEntriesBySearch({
-          entries,
-          query: searchQuery,
-          accounts: snapshot.accounts,
-          categories,
-        }).sort(compareTransactionDisplayEntriesDescending);
-
-        return groupTransactionDisplayEntries(searchedEntries, getTransactionGroupGranularity(range));
-      },
+      () => groupTransactionDisplayEntries(visibleEntries, getTransactionGroupGranularity(range)),
       (nextGroups) => ({
-        accounts: snapshot.accounts.length,
-        selectedAccounts: selectedAccountIds.length,
-        transactions: snapshot.transactions.length,
-        lines: snapshot.transactionLines.length,
-        links: snapshot.transactionLinks.length,
+        entries: visibleEntries.length,
         groups: nextGroups.length,
       }),
     );
   }, [
-    categories,
     range,
-    searchQuery,
-    selectedAccountIds,
+    visibleEntries,
+  ]);
+  useEffect(() => {
+    if (deferListDerivation) {
+      return;
+    }
+
+    setCachedTransactionsListDerivation({
+      accounts: snapshot.accounts,
+      balanceAfterByEntryId,
+      cacheKey,
+      categories,
+      groups,
+      transactionLines: snapshot.transactionLines,
+      transactionLinks: snapshot.transactionLinks,
+      transactions: snapshot.transactions,
+    });
+  }, [
+    balanceAfterByEntryId,
+    cacheKey,
+    categories,
+    deferListDerivation,
+    groups,
     snapshot.accounts,
     snapshot.transactionLines,
     snapshot.transactionLinks,
     snapshot.transactions,
   ]);
+  const renderedBalanceAfterByEntryId = cachedListDerivation?.balanceAfterByEntryId ?? balanceAfterByEntryId;
+  const renderedGroups = cachedListDerivation?.groups ?? groups;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
   const bottomPadding = (rangeMode === 'custom' ? 220 : 140) + bottomInset;
   const emptyMessage = selectedAccountIds.length
@@ -202,15 +303,16 @@ export function useTransactionsViewModel({
   }
 
   return {
-    balanceAfterByEntryId,
+    balanceAfterByEntryId: renderedBalanceAfterByEntryId,
     bottomPadding,
     categories,
     customEndDate,
     customStartDate,
     datePickerTarget,
     emptyMessage,
-    groups,
+    groups: renderedGroups,
     handleDatePickerChange,
+    isListDeferred: deferListDerivation && !cachedListDerivation,
     rangeMode,
     searchQuery,
     selectedAccountIds,
@@ -235,4 +337,110 @@ export function getTransactionsInitialSelectedAccountIds(
 
 function areAccountIdListsEqual(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((accountId, index) => accountId === right[index]);
+}
+
+function deriveTransactionDisplayEntries({
+  accountIds,
+  range,
+  snapshot,
+}: {
+  accountIds: string[];
+  range: ReturnType<typeof getDateRangeForPreset>;
+  snapshot: AppSnapshot;
+}) {
+  const transactionsInRange = snapshot.transactions.filter((transaction) =>
+    isWithinDateRange(transaction.datetime, range));
+  return getTransactionDisplayEntries({
+    transactions: transactionsInRange,
+    lines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    accountIds,
+  });
+}
+
+function deriveVisibleTransactionEntries({
+  categories,
+  entries,
+  searchQuery,
+  snapshot,
+}: {
+  categories: AppSnapshot['categories'];
+  entries: ReturnType<typeof getTransactionDisplayEntries>;
+  searchQuery: string;
+  snapshot: AppSnapshot;
+}) {
+  const searchedEntries = filterTransactionDisplayEntriesBySearch({
+    entries,
+    query: searchQuery,
+    accounts: snapshot.accounts,
+    categories,
+  });
+  return [...searchedEntries].sort(compareTransactionDisplayEntriesDescending);
+}
+
+function deriveBalanceAfterByEntryId({
+  entries,
+  snapshot,
+}: {
+  entries: ReturnType<typeof getTransactionDisplayEntries>;
+  snapshot: AppSnapshot;
+}) {
+  return getBalanceAfterDisplayEntriesForEntries({
+    accounts: snapshot.accounts,
+    transactions: snapshot.transactions,
+    lines: snapshot.transactionLines,
+    entries,
+  });
+}
+
+function getTransactionsListCacheKey({
+  endIso,
+  searchQuery,
+  selectedAccountIds,
+  startIso,
+}: {
+  endIso: string;
+  searchQuery: string;
+  selectedAccountIds: string[];
+  startIso: string;
+}): string {
+  return [
+    startIso,
+    endIso,
+    selectedAccountIds.join('\u001f'),
+    searchQuery,
+  ].join('\u001e');
+}
+
+function getCachedTransactionsListDerivation({
+  accounts,
+  cacheKey,
+  categories,
+  transactionLines,
+  transactionLinks,
+  transactions,
+}: {
+  accounts: AppSnapshot['accounts'];
+  cacheKey: string;
+  categories: AppSnapshot['categories'];
+  transactionLines: AppSnapshot['transactionLines'];
+  transactionLinks: AppSnapshot['transactionLinks'];
+  transactions: AppSnapshot['transactions'];
+}): CachedTransactionsListDerivation | null {
+  if (
+    cachedTransactionsListDerivation?.accounts !== accounts ||
+    cachedTransactionsListDerivation.cacheKey !== cacheKey ||
+    cachedTransactionsListDerivation.categories !== categories ||
+    cachedTransactionsListDerivation.transactionLines !== transactionLines ||
+    cachedTransactionsListDerivation.transactionLinks !== transactionLinks ||
+    cachedTransactionsListDerivation.transactions !== transactions
+  ) {
+    return null;
+  }
+
+  return cachedTransactionsListDerivation;
+}
+
+function setCachedTransactionsListDerivation(nextCache: CachedTransactionsListDerivation): void {
+  cachedTransactionsListDerivation = nextCache;
 }
