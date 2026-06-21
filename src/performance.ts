@@ -3,18 +3,24 @@ type PerfMetadataValue = boolean | number | string | null | undefined;
 export type PerfMetadata = Record<string, PerfMetadataValue>;
 
 type PerfMetadataInput<T> = PerfMetadata | ((result: T) => PerfMetadata);
+type PerfMetadataFactory = PerfMetadata | (() => PerfMetadata);
 
 export function isDevPerfLoggingEnabled(): boolean {
-  return typeof __DEV__ !== 'undefined' && __DEV__ && process.env.NODE_ENV !== 'test';
+  return (
+    typeof __DEV__ !== 'undefined' &&
+    __DEV__ &&
+    process.env.NODE_ENV !== 'test' &&
+    process.env.EXPO_PUBLIC_RAINPROOF_PERF_LOGS === '1'
+  );
 }
 
-export function logDevPerfDuration(label: string, startedAt: number, metadata: PerfMetadata = {}): void {
+export function logDevPerfDuration(label: string, startedAt: number, metadata: PerfMetadataFactory = {}): void {
   if (!isDevPerfLoggingEnabled()) {
     return;
   }
 
   const durationMs = Date.now() - startedAt;
-  const details = formatPerfMetadata(metadata);
+  const details = formatPerfMetadata(resolvePerfMetadataFactory(metadata));
   console.info(`[perf] ${label} ${durationMs}ms${details}`);
 }
 
@@ -62,6 +68,10 @@ function resolvePerfMetadata<T>(metadata: PerfMetadataInput<T> | undefined, resu
   }
 
   return typeof metadata === 'function' ? metadata(result) : metadata;
+}
+
+function resolvePerfMetadataFactory(metadata: PerfMetadataFactory): PerfMetadata {
+  return typeof metadata === 'function' ? metadata() : metadata;
 }
 
 function formatPerfMetadata(metadata: PerfMetadata): string {

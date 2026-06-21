@@ -52,7 +52,8 @@ export function TransactionsScreen({
     periodState,
     snapshot,
   });
-  const contextAccountId = viewModel.selectedAccountIds.length === 1 ? viewModel.selectedAccountIds[0] : undefined;
+  const contextAccountId =
+    viewModel.listSelectedAccountIds.length === 1 ? viewModel.listSelectedAccountIds[0] : undefined;
   const collapseAccountSelector = shouldCollapseTransactionsAccountSelector({
     keyboardVisible,
     searchFocused,

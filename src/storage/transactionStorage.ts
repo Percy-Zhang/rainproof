@@ -1,7 +1,7 @@
 import { normalizeCurrencyCode } from '../domain/money';
 import { validateSplitTransactionLines } from '../domain/splitTransactions';
 import type { NewTransactionInput, Transaction, TransactionKind, TransactionLine, UpdateTransactionInput } from '../domain/types';
-import { logDevPerfDuration, type PerfMetadata, timeDevPerf, timeDevPerfAsync } from '../performance';
+import { timeDevPerfAsync } from '../performance';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
 import {
@@ -21,7 +21,6 @@ type TransactionLinePersistencePlan = {
 };
 
 type TransactionWriteDatabase = Pick<RepositoryDatabase, 'runAsync'>;
-type AddTransactionStrategy = 'manual';
 
 export type AddTransactionStorageResult = {
   lines: TransactionLine[];
@@ -136,33 +135,15 @@ export async function addTransactionStorage(
   input: NewTransactionInput,
   records?: AddTransactionStorageResult,
 ): Promise<AddTransactionStorageResult> {
-  const metadata = getTransactionWritePerfMetadata(input, 'manual');
-  const beforeTransactionStartedAt = Date.now();
-  let callbackFinishedAt: number | null = null;
+  const metadata = getTransactionWritePerfMetadata(input);
   let result: AddTransactionStorageResult | null = null;
 
   await timeDevPerfAsync(
     'transactionStorage.addTransaction.total',
     async () => {
-      await timeDevPerfAsync(
-        'transactionStorage.addTransaction.transaction',
-        () =>
-          runAddTransactionWriteTransaction(db, metadata, async (transactionDb) => {
-            logAddTransactionBoundary('transactionStorage.addTransaction.beforeCallback', beforeTransactionStartedAt, metadata);
-            const callbackStartedAt = Date.now();
-            try {
-              result = await insertTransactionRecordsStorage(transactionDb, input, { records });
-            } finally {
-              callbackFinishedAt = Date.now();
-              logAddTransactionBoundary('transactionStorage.addTransaction.callback', callbackStartedAt, metadata);
-            }
-          }),
-        metadata,
-      );
-
-      if (callbackFinishedAt !== null) {
-        logAddTransactionBoundary('transactionStorage.addTransaction.afterCallbackToResolved', callbackFinishedAt, metadata);
-      }
+      await runAddTransactionWriteTransaction(db, async (transactionDb) => {
+        result = await insertTransactionRecordsStorage(transactionDb, input, { records });
+      });
     },
     metadata,
   );
@@ -179,53 +160,31 @@ export async function insertTransactionRecordsStorage(
   input: NewTransactionInput,
   options: InsertTransactionRecordsOptions = {},
 ): Promise<AddTransactionStorageResult> {
-  const metadata = getTransactionWritePerfMetadata(input);
-  timeDevPerf(
-    'transactionStorage.insertRecords.validation',
-    () => {
-      validateTransactionLinesForStorage(input.kind, input.lines);
-      if (options.records) {
-        validateAddTransactionStorageRecords(input, options.records);
-      }
-    },
-    metadata,
+  validateTransactionLinesForStorage(input.kind, input.lines);
+  if (options.records) {
+    validateAddTransactionStorageRecords(input, options.records);
+  }
+
+  const records = options.records ?? createAddTransactionStorageRecords(input, options);
+
+  await db.runAsync(
+    `INSERT INTO transactions (
+      id, kind, title, datetime, notes, labels_json, group_id, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    records.transaction.id,
+    records.transaction.kind,
+    records.transaction.title,
+    records.transaction.datetime,
+    records.transaction.notes,
+    JSON.stringify(records.transaction.labels),
+    records.transaction.groupId,
+    records.transaction.createdAt,
+    records.transaction.updatedAt,
   );
 
-  const records = timeDevPerf(
-    'transactionStorage.insertRecords.identifiers',
-    () => options.records ?? createAddTransactionStorageRecords(input, options),
-    metadata,
-  );
-
-  await timeDevPerfAsync(
-    'transactionStorage.insertRecords.parent',
-    () =>
-      db.runAsync(
-        `INSERT INTO transactions (
-          id, kind, title, datetime, notes, labels_json, group_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        records.transaction.id,
-        records.transaction.kind,
-        records.transaction.title,
-        records.transaction.datetime,
-        records.transaction.notes,
-        JSON.stringify(records.transaction.labels),
-        records.transaction.groupId,
-        records.transaction.createdAt,
-        records.transaction.updatedAt,
-      ),
-    metadata,
-  );
-
-  await timeDevPerfAsync(
-    'transactionStorage.insertRecords.lines',
-    async () => {
-      for (const line of records.lines) {
-        await insertTransactionLineStorage(db, line);
-      }
-    },
-    metadata,
-  );
+  for (const line of records.lines) {
+    await insertTransactionLineStorage(db, line);
+  }
 
   return records;
 }
@@ -629,32 +588,19 @@ function validateTransferLinesForStorage(lines: TransactionLineInput[]): void {
 
 async function runAddTransactionWriteTransaction(
   db: RepositoryDatabase,
-  metadata: PerfMetadata,
   task: (transactionDb: TransactionWriteDatabase) => Promise<void>,
 ): Promise<void> {
   let transactionOpen = false;
   try {
-    await timeDevPerfAsync(
-      'transactionStorage.addTransaction.manual.begin',
-      () => db.execAsync('BEGIN IMMEDIATE TRANSACTION'),
-      metadata,
-    );
+    await db.execAsync('BEGIN IMMEDIATE TRANSACTION');
     transactionOpen = true;
     await task(db);
-    await timeDevPerfAsync(
-      'transactionStorage.addTransaction.manual.commit',
-      () => db.execAsync('COMMIT'),
-      metadata,
-    );
+    await db.execAsync('COMMIT');
     transactionOpen = false;
   } catch (error) {
     if (transactionOpen) {
       try {
-        await timeDevPerfAsync(
-          'transactionStorage.addTransaction.manual.rollback',
-          () => db.execAsync('ROLLBACK'),
-          metadata,
-        );
+        await db.execAsync('ROLLBACK');
       } catch {
         // Preserve the original insert/commit error; rollback can fail if SQLite already closed the transaction.
       }
@@ -663,14 +609,13 @@ async function runAddTransactionWriteTransaction(
   }
 }
 
-function getTransactionWritePerfMetadata(input: NewTransactionInput, strategy?: AddTransactionStrategy) {
+function getTransactionWritePerfMetadata(input: NewTransactionInput) {
   return {
     kind: input.kind,
     lines: input.lines.length,
     split: input.kind !== 'transfer' && input.lines.length > 1,
     transfer: input.kind === 'transfer',
     crossCurrencyTransfer: isCrossCurrencyTransferInput(input),
-    ...(strategy ? { strategy } : {}),
   };
 }
 
@@ -680,8 +625,4 @@ function isCrossCurrencyTransferInput(input: NewTransactionInput): boolean {
   }
 
   return new Set(input.lines.map((line) => normalizeCurrencyCode(line.currencyCode))).size > 1;
-}
-
-function logAddTransactionBoundary(label: string, startedAt: number, metadata: PerfMetadata): void {
-  logDevPerfDuration(label, startedAt, metadata);
 }

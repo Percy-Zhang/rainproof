@@ -1,6 +1,6 @@
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useMemo, useState } from 'react';
-import { Platform } from 'react-native';
+import { InteractionManager, Platform } from 'react-native';
 
 import {
   compareTransactionDisplayEntriesDescending,
@@ -34,6 +34,9 @@ type CachedTransactionsListDerivation = {
 };
 
 let cachedTransactionsListDerivation: CachedTransactionsListDerivation | null = null;
+
+const ACCOUNT_FILTER_APPLY_DELAY_MS = 80;
+const SEARCH_FILTER_APPLY_DELAY_MS = 180;
 
 export type TransactionDatePickerTarget = 'start' | 'end';
 
@@ -75,8 +78,10 @@ export function useTransactionsViewModel({
   );
   const selectableAccounts = useMemo(() => getSelectableAccounts(snapshot.accounts), [snapshot.accounts]);
   const [selectedAccountIds, setSelectedAccountIds] = useState(initialSelectedAccountIds);
+  const [appliedSelectedAccountIds, setAppliedSelectedAccountIds] = useState(initialSelectedAccountIds);
   const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
   const { customEndDate, customStartDate, preset, rangeMode } = periodState;
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -89,8 +94,8 @@ export function useTransactionsViewModel({
   );
   const cacheKey = getTransactionsListCacheKey({
     endIso: range.endIso,
-    searchQuery,
-    selectedAccountIds,
+    searchQuery: appliedSearchQuery,
+    selectedAccountIds: appliedSelectedAccountIds,
     startIso: range.startIso,
   });
   const cachedListDerivation = useMemo(
@@ -124,13 +129,13 @@ export function useTransactionsViewModel({
         }
 
         return deriveTransactionDisplayEntries({
-          accountIds: selectedAccountIds,
+          accountIds: appliedSelectedAccountIds,
           range,
           snapshot,
         });
       },
       (entries) => ({
-        selectedAccounts: selectedAccountIds.length,
+        selectedAccounts: appliedSelectedAccountIds.length,
         transactions: snapshot.transactions.length,
         visibleTransactions: new Set(entries.map((entry) => entry.transaction.id)).size,
         lines: snapshot.transactionLines.length,
@@ -141,7 +146,7 @@ export function useTransactionsViewModel({
   }, [
     deferListDerivation,
     range,
-    selectedAccountIds,
+    appliedSelectedAccountIds,
     snapshot.transactionLines,
     snapshot.transactionLinks,
     snapshot.transactions,
@@ -153,7 +158,7 @@ export function useTransactionsViewModel({
         return deriveVisibleTransactionEntries({
           entries: displayEntries,
           categories,
-          searchQuery,
+          searchQuery: appliedSearchQuery,
           snapshot,
         });
       },
@@ -166,7 +171,7 @@ export function useTransactionsViewModel({
   }, [
     categories,
     displayEntries,
-    searchQuery,
+    appliedSearchQuery,
     snapshot.accounts,
   ]);
   const balanceAfterByEntryId = useMemo(
@@ -230,11 +235,41 @@ export function useTransactionsViewModel({
   const renderedGroups = cachedListDerivation?.groups ?? groups;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
   const bottomPadding = (rangeMode === 'custom' ? 220 : 140) + bottomInset;
-  const emptyMessage = selectedAccountIds.length
-    ? searchQuery.trim()
+  const emptyMessage = appliedSelectedAccountIds.length
+    ? appliedSearchQuery.trim()
       ? 'No transactions match this search.'
       : 'No transactions in this period.'
     : 'No accounts selected.';
+
+  useEffect(() => {
+    if (
+      areAccountIdListsEqual(appliedSelectedAccountIds, selectedAccountIds) &&
+      appliedSearchQuery === searchQuery
+    ) {
+      return;
+    }
+
+    let interactionTask: { cancel?: () => void } | null = null;
+    const delayMs = appliedSearchQuery === searchQuery ? ACCOUNT_FILTER_APPLY_DELAY_MS : SEARCH_FILTER_APPLY_DELAY_MS;
+    const timeoutId = setTimeout(() => {
+      interactionTask = InteractionManager.runAfterInteractions(() => {
+        setAppliedSelectedAccountIds((currentIds) =>
+          areAccountIdListsEqual(currentIds, selectedAccountIds) ? currentIds : selectedAccountIds,
+        );
+        setAppliedSearchQuery((currentQuery) => (currentQuery === searchQuery ? currentQuery : searchQuery));
+      });
+    }, delayMs);
+
+    return () => {
+      clearTimeout(timeoutId);
+      interactionTask?.cancel?.();
+    };
+  }, [
+    appliedSearchQuery,
+    appliedSelectedAccountIds,
+    searchQuery,
+    selectedAccountIds,
+  ]);
 
   useEffect(() => {
     if (hasLocalAccountOverride) {
@@ -313,6 +348,7 @@ export function useTransactionsViewModel({
     groups: renderedGroups,
     handleDatePickerChange,
     isListDeferred: deferListDerivation && !cachedListDerivation,
+    listSelectedAccountIds: appliedSelectedAccountIds,
     rangeMode,
     searchQuery,
     selectedAccountIds,

@@ -196,7 +196,7 @@ export function useRainproofData(): RainproofDataState {
     const nextSnapshot = await repository.getSnapshot();
     snapshotRef.current = nextSnapshot;
     setSnapshot(nextSnapshot);
-    logDevPerfDuration('rainproofData.refresh', startedAt, getSnapshotPerfCounts(nextSnapshot));
+    logDevPerfDuration('rainproofData.refresh', startedAt, () => getSnapshotPerfCounts(nextSnapshot));
   }, []);
 
   const applySnapshotPatch = useCallback((patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => {
@@ -275,7 +275,7 @@ export function useRainproofData(): RainproofDataState {
             const patchedSnapshot = applySnapshotPatch(mutationResult.patchSnapshot);
             if (patchedSnapshot) {
               refreshMode = 'patched';
-              logDevPerfDuration(`rainproofData.${label}.patch`, patchStartedAt, getSnapshotPerfCounts(patchedSnapshot));
+              logDevPerfDuration(`rainproofData.${label}.patch`, patchStartedAt, () => getSnapshotPerfCounts(patchedSnapshot));
             }
           } catch {
             refreshMode = 'full';
@@ -844,7 +844,7 @@ export function useRainproofData(): RainproofDataState {
         upcomingBills,
         cashFlow,
       };
-    }, getSnapshotPerfCounts(snapshot));
+    }, () => getSnapshotPerfCounts(snapshot));
   }, [snapshot]);
 
   const actions = useMemo<RainproofActions>(
@@ -1045,7 +1045,7 @@ function applyAcceptedOptimisticAddTransaction({
   logDevPerfDuration(
     'rainproofData.addTransaction.optimisticPatch',
     optimisticPatchStartedAt,
-    getSnapshotPerfCounts(optimisticSnapshot),
+    () => getSnapshotPerfCounts(optimisticSnapshot),
   );
   setError('');
 
@@ -1110,11 +1110,11 @@ function applyAcceptedOptimisticEditTransaction({
   logDevPerfDuration(
     'rainproofData.updateTransaction.optimisticPatch',
     optimisticPatchStartedAt,
-    {
+    () => ({
       ...getSnapshotPerfCounts(optimisticSnapshot),
       insertedLines: optimisticRecords.insertedLineIds.length,
       removedLines: optimisticRecords.removedLineIds.length,
-    },
+    }),
   );
   setError('');
 
@@ -1172,11 +1172,11 @@ function applyAcceptedOptimisticDeleteTransaction({
   logDevPerfDuration(
     'rainproofData.deleteTransaction.optimisticPatch',
     optimisticPatchStartedAt,
-    {
+    () => ({
       ...getSnapshotPerfCounts(optimisticSnapshot),
       linksRemoved: rollback.links.length,
       linesRemoved: rollback.lines.length,
-    },
+    }),
   );
   setError('');
 
@@ -1230,7 +1230,7 @@ function applyAcceptedOptimisticAddTransactionLink({
   logDevPerfDuration(
     'rainproofData.addTransactionLink.optimisticPatch',
     optimisticPatchStartedAt,
-    getSnapshotPerfCounts(optimisticSnapshot),
+    () => getSnapshotPerfCounts(optimisticSnapshot),
   );
   setError('');
 
@@ -1286,7 +1286,7 @@ function applyAcceptedOptimisticUpdateTransactionLink({
   logDevPerfDuration(
     'rainproofData.updateTransactionLink.optimisticPatch',
     optimisticPatchStartedAt,
-    getSnapshotPerfCounts(optimisticSnapshot),
+    () => getSnapshotPerfCounts(optimisticSnapshot),
   );
   setError('');
 
@@ -1339,7 +1339,7 @@ function applyAcceptedOptimisticDeleteTransactionLink({
   logDevPerfDuration(
     'rainproofData.deleteTransactionLink.optimisticPatch',
     optimisticPatchStartedAt,
-    getSnapshotPerfCounts(optimisticSnapshot),
+    () => getSnapshotPerfCounts(optimisticSnapshot),
   );
   setError('');
 
@@ -1394,12 +1394,12 @@ function applyAcceptedOptimisticTransactionLinkBatch({
   logDevPerfDuration(
     'rainproofData.saveTransactionLinkBatch.optimisticPatch',
     optimisticPatchStartedAt,
-    {
+    () => ({
       ...getSnapshotPerfCounts(optimisticSnapshot),
       addedLinks: optimisticRecords.addedLinks.length,
       deletedLinks: optimisticRecords.deletedLinkIds.length,
       updatedLinks: optimisticRecords.updatedLinks.length,
-    },
+    }),
   );
   setError('');
 
@@ -1614,10 +1614,10 @@ async function persistOptimisticAddTransactionLink({
       logDevPerfDuration(
         'rainproofData.addTransactionLink.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
@@ -1670,10 +1670,10 @@ async function persistOptimisticUpdateTransactionLink({
       logDevPerfDuration(
         'rainproofData.updateTransactionLink.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
@@ -1715,10 +1715,10 @@ async function persistOptimisticDeleteTransactionLink({
       logDevPerfDuration(
         'rainproofData.deleteTransactionLink.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
@@ -1811,10 +1811,10 @@ async function persistOptimisticTransactionLinkBatch({
       logDevPerfDuration(
         'rainproofData.saveTransactionLinkBatch.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
@@ -1926,10 +1926,10 @@ async function persistOptimisticEditTransaction({
       logDevPerfDuration(
         'rainproofData.updateTransaction.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
@@ -1981,10 +1981,10 @@ async function persistOptimisticDeleteTransaction({
       logDevPerfDuration(
         'rainproofData.deleteTransaction.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
@@ -2110,10 +2110,10 @@ async function persistOptimisticAddTransaction({
       logDevPerfDuration(
         'rainproofData.addTransaction.rollback',
         rollbackStartedAt,
-        {
+        () => ({
           ...getSnapshotPerfCounts(rolledBackSnapshot),
           refresh: 'patched',
-        },
+        }),
       );
     } else {
       await refresh();
