@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { AccountIconBadge } from '../../components/AccountDisplay';
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
@@ -213,14 +213,6 @@ export function getNativePickerValue(dateValue: string, timeValue: string): Date
   const [year, month, day] = dateValue.split('-').map(Number);
   const [hour, minute] = timeValue.split(':').map(Number);
   return new Date(year, month - 1, day, hour, minute, 0, 0);
-}
-
-export function getNativePickerDisplay(mode: NativePickerMode): 'calendar' | 'clock' | 'compact' {
-  if (Platform.OS === 'ios') {
-    return 'compact';
-  }
-
-  return mode === 'date' ? 'calendar' : 'clock';
 }
 
 function getTint(color: string): string {

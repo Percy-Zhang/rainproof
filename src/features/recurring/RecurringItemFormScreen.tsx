@@ -1,8 +1,9 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useMemo, useState } from 'react';
-import { BackHandler, Keyboard, Platform, Pressable, Text, View } from 'react-native';
+import { BackHandler, Keyboard, Platform } from 'react-native';
 
+import { FloatingDateTimePicker } from '../../components/FloatingDateTimePicker';
 import { ActionButton, Chip, FormError, TextField } from '../../components/ui';
 import {
   FormChipRow,
@@ -11,7 +12,6 @@ import {
   FormScreenShell,
   FormSection,
   KeyboardAwareFormScroll,
-  formLayoutStyles,
 } from '../../components/FormLayout';
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
 import { getAccountBalances } from '../../domain/aggregates';
@@ -53,7 +53,6 @@ import type {
 import { CategorySelectionField } from '../categorySelection/CategorySelectionField';
 import {
   AutocompleteField,
-  getNativePickerDisplay,
   NativePickerRow,
   SelectorRow,
   TransactionPickerScreen,
@@ -378,35 +377,12 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
             value={isValidDateOnly(nextDueDate) ? formatLongDateLabel(nextDueDate) : 'Choose date'}
             onPress={openDatePicker}
           />
-          {datePickerOpen ? (
-            Platform.OS === 'android' ? (
-              <DateTimePicker
-                value={datePickerValue}
-                mode="date"
-                display={getNativePickerDisplay('date')}
-                onChange={handleDatePickerChange}
-              />
-            ) : (
-              <View style={formLayoutStyles.nativePickerPanel}>
-                <DateTimePicker
-                  value={datePickerValue}
-                  mode="date"
-                  display={getNativePickerDisplay('date')}
-                  onChange={handleDatePickerChange}
-                />
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setDatePickerOpen(false)}
-                  style={({ pressed }) => [
-                    formLayoutStyles.nativePickerDone,
-                    pressed && formLayoutStyles.pressed,
-                  ]}
-                >
-                  <Text style={formLayoutStyles.nativePickerDoneText}>Done</Text>
-                </Pressable>
-              </View>
-            )
-          ) : null}
+          <FloatingDateTimePicker
+            mode={datePickerOpen ? 'date' : null}
+            value={datePickerValue}
+            onChange={handleDatePickerChange}
+            onClose={() => setDatePickerOpen(false)}
+          />
         </FormSection>
 
         <FormSection label="Category">

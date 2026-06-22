@@ -91,25 +91,6 @@ export const transactionsScreenStyles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '800',
   },
-  datePickerPanel: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingVertical: spacing.xs,
-  },
-  datePickerDone: {
-    alignItems: 'center',
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  datePickerDoneText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
   transactionGroupSpacer: {
     height: spacing.md,
   },

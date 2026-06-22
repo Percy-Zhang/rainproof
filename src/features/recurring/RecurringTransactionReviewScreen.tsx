@@ -1,10 +1,11 @@
-import DateTimePicker, { type DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Keyboard, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { AccountIconBadge } from '../../components/AccountDisplay';
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
+import { FloatingDateTimePicker } from '../../components/FloatingDateTimePicker';
 import { FormError, TextField } from '../../components/ui';
 import { formatOptionalMoneyInput } from '../../domain/accountForm';
 import {
@@ -36,7 +37,7 @@ import type {
   CategorySelectLaunchParams,
   CategorySelectionResult,
 } from '../categorySelection/categorySelectionModel';
-import { getNativePickerDisplay, NativePickerRow } from '../transactions/TransactionFormComponents';
+import { NativePickerRow } from '../transactions/TransactionFormComponents';
 
 type RecurringTransactionReviewScreenProps = {
   snapshot: AppSnapshot;
@@ -246,32 +247,12 @@ export function RecurringTransactionReviewScreen({
             value={isValidDateOnly(transactionDate) ? formatLongDateLabel(transactionDate) : 'Choose date'}
             onPress={openDatePicker}
           />
-          {datePickerOpen ? (
-            Platform.OS === 'android' ? (
-              <DateTimePicker
-                value={datePickerValue}
-                mode="date"
-                display={getNativePickerDisplay('date')}
-                onChange={handleDatePickerChange}
-              />
-            ) : (
-              <View style={styles.nativePickerPanel}>
-                <DateTimePicker
-                  value={datePickerValue}
-                  mode="date"
-                  display={getNativePickerDisplay('date')}
-                  onChange={handleDatePickerChange}
-                />
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => setDatePickerOpen(false)}
-                  style={({ pressed }) => [styles.nativePickerDone, pressed && styles.pressed]}
-                >
-                  <Text style={styles.nativePickerDoneText}>Done</Text>
-                </Pressable>
-              </View>
-            )
-          ) : null}
+          <FloatingDateTimePicker
+            mode={datePickerOpen ? 'date' : null}
+            value={datePickerValue}
+            onChange={handleDatePickerChange}
+            onClose={() => setDatePickerOpen(false)}
+          />
         </View>
 
         <View style={styles.fieldGroup}>
@@ -476,23 +457,6 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     lineHeight: 18,
-  },
-  nativePickerPanel: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: 0,
-  },
-  nativePickerDone: {
-    alignItems: 'center',
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  nativePickerDoneText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
   },
   disabled: {
     opacity: 0.5,

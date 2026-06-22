@@ -78,26 +78,6 @@ export const statsStyles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '800',
   },
-  datePickerPanel: {
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    paddingVertical: spacing.xs,
-    width: '100%',
-  },
-  datePickerDone: {
-    alignItems: 'center',
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  datePickerDoneText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
   cardTitle: {
     color: colors.ink,
     fontSize: typography.h3,

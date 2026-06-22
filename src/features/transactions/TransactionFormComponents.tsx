@@ -2,7 +2,6 @@ export {
   accountLabel,
   AutocompleteField,
   DateTimePickerFields,
-  getNativePickerDisplay,
   getNativePickerValue,
   InlineField,
   NativePickerRow,

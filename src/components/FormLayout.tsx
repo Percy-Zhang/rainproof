@@ -275,23 +275,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-  nativePickerDone: {
-    alignItems: 'center',
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
-  },
-  nativePickerDoneText: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
-  nativePickerPanel: {
-    alignItems: 'center',
-    alignSelf: 'center',
-    backgroundColor: 'transparent',
-    paddingVertical: 0,
-  },
   optionDetail: {
     color: colors.muted,
     fontSize: typography.small,
@@ -389,10 +372,3 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
 });
-
-export const formLayoutStyles = {
-  nativePickerDone: styles.nativePickerDone,
-  nativePickerDoneText: styles.nativePickerDoneText,
-  nativePickerPanel: styles.nativePickerPanel,
-  pressed: styles.pressed,
-};
