@@ -1,9 +1,12 @@
 import {
   getDashboardBalanceTotals,
   getDashboardCashFlowByCurrency,
+  getDashboardCashFlowByCurrencyFromContext,
   getDashboardTopSpendingByCurrency,
+  getDashboardTopSpendingByCurrencyFromContext,
 } from '../dashboardFinancial';
-import type { Account, AccountBalance, DateRange, Transaction, TransactionLine } from '../types';
+import { buildDashboardSelectedAccountContext } from '../dashboardSelectedAccountContext';
+import type { Account, AccountBalance, DateRange, Transaction, TransactionLine, TransactionLink } from '../types';
 
 const now = '2026-05-15T12:00:00.000Z';
 const range: DateRange = {
@@ -150,6 +153,78 @@ describe('dashboard financial card helpers', () => {
     expect(getDashboardCashFlowByCurrency({ transactions, lines, range, accountIds: [] })).toEqual([]);
     expect(getDashboardTopSpendingByCurrency({ transactions, lines, range, accountIds: ['usd_1'] })).toEqual([]);
   });
+
+  it('reuses selected-account context for cash flow and top spending without counting transfers', () => {
+    const transactions = [
+      transaction({ id: 'aud_income', kind: 'income' }),
+      transaction({ id: 'aud_expense', kind: 'expense' }),
+      transaction({ id: 'usd_mixed_income', kind: 'income' }),
+      transaction({ id: 'transfer', kind: 'transfer' }),
+    ];
+    const lines = [
+      line({ id: 'aud_income_line', transactionId: 'aud_income', amountMinor: 320000, currencyCode: 'AUD', categoryId: 'income' }),
+      line({ id: 'aud_food', transactionId: 'aud_expense', amountMinor: -80000, currencyCode: 'AUD', categoryId: 'food' }),
+      line({ id: 'usd_salary', transactionId: 'usd_mixed_income', accountId: 'usd_1', amountMinor: 20000, currencyCode: 'USD', categoryId: 'income' }),
+      line({ id: 'usd_tax', transactionId: 'usd_mixed_income', accountId: 'usd_1', amountMinor: -5000, currencyCode: 'USD', categoryId: 'tax' }),
+      line({ id: 'transfer_out', transactionId: 'transfer', amountMinor: -999999, currencyCode: 'AUD', categoryId: 'ignored' }),
+      line({ id: 'transfer_in', transactionId: 'transfer', amountMinor: 999999, currencyCode: 'AUD', categoryId: 'ignored' }),
+    ];
+    const context = buildDashboardSelectedAccountContext({
+      lines,
+      range,
+      selectedAccountIds: ['aud_1', 'usd_1'],
+      transactions,
+    });
+
+    expect(getDashboardCashFlowByCurrencyFromContext(context)).toEqual([
+      { currencyCode: 'AUD', incomeMinor: 320000, expenseMinor: 80000, netMinor: 240000 },
+      { currencyCode: 'USD', incomeMinor: 20000, expenseMinor: 5000, netMinor: 15000 },
+    ]);
+    expect(getDashboardTopSpendingByCurrencyFromContext(context)).toEqual([
+      {
+        currencyCode: 'AUD',
+        rows: [{ categoryId: 'food', currencyCode: 'AUD', amountMinor: 80000 }],
+      },
+      {
+        currencyCode: 'USD',
+        rows: [{ categoryId: 'tax', currencyCode: 'USD', amountMinor: 5000 }],
+      },
+    ]);
+  });
+
+  it('applies linked reimbursement adjustments once through selected-account context', () => {
+    const transactions = [
+      transaction({ id: 'income_1', kind: 'income' }),
+      transaction({ id: 'expense_1', kind: 'expense' }),
+    ];
+    const lines = [
+      line({ id: 'income_line', transactionId: 'income_1', amountMinor: 10000, currencyCode: 'AUD', categoryId: 'income' }),
+      line({ id: 'expense_line', transactionId: 'expense_1', amountMinor: -10000, currencyCode: 'AUD', categoryId: 'food' }),
+    ];
+    const transactionLinks = [link({
+      amountMinor: 6000,
+      currencyCode: 'AUD',
+      sourceTransactionId: 'income_1',
+      targetTransactionId: 'expense_1',
+    })];
+    const context = buildDashboardSelectedAccountContext({
+      lines,
+      range,
+      selectedAccountIds: ['aud_1'],
+      transactionLinks,
+      transactions,
+    });
+
+    expect(getDashboardCashFlowByCurrencyFromContext(context)).toEqual([
+      { currencyCode: 'AUD', incomeMinor: 4000, expenseMinor: 4000, netMinor: 0 },
+    ]);
+    expect(getDashboardTopSpendingByCurrencyFromContext(context)).toEqual([
+      {
+        currencyCode: 'AUD',
+        rows: [{ categoryId: 'food', currencyCode: 'AUD', amountMinor: 4000 }],
+      },
+    ]);
+  });
 });
 
 function account(overrides: Partial<Account>): Account {
@@ -203,6 +278,22 @@ function line(overrides: Partial<TransactionLine>): TransactionLine {
     transferPeerAccountId: '',
     note: '',
     createdAt: now,
+    ...overrides,
+  };
+}
+
+function link(overrides: Partial<TransactionLink>): TransactionLink {
+  return {
+    id: 'link',
+    sourceTransactionId: 'income',
+    targetTransactionId: 'expense',
+    sourceLineId: null,
+    targetLineId: null,
+    linkType: 'reimbursement',
+    amountMinor: 1000,
+    currencyCode: 'AUD',
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 }

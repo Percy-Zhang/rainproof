@@ -1,7 +1,5 @@
-import {
-  compareTransactionDisplayEntriesDescending,
-  type TransactionDisplayEntry,
-} from './aggregates';
+import type { TransactionDisplayEntry } from './aggregates';
+import type { DashboardSelectedAccountContext } from './dashboardSelectedAccountContext';
 import { getTransactionDisplayLinkStatus } from './transactionLinks';
 import type { Account, AccountBalance, AppSnapshot, CurrencyCode, Transaction, TransactionLine, TransactionLink } from './types';
 
@@ -84,6 +82,31 @@ export function getDashboardRecentTransactions({
   selectedAccountIds: string[];
   limit?: number;
 }): TransactionDisplayEntry[] {
+  return getDashboardRecentTransactionsForData({
+    transactions: snapshot.transactions,
+    lines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    previewAccountIds,
+    selectedAccountIds,
+    limit,
+  });
+}
+
+export function getDashboardRecentTransactionsForData({
+  transactions,
+  lines,
+  transactionLinks,
+  previewAccountIds,
+  selectedAccountIds,
+  limit = dashboardRecentTransactionLimit,
+}: {
+  transactions: Transaction[];
+  lines: TransactionLine[];
+  transactionLinks: TransactionLink[];
+  previewAccountIds: string[];
+  selectedAccountIds: string[];
+  limit?: number;
+}): TransactionDisplayEntry[] {
   const previewIds = new Set(previewAccountIds);
   const visibleSelectedAccountIds = selectedAccountIds.filter((accountId) => previewIds.has(accountId));
   if (!visibleSelectedAccountIds.length) {
@@ -91,13 +114,50 @@ export function getDashboardRecentTransactions({
   }
 
   return getRecentTransactionEntries({
-    transactions: snapshot.transactions,
-    lines: snapshot.transactionLines,
-    transactionLinks: snapshot.transactionLinks,
+    transactions,
+    lines,
+    transactionLinks,
     accountIds: visibleSelectedAccountIds,
-  })
-    .sort(compareTransactionDisplayEntriesDescending)
-    .slice(0, limit);
+    limit,
+  });
+}
+
+export function getDashboardRecentTransactionsForContext({
+  context,
+  limit = dashboardRecentTransactionLimit,
+  previewAccountIds,
+}: {
+  context: DashboardSelectedAccountContext;
+  limit?: number;
+  previewAccountIds: string[];
+}): TransactionDisplayEntry[] {
+  if (limit <= 0) {
+    return [];
+  }
+
+  const previewIds = new Set(previewAccountIds);
+  const visibleSelectedAccountIds = context.selectedAccountIds.filter((accountId) => previewIds.has(accountId));
+  if (!visibleSelectedAccountIds.length) {
+    return [];
+  }
+
+  const recentEntries: TransactionDisplayEntry[] = [];
+
+  for (const transaction of context.transactions) {
+    if (recentEntries.length >= limit) {
+      break;
+    }
+
+    const selectedLines = context.selectedLinesByTransactionId.get(transaction.id) ?? [];
+    const visibleLines = selectedLines.filter((line) => previewIds.has(line.accountId));
+    if (!visibleLines.length) {
+      continue;
+    }
+
+    recentEntries.push(getRecentTransactionEntry(transaction, visibleLines, context.transactionLinks));
+  }
+
+  return recentEntries;
 }
 
 function getRecentTransactionEntries({
@@ -105,12 +165,18 @@ function getRecentTransactionEntries({
   lines,
   transactionLinks,
   accountIds,
+  limit,
 }: {
   transactions: Transaction[];
   lines: TransactionLine[];
   transactionLinks: TransactionLink[];
   accountIds: string[];
+  limit: number;
 }): TransactionDisplayEntry[] {
+  if (limit <= 0) {
+    return [];
+  }
+
   const accountFilter = new Set(accountIds);
   const linesByTransaction = new Map<string, TransactionLine[]>();
 
@@ -119,60 +185,74 @@ function getRecentTransactionEntries({
       continue;
     }
 
-    linesByTransaction.set(line.transactionId, [
-      ...(linesByTransaction.get(line.transactionId) ?? []),
-      line,
-    ]);
+    const existingLines = linesByTransaction.get(line.transactionId);
+    if (existingLines) {
+      existingLines.push(line);
+    } else {
+      linesByTransaction.set(line.transactionId, [line]);
+    }
   }
 
-  return transactions.flatMap((transaction) => {
+  const recentEntries: TransactionDisplayEntry[] = [];
+
+  for (const transaction of transactions) {
+    if (recentEntries.length >= limit) {
+      break;
+    }
+
     const visibleLines = linesByTransaction.get(transaction.id) ?? [];
     if (!visibleLines.length) {
-      return [];
+      continue;
     }
 
-    if (transaction.kind === 'transfer') {
-      const displayLine = getTransferDisplayLine(visibleLines);
-      const linkStatus = getTransactionDisplayLinkStatus({
-        transactionId: transaction.id,
-        lineIds: [displayLine.id],
-        links: transactionLinks,
-        showLineLevel: false,
-      });
-      return [
-        {
-          id: transaction.id,
-          accountId: displayLine.accountId,
-          transaction,
-          lines: [displayLine],
-          amountMinor: displayLine.amountMinor,
-          currencyCode: displayLine.currencyCode,
-          isLinked: linkStatus.isParentLinked,
-          linkedLineIds: linkStatus.linkedLineIds,
-        },
-      ];
-    }
+    recentEntries.push(getRecentTransactionEntry(transaction, visibleLines, transactionLinks));
+  }
 
-    const entryCurrencyCode = visibleLines[0].currencyCode;
+  return recentEntries;
+}
+
+function getRecentTransactionEntry(
+  transaction: Transaction,
+  visibleLines: TransactionLine[],
+  transactionLinks: TransactionLink[],
+): TransactionDisplayEntry {
+  if (transaction.kind === 'transfer') {
+    const displayLine = getTransferDisplayLine(visibleLines);
     const linkStatus = getTransactionDisplayLinkStatus({
       transactionId: transaction.id,
-      lineIds: visibleLines.map((line) => line.id),
+      lineIds: [displayLine.id],
       links: transactionLinks,
-      showLineLevel: visibleLines.length > 1,
+      showLineLevel: false,
     });
-    return [
-      {
-        id: transaction.id,
-        accountId: visibleLines[0].accountId,
-        transaction,
-        lines: visibleLines,
-        amountMinor: sumLinesByCurrency(visibleLines, entryCurrencyCode),
-        currencyCode: entryCurrencyCode,
-        isLinked: linkStatus.isParentLinked,
-        linkedLineIds: linkStatus.linkedLineIds,
-      },
-    ];
+    return {
+      id: transaction.id,
+      accountId: displayLine.accountId,
+      transaction,
+      lines: [displayLine],
+      amountMinor: displayLine.amountMinor,
+      currencyCode: displayLine.currencyCode,
+      isLinked: linkStatus.isParentLinked,
+      linkedLineIds: linkStatus.linkedLineIds,
+    };
+  }
+
+  const entryCurrencyCode = visibleLines[0].currencyCode;
+  const linkStatus = getTransactionDisplayLinkStatus({
+    transactionId: transaction.id,
+    lineIds: visibleLines.map((line) => line.id),
+    links: transactionLinks,
+    showLineLevel: visibleLines.length > 1,
   });
+  return {
+    id: transaction.id,
+    accountId: visibleLines[0].accountId,
+    transaction,
+    lines: visibleLines,
+    amountMinor: sumLinesByCurrency(visibleLines, entryCurrencyCode),
+    currencyCode: entryCurrencyCode,
+    isLinked: linkStatus.isParentLinked,
+    linkedLineIds: linkStatus.linkedLineIds,
+  };
 }
 
 function getTransferDisplayLine(lines: TransactionLine[]): TransactionLine {

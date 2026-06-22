@@ -1,6 +1,7 @@
+import { memo } from 'react';
+
 import type {
   AppSnapshot,
-  DashboardCardId,
   RainyDayProgress,
 } from '../../domain/types';
 import { AccountsDashboardCard } from './DashboardAccountsCard';
@@ -18,113 +19,153 @@ import type { DashboardViewModel } from './useDashboardViewModel';
 
 export { DashboardHeaderAction } from './DashboardCardPrimitives';
 
-type DashboardCardSlotProps = {
-  cardId: DashboardCardId;
-  onAddAccount: () => void;
-  onOpenAccount: () => void;
-  onOpenBudgets: () => void;
-  onOpenRainyDayFund: () => void;
-  onOpenRecurring: () => void;
-  onOpenTransaction: (transactionId: string) => void;
-  onOpenTransactions: () => void;
-  rainyDayProgress: RainyDayProgress;
-  snapshot: AppSnapshot;
-  viewModel: DashboardViewModel;
-};
+type DashboardCardSlotProps =
+  | {
+    cardId: 'balanceSummary';
+    showCurrencyCodes: boolean;
+    totalsByCurrency: DashboardViewModel['dashboardBalanceTotals'];
+  }
+  | {
+    cardId: 'cashFlow';
+    cashFlow: DashboardViewModel['dashboardCashFlow'];
+    showCurrencyCodes: boolean;
+  }
+  | {
+    cardId: 'rainyDay';
+    onOpenRainyDayFund: () => void;
+    rainyDayProgress: RainyDayProgress;
+    showCurrencyCodes: boolean;
+  }
+  | {
+    accountPreview: DashboardViewModel['accountPreview'];
+    cardId: 'accounts';
+    hasAnyAccounts: boolean;
+    onAddAccount: () => void;
+    onClearSelection: () => void;
+    onOpenAccount: () => void;
+    onSelectAll: () => void;
+    onToggleAccount: (accountId: string) => void;
+    selectedAccountIds: string[];
+    showCurrencyCodes: boolean;
+  }
+  | {
+    cardId: 'creditCards';
+    creditCardSummaries: DashboardViewModel['creditCardSummaries'];
+    showCurrencyCodes: boolean;
+  }
+  | {
+    budgetProgress: DashboardViewModel['budgetProgress'];
+    cardId: 'budgetProgress';
+    onOpenBudgets: () => void;
+    showCurrencyCodes: boolean;
+  }
+  | {
+    accountById: DashboardViewModel['accountById'];
+    cardId: 'upcomingPayments';
+    onOpenRecurring: () => void;
+    rows: DashboardViewModel['recurringSummary']['rows'];
+    showCurrencyCodes: boolean;
+  }
+  | {
+    cardId: 'topSpending';
+    categories: DashboardViewModel['categories'];
+    showCurrencyCodes: boolean;
+    topSpendingByCurrency: DashboardViewModel['dashboardTopSpending'];
+  }
+  | {
+    appliedSelectedAccountIds: string[];
+    cardId: 'recentTransactions';
+    categories: DashboardViewModel['categories'];
+    onOpenTransaction: (transactionId: string) => void;
+    onOpenTransactions: () => void;
+    recentTransactions: DashboardViewModel['recentTransactions'];
+    showCurrencyCodes: boolean;
+    snapshot: AppSnapshot;
+  };
 
-export function DashboardCardSlot({
-  cardId,
-  onAddAccount,
-  onOpenAccount,
-  onOpenBudgets,
-  onOpenRainyDayFund,
-  onOpenRecurring,
-  onOpenTransaction,
-  onOpenTransactions,
-  rainyDayProgress,
-  snapshot,
-  viewModel,
-}: DashboardCardSlotProps) {
-  switch (cardId) {
+export const DashboardCardSlot = memo(function DashboardCardSlot(props: DashboardCardSlotProps) {
+  switch (props.cardId) {
     case 'balanceSummary':
       return (
         <BalanceSummaryCard
-          showCurrencyCodes={viewModel.showCurrencyCodes}
-          totalsByCurrency={viewModel.dashboardBalanceTotals}
+          showCurrencyCodes={props.showCurrencyCodes}
+          totalsByCurrency={props.totalsByCurrency}
         />
       );
     case 'cashFlow':
       return (
         <CashFlowCard
-          cashFlow={viewModel.dashboardCashFlow}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
+          cashFlow={props.cashFlow}
+          showCurrencyCodes={props.showCurrencyCodes}
         />
       );
     case 'rainyDay':
       return (
         <RainyDayDashboardCard
-          rainyDayProgress={rainyDayProgress}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
-          onOpenRainyDayFund={onOpenRainyDayFund}
+          rainyDayProgress={props.rainyDayProgress}
+          showCurrencyCodes={props.showCurrencyCodes}
+          onOpenRainyDayFund={props.onOpenRainyDayFund}
         />
       );
     case 'accounts':
       return (
         <AccountsDashboardCard
-          accountPreview={viewModel.accountPreview}
-          hasAnyAccounts={viewModel.hasAnyAccounts}
-          selectedAccountIds={viewModel.selectedAccountIds}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
-          onAddAccount={onAddAccount}
-          onOpenAccount={onOpenAccount}
-          onToggleAccount={viewModel.toggleAccount}
+          accountPreview={props.accountPreview}
+          hasAnyAccounts={props.hasAnyAccounts}
+          selectedAccountIds={props.selectedAccountIds}
+          showCurrencyCodes={props.showCurrencyCodes}
+          onAddAccount={props.onAddAccount}
+          onClearSelection={props.onClearSelection}
+          onOpenAccount={props.onOpenAccount}
+          onSelectAll={props.onSelectAll}
+          onToggleAccount={props.onToggleAccount}
         />
       );
     case 'creditCards':
       return (
         <CreditCardsDashboardCard
-          creditCardSummaries={viewModel.creditCardSummaries}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
+          creditCardSummaries={props.creditCardSummaries}
+          showCurrencyCodes={props.showCurrencyCodes}
         />
       );
     case 'budgetProgress':
       return (
         <BudgetProgressDashboardCard
-          budgetProgress={viewModel.budgetProgress}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
-          onOpenBudgets={onOpenBudgets}
+          budgetProgress={props.budgetProgress}
+          showCurrencyCodes={props.showCurrencyCodes}
+          onOpenBudgets={props.onOpenBudgets}
         />
       );
     case 'upcomingPayments':
       return (
         <UpcomingPaymentsDashboardCard
-          accountById={viewModel.accountById}
-          rows={viewModel.recurringSummary.rows}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
-          onOpenRecurring={onOpenRecurring}
+          accountById={props.accountById}
+          rows={props.rows}
+          showCurrencyCodes={props.showCurrencyCodes}
+          onOpenRecurring={props.onOpenRecurring}
         />
       );
     case 'topSpending':
       return (
         <TopSpendingCard
-          categories={viewModel.categories}
-          topSpendingByCurrency={viewModel.dashboardTopSpending}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
+          categories={props.categories}
+          topSpendingByCurrency={props.topSpendingByCurrency}
+          showCurrencyCodes={props.showCurrencyCodes}
         />
       );
     case 'recentTransactions':
       return (
         <RecentTransactionsCard
-          categories={viewModel.categories}
-          recentTransactions={viewModel.recentTransactions}
-          selectedAccountIds={viewModel.selectedAccountIds}
-          showCurrencyCodes={viewModel.showCurrencyCodes}
-          snapshot={snapshot}
-          onOpenTransaction={onOpenTransaction}
-          onOpenTransactions={onOpenTransactions}
+          categories={props.categories}
+          recentTransactions={props.recentTransactions}
+          selectedAccountIds={props.appliedSelectedAccountIds}
+          showCurrencyCodes={props.showCurrencyCodes}
+          snapshot={props.snapshot}
+          onOpenTransaction={props.onOpenTransaction}
+          onOpenTransactions={props.onOpenTransactions}
         />
       );
     default:
       return null;
   }
-}
+});

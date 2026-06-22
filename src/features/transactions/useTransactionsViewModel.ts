@@ -1,5 +1,5 @@
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { InteractionManager, Platform } from 'react-native';
 
 import {
@@ -82,6 +82,7 @@ export function useTransactionsViewModel({
   const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
+  const filterApplyTokenRef = useRef(0);
   const { customEndDate, customStartDate, preset, rangeMode } = periodState;
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -250,9 +251,15 @@ export function useTransactionsViewModel({
     }
 
     let interactionTask: { cancel?: () => void } | null = null;
+    const applyToken = filterApplyTokenRef.current + 1;
+    filterApplyTokenRef.current = applyToken;
     const delayMs = appliedSearchQuery === searchQuery ? ACCOUNT_FILTER_APPLY_DELAY_MS : SEARCH_FILTER_APPLY_DELAY_MS;
     const timeoutId = setTimeout(() => {
       interactionTask = InteractionManager.runAfterInteractions(() => {
+        if (filterApplyTokenRef.current !== applyToken) {
+          return;
+        }
+
         setAppliedSelectedAccountIds((currentIds) =>
           areAccountIdListsEqual(currentIds, selectedAccountIds) ? currentIds : selectedAccountIds,
         );
@@ -261,6 +268,7 @@ export function useTransactionsViewModel({
     }, delayMs);
 
     return () => {
+      filterApplyTokenRef.current += 1;
       clearTimeout(timeoutId);
       interactionTask?.cancel?.();
     };

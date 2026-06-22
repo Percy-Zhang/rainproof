@@ -181,6 +181,8 @@ export function useRainproofData(): RainproofDataState {
   const repositoryRef = useRef<FinanceRepository | null>(null);
   const snapshotRef = useRef<AppSnapshot | null>(null);
   const transactionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const dashboardSelectedAccountIdsWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const dashboardSelectedAccountIdsUpdateTokenRef = useRef(0);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -902,8 +904,44 @@ export function useRainproofData(): RainproofDataState {
       updateCategoryCatalog: (input) => runMutation((repository) => repository.updateCategoryCatalog(input)),
       updateDashboardCardSettings: (input) =>
         runMutation((repository) => repository.updateDashboardCardSettings(input)),
-      updateDashboardSelectedAccountIds: (accountIds) =>
-        runMutation((repository) => repository.updateDashboardSelectedAccountIds(accountIds), { showSaving: false }),
+      updateDashboardSelectedAccountIds: (accountIds) => {
+        const updateToken = dashboardSelectedAccountIdsUpdateTokenRef.current + 1;
+        dashboardSelectedAccountIdsUpdateTokenRef.current = updateToken;
+        const nextAccountIds = [...accountIds];
+
+        return runMutation(
+          async (repository) => {
+            const write = dashboardSelectedAccountIdsWriteQueueRef.current
+              .catch(() => undefined)
+              .then(async () => {
+                if (dashboardSelectedAccountIdsUpdateTokenRef.current !== updateToken) {
+                  return;
+                }
+
+                await repository.updateDashboardSelectedAccountIds(nextAccountIds);
+              });
+
+            dashboardSelectedAccountIdsWriteQueueRef.current = write.catch(() => undefined);
+            try {
+              await write;
+            } catch (caught) {
+              await refresh();
+              throw caught;
+            }
+
+            return {
+              patchSnapshot: patchDashboardSelectedAccountIdsSetting(
+                nextAccountIds,
+                () => dashboardSelectedAccountIdsUpdateTokenRef.current === updateToken,
+              ),
+            };
+          },
+          {
+            label: 'updateDashboardSelectedAccountIds',
+            showSaving: false,
+          },
+        );
+      },
       updateAccountDashboardVisibility: (accountId, showOnDashboard) =>
         runMutation((repository) => repository.updateAccountDashboardVisibility(accountId, showOnDashboard)),
       updateAccountOrder: (accountIds) => runMutation((repository) => repository.updateAccountOrder(accountIds)),
@@ -946,6 +984,34 @@ function getSnapshotPerfCounts(snapshot: AppSnapshot) {
     templates: snapshot.transactionTemplates.length,
     recurring: snapshot.recurringItems.length,
   };
+}
+
+function patchDashboardSelectedAccountIdsSetting(accountIds: string[], shouldPatch: () => boolean) {
+  const nextAccountIds = [...accountIds];
+
+  return (snapshot: AppSnapshot): AppSnapshot => {
+    if (!shouldPatch()) {
+      return snapshot;
+    }
+
+    if (areStringArraysEqual(snapshot.settings.dashboardSelectedAccountIds, nextAccountIds)) {
+      return snapshot;
+    }
+
+    return {
+      ...snapshot,
+      settings: {
+        ...snapshot.settings,
+        dashboardSelectedAccountIds: nextAccountIds,
+      },
+    };
+  };
+}
+
+function areStringArraysEqual(left: string[] | null | undefined, right: string[]): boolean {
+  return Array.isArray(left) &&
+    left.length === right.length &&
+    left.every((value, index) => value === right[index]);
 }
 
 function getNewTransactionInputPerfMetadata(input: NewTransactionInput) {

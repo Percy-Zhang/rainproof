@@ -4,6 +4,7 @@ import {
   groupBalancesByCurrency,
 } from './aggregates';
 import { isWithinDateRange } from './dates';
+import type { DashboardSelectedAccountContext } from './dashboardSelectedAccountContext';
 import type {
   AccountBalance,
   CashFlowSummary,
@@ -75,6 +76,14 @@ export function getDashboardCashFlowByCurrency({
     .filter((summary) => summary.incomeMinor > 0 || summary.expenseMinor > 0);
 }
 
+export function getDashboardCashFlowByCurrencyFromContext(
+  context: DashboardSelectedAccountContext,
+): CashFlowSummary[] {
+  return context.incomeExpenseCurrencyCodes
+    .map((currencyCode) => getCashFlowSummaryFromContext(context, currencyCode))
+    .filter((summary) => summary.incomeMinor > 0 || summary.expenseMinor > 0);
+}
+
 export function getDashboardTopSpendingByCurrency({
   accountIds,
   lines,
@@ -113,6 +122,90 @@ export function getDashboardTopSpendingByCurrency({
       }).slice(0, safeLimit),
     }))
     .filter((group) => group.rows.length > 0);
+}
+
+export function getDashboardTopSpendingByCurrencyFromContext(
+  context: DashboardSelectedAccountContext,
+  perCurrencyLimit = 3,
+): DashboardTopSpendingCurrencyGroup[] {
+  const safeLimit = Math.max(1, Math.trunc(perCurrencyLimit));
+
+  return context.spendingCurrencyCodes
+    .map((currencyCode) => ({
+      currencyCode,
+      rows: getSpendingByCategoryFromContext(context, currencyCode).slice(0, safeLimit),
+    }))
+    .filter((group) => group.rows.length > 0);
+}
+
+function getCashFlowSummaryFromContext(
+  context: DashboardSelectedAccountContext,
+  currencyCode: CurrencyCode,
+): CashFlowSummary {
+  let incomeMinor = 0;
+  let expenseMinor = 0;
+
+  for (const line of context.selectedLines) {
+    const transaction = context.transactionById.get(line.transactionId);
+    if (
+      !transaction ||
+      transaction.kind === 'transfer' ||
+      line.currencyCode !== currencyCode ||
+      !isWithinDateRange(transaction.datetime, context.range)
+    ) {
+      continue;
+    }
+
+    if (line.amountMinor > 0) {
+      const exclusionMinor =
+        context.linkedStatsAdjustments.incomeLineExclusionMinorByLineId.get(line.id) ?? 0;
+      incomeMinor += Math.max(0, line.amountMinor - exclusionMinor);
+    } else if (line.amountMinor < 0) {
+      const reductionMinor =
+        transaction.kind === 'expense'
+          ? context.linkedStatsAdjustments.expenseLineReductionMinorByLineId.get(line.id) ?? 0
+          : 0;
+      expenseMinor += Math.max(0, Math.abs(line.amountMinor) - reductionMinor);
+    }
+  }
+
+  return {
+    currencyCode,
+    incomeMinor,
+    expenseMinor,
+    netMinor: incomeMinor - expenseMinor,
+  };
+}
+
+function getSpendingByCategoryFromContext(
+  context: DashboardSelectedAccountContext,
+  currencyCode: CurrencyCode,
+): SpendingByCategory[] {
+  const totals = new Map<string, number>();
+
+  for (const line of context.selectedLines) {
+    const transaction = context.transactionById.get(line.transactionId);
+    if (
+      !transaction ||
+      transaction.kind === 'transfer' ||
+      line.amountMinor >= 0 ||
+      line.currencyCode !== currencyCode ||
+      !isWithinDateRange(transaction.datetime, context.range)
+    ) {
+      continue;
+    }
+
+    const reductionMinor =
+      context.linkedStatsAdjustments.expenseLineReductionMinorByLineId.get(line.id) ?? 0;
+    const amountMinor = Math.max(0, Math.abs(line.amountMinor) - reductionMinor);
+    if (amountMinor > 0) {
+      totals.set(line.categoryId, (totals.get(line.categoryId) ?? 0) + amountMinor);
+    }
+  }
+
+  return Array.from(totals.entries())
+    .map(([categoryId, amountMinor]) => ({ categoryId, currencyCode, amountMinor }))
+    .sort((a, b) => b.amountMinor - a.amountMinor);
 }
 
 function getMatchingCurrencyCodes({

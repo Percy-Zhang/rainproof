@@ -3,9 +3,11 @@ import {
   getDashboardDefaultSelectedAccountIds,
   getDashboardInitialSelectedAccountIds,
   getDashboardRecentTransactions,
+  getDashboardRecentTransactionsForContext,
   getDashboardSelectedAccountIds,
   toggleDashboardAccountSelection,
 } from '../dashboard';
+import { buildDashboardSelectedAccountContext } from '../dashboardSelectedAccountContext';
 import type { Account, AccountBalance, AppSnapshot, Transaction, TransactionLine, TransactionLink } from '../types';
 
 function account(id: string, sortOrder: number): Account {
@@ -308,15 +310,15 @@ describe('dashboard helpers', () => {
     }));
   });
 
-  it('sorts recent transactions globally before taking the latest five', () => {
+  it('takes the first five displayable transactions from newest-first snapshot order', () => {
     const accounts = [account('a1', 0), account('a2', 1)];
     const transactions = [
-      transaction('older', new Date(2026, 4, 16, 9).toISOString()),
       transaction('newest', new Date(2026, 4, 22, 9).toISOString()),
-      transaction('mid-1', new Date(2026, 4, 19, 9).toISOString()),
-      transaction('mid-2', new Date(2026, 4, 20, 9).toISOString()),
-      transaction('mid-3', new Date(2026, 4, 18, 9).toISOString()),
       transaction('mid-4', new Date(2026, 4, 21, 9).toISOString()),
+      transaction('mid-2', new Date(2026, 4, 20, 9).toISOString()),
+      transaction('mid-1', new Date(2026, 4, 19, 9).toISOString()),
+      transaction('mid-3', new Date(2026, 4, 18, 9).toISOString()),
+      transaction('older', new Date(2026, 4, 16, 9).toISOString()),
     ];
 
     const recent = getDashboardRecentTransactions({
@@ -430,6 +432,44 @@ describe('dashboard helpers', () => {
     expect(recent.map((entry) => entry.transaction.id)).toEqual(['tx-1']);
   });
 
+  it('uses selected-account context for the same recent transaction rows', () => {
+    const accounts = [account('a1', 0), account('a2', 1)];
+    const transactions = [
+      transaction('newest', new Date(2026, 4, 22, 9).toISOString()),
+      transaction('mid-4', new Date(2026, 4, 21, 9).toISOString()),
+      transaction('mid-2', new Date(2026, 4, 20, 9).toISOString()),
+      transaction('mid-1', new Date(2026, 4, 19, 9).toISOString()),
+      transaction('mid-3', new Date(2026, 4, 18, 9).toISOString()),
+      transaction('older', new Date(2026, 4, 16, 9).toISOString()),
+    ];
+    const transactionLines = transactions.map((item) => line(item.id, item.id === 'older' ? 'a2' : 'a1'));
+    const appSnapshot = snapshot(accounts, transactions, transactionLines);
+    const context = buildDashboardSelectedAccountContext({
+      lines: transactionLines,
+      range: {
+        startIso: '2026-05-01T00:00:00.000Z',
+        endIso: '2026-06-01T00:00:00.000Z',
+      },
+      selectedAccountIds: ['a1', 'a2'],
+      transactions,
+    });
+
+    const fromSnapshot = getDashboardRecentTransactions({
+      previewAccountIds: ['a1', 'a2'],
+      selectedAccountIds: ['a1', 'a2'],
+      snapshot: appSnapshot,
+    });
+    const fromContext = getDashboardRecentTransactionsForContext({
+      context,
+      previewAccountIds: ['a1', 'a2'],
+    });
+
+    expect(fromContext.map((entry) => entry.transaction.id)).toEqual(
+      fromSnapshot.map((entry) => entry.transaction.id),
+    );
+    expect(fromContext).toHaveLength(5);
+  });
+
   it('shows no transactions when all preview accounts are unselected', () => {
     const accounts = [account('a1', 0), account('a2', 1)];
     const tx1 = transaction('tx-1', new Date(2026, 4, 18, 9).toISOString());
@@ -455,5 +495,49 @@ describe('dashboard helpers', () => {
 
     expect(initial).toEqual(['a1', 'a2', 'a3', 'a4', 'a5']);
     expect(toggleDashboardAccountSelection(initial, 'a1')).toEqual(['a2', 'a3', 'a4', 'a5']);
+  });
+
+  it('applies rapid account selections in order', () => {
+    const finalSelection = ['a1', 'a2', 'a3'].reduce(
+      (selectedIds, accountId) => toggleDashboardAccountSelection(selectedIds, accountId),
+      [] as string[],
+    );
+
+    expect(finalSelection).toEqual(['a1', 'a2', 'a3']);
+  });
+
+  it('applies rapid account deselections in order', () => {
+    const finalSelection = ['a2', 'a3'].reduce(
+      (selectedIds, accountId) => toggleDashboardAccountSelection(selectedIds, accountId),
+      ['a1', 'a2', 'a3'],
+    );
+
+    expect(finalSelection).toEqual(['a1']);
+  });
+
+  it('applies rapid chip, all, none, chip actions in order', () => {
+    const balances = [accountBalance('a1', 0), accountBalance('a2', 1), accountBalance('a3', 2)];
+    let selectedIds = toggleDashboardAccountSelection([], 'a1');
+    selectedIds = getDashboardInitialSelectedAccountIds(balances);
+    selectedIds = [];
+    selectedIds = toggleDashboardAccountSelection(selectedIds, 'a3');
+
+    expect(selectedIds).toEqual(['a3']);
+  });
+
+  it('applies rapid chip, all, none actions in order', () => {
+    const balances = [accountBalance('a1', 0), accountBalance('a2', 1), accountBalance('a3', 2)];
+    let selectedIds = toggleDashboardAccountSelection([], 'a1');
+    selectedIds = getDashboardInitialSelectedAccountIds(balances);
+    selectedIds = [];
+
+    expect(selectedIds).toEqual([]);
+  });
+
+  it('applies rapid none, chip actions in order', () => {
+    let selectedIds: string[] = [];
+    selectedIds = toggleDashboardAccountSelection(selectedIds, 'a2');
+
+    expect(selectedIds).toEqual(['a2']);
   });
 });

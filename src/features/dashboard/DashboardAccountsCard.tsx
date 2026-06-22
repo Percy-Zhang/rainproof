@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
+import { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AccountSelectorAction } from '../../components/CompactAccountSelector';
 import { Card } from '../../components/ui';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
 import {
@@ -15,13 +17,15 @@ import {
   dashboardCardStyles,
 } from './DashboardCardPrimitives';
 
-export function AccountsDashboardCard({
+export const AccountsDashboardCard = memo(function AccountsDashboardCard({
   accountPreview,
   hasAnyAccounts,
   selectedAccountIds,
   showCurrencyCodes,
   onAddAccount,
+  onClearSelection,
   onOpenAccount,
+  onSelectAll,
   onToggleAccount,
 }: {
   accountPreview: AccountBalance[];
@@ -29,19 +33,32 @@ export function AccountsDashboardCard({
   selectedAccountIds: string[];
   showCurrencyCodes: boolean;
   onAddAccount: () => void;
+  onClearSelection: () => void;
   onOpenAccount: () => void;
+  onSelectAll: () => void;
   onToggleAccount: (accountId: string) => void;
 }) {
+  const selectedAccountIdSet = new Set(selectedAccountIds);
+  const allSelected = accountPreview.length > 0 &&
+    accountPreview.every(({ account }) => selectedAccountIdSet.has(account.id));
   return (
     <Card testID="dashboard-accounts-card" style={dashboardCardStyles.compactCard}>
       <View style={dashboardCardStyles.sectionCardHeader}>
-        <Text style={dashboardCardStyles.cardTitle}>Accounts</Text>
-        <DashboardHeaderIconAction
-          accessibilityLabel="Manage accounts"
-          icon="settings-outline"
-          onPress={onOpenAccount}
-          testID="dashboard-manage-accounts"
-        />
+        <Text numberOfLines={1} style={[dashboardCardStyles.cardTitle, styles.headerTitle]}>Accounts</Text>
+        <View style={styles.headerActions}>
+          {accountPreview.length ? (
+            <>
+              <AccountSelectorAction disabled={allSelected} label="All" onPress={onSelectAll} />
+              <AccountSelectorAction disabled={!selectedAccountIds.length} label="None" onPress={onClearSelection} />
+            </>
+          ) : null}
+          <DashboardHeaderIconAction
+            accessibilityLabel="Manage accounts"
+            icon="settings-outline"
+            onPress={onOpenAccount}
+            testID="dashboard-manage-accounts"
+          />
+        </View>
       </View>
 
       {accountPreview.length ? (
@@ -51,9 +68,9 @@ export function AccountsDashboardCard({
               key={account.id}
               account={account}
               balanceMinor={balanceMinor}
-              selected={selectedAccountIds.includes(account.id)}
+              selected={selectedAccountIdSet.has(account.id)}
               showCurrencyCodes={showCurrencyCodes}
-              onPress={() => onToggleAccount(account.id)}
+              onToggleAccount={onToggleAccount}
             />
           ))}
         </View>
@@ -66,7 +83,7 @@ export function AccountsDashboardCard({
       )}
     </Card>
   );
-}
+});
 
 function DashboardAccountsEmptyState({
   hasAnyAccounts,
@@ -104,18 +121,18 @@ function DashboardAccountsEmptyState({
   );
 }
 
-function AccountTile({
+const AccountTile = memo(function AccountTile({
   account,
   balanceMinor,
   selected,
   showCurrencyCodes,
-  onPress,
+  onToggleAccount,
 }: {
   account: Account;
   balanceMinor: number;
   selected: boolean;
   showCurrencyCodes: boolean;
-  onPress: () => void;
+  onToggleAccount: (accountId: string) => void;
 }) {
   const creditCardSummary = getCreditCardBalanceSummary({ account, balanceMinor });
   const balanceLabel = creditCardSummary
@@ -125,7 +142,7 @@ function AccountTile({
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={onPress}
+      onPress={() => onToggleAccount(account.id)}
       testID={`dashboard-account-${account.id}`}
       style={({ pressed }) => [
         styles.accountTile,
@@ -143,7 +160,7 @@ function AccountTile({
       </Text>
     </Pressable>
   );
-}
+});
 
 const styles = StyleSheet.create({
   accountBalance: {
@@ -193,5 +210,17 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontSize: typography.body,
     fontWeight: '900',
+  },
+  headerActions: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    justifyContent: 'flex-end',
+    minWidth: 0,
+  },
+  headerTitle: {
+    flexShrink: 0,
   },
 });

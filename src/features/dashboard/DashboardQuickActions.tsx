@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { BackHandler, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -10,7 +10,7 @@ type DashboardQuickActionsProps = {
   selectedAccountIds: string[];
 };
 
-export function DashboardQuickActions({
+export const DashboardQuickActions = memo(function DashboardQuickActions({
   onAddTransaction,
   onOpenTemplates,
   selectedAccountIds,
@@ -81,7 +81,7 @@ export function DashboardQuickActions({
       </Pressable>
     </>
   );
-}
+});
 
 function DashboardQuickAction({
   accessibilityLabel,

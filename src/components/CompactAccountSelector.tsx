@@ -38,7 +38,7 @@ export function CompactAccountSelector({
   testID,
 }: CompactAccountSelectorProps) {
   const selectedAccountIdSet = new Set(selectedAccountIds);
-  const allSelected = accounts.length > 0 && selectedAccountIds.length === accounts.length;
+  const allSelected = accounts.length > 0 && accounts.every((account) => selectedAccountIdSet.has(account.id));
   const summary = getAccountSelectionSummary(accounts, selectedAccountIds);
   const listShouldScroll = accounts.length > 2;
   const balanceMinorByAccountId = new Map(
@@ -53,8 +53,8 @@ export function CompactAccountSelector({
           <Text numberOfLines={1} style={styles.detail}>{summary.detail}</Text>
         </View>
         <View style={styles.actions}>
-          <SelectorAction disabled={allSelected} label="All" onPress={onSelectAll} />
-          <SelectorAction disabled={!selectedAccountIds.length} label="None" onPress={onClearSelection} />
+          <AccountSelectorAction disabled={allSelected} label="All" onPress={onSelectAll} />
+          <AccountSelectorAction disabled={!selectedAccountIds.length} label="None" onPress={onClearSelection} />
         </View>
       </View>
 
@@ -82,7 +82,7 @@ export function CompactAccountSelector({
   );
 }
 
-function SelectorAction({
+export function AccountSelectorAction({
   disabled,
   label,
   onPress,
