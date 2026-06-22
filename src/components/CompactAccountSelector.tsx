@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { getAccountDisplayName, getTransparentColor } from '../domain/accountThemes';
 import {
@@ -6,6 +6,11 @@ import {
   getAccountSelectionSummary,
 } from '../domain/accountSelection';
 import type { Account, AccountBalance } from '../domain/types';
+import {
+  getResponsiveAccountColumnsForItemCount,
+  getResponsiveAccountTileBasisForColumns,
+  RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
+} from '../theme/responsiveLayout';
 import { colors, spacing, typography } from '../theme/tokens';
 import { Card } from './ui';
 
@@ -25,6 +30,7 @@ const ACCOUNT_TILE_MIN_HEIGHT = 62;
 const NEXT_ROW_PEEK_HEIGHT = 6;
 const SCROLLABLE_ACCOUNT_LIST_HEIGHT =
   ACCOUNT_TILE_MIN_HEIGHT + spacing.sm + NEXT_ROW_PEEK_HEIGHT;
+type AccountTileBasis = ReturnType<typeof getResponsiveAccountTileBasisForColumns>;
 
 export function CompactAccountSelector({
   accounts,
@@ -37,10 +43,13 @@ export function CompactAccountSelector({
   onToggleAccount,
   testID,
 }: CompactAccountSelectorProps) {
+  const { width } = useWindowDimensions();
+  const accountColumns = getResponsiveAccountColumnsForItemCount(width, accounts.length);
+  const tileBasis = getResponsiveAccountTileBasisForColumns(accountColumns);
   const selectedAccountIdSet = new Set(selectedAccountIds);
   const allSelected = accounts.length > 0 && accounts.every((account) => selectedAccountIdSet.has(account.id));
   const summary = getAccountSelectionSummary(accounts, selectedAccountIds);
-  const listShouldScroll = accounts.length > 2;
+  const listShouldScroll = accounts.length > accountColumns;
   const balanceMinorByAccountId = new Map(
     accountBalances.map(({ account, balanceMinor }) => [account.id, balanceMinor]),
   );
@@ -66,13 +75,14 @@ export function CompactAccountSelector({
           contentContainerStyle={styles.accountGrid}
         >
           {accounts.map((account) => (
-                <AccountSelectorTile
-                  key={account.id}
-                  account={account}
-                  balanceMinor={balanceMinorByAccountId.get(account.id)}
-                  selected={selectedAccountIdSet.has(account.id)}
-                  onPress={() => onToggleAccount(account.id)}
-                />
+            <AccountSelectorTile
+              key={account.id}
+              account={account}
+              balanceMinor={balanceMinorByAccountId.get(account.id)}
+              selected={selectedAccountIdSet.has(account.id)}
+              tileBasis={tileBasis}
+              onPress={() => onToggleAccount(account.id)}
+            />
           ))}
         </ScrollView>
       ) : (
@@ -111,11 +121,13 @@ function AccountSelectorTile({
   account,
   balanceMinor,
   selected,
+  tileBasis,
   onPress,
 }: {
   account: Account;
   balanceMinor?: number;
   selected: boolean;
+  tileBasis: AccountTileBasis;
   onPress: () => void;
 }) {
   const accountName = getAccountDisplayName(account);
@@ -132,6 +144,7 @@ function AccountSelectorTile({
           backgroundColor: selected ? getTransparentColor(account.themeColor, '38') : colors.surface,
           borderColor: selected ? account.themeColor : getTransparentColor(account.themeColor, '99'),
           borderLeftColor: account.themeColor,
+          width: tileBasis,
         },
         pressed && styles.pressed,
       ]}
@@ -227,8 +240,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: spacing.xs,
     minHeight: ACCOUNT_TILE_MIN_HEIGHT,
-    width: '48%',
-    minWidth: 130,
+    minWidth: RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
     padding: spacing.sm,
   },
   title: {

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { AccountSelectorAction } from '../../components/CompactAccountSelector';
 import { Card } from '../../components/ui';
@@ -11,6 +11,11 @@ import {
 } from '../../domain/creditCards';
 import { formatMoney } from '../../domain/money';
 import type { Account, AccountBalance } from '../../domain/types';
+import {
+  getResponsiveAccountColumnsForItemCount,
+  getResponsiveAccountTileBasisForColumns,
+  RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
+} from '../../theme/responsiveLayout';
 import { colors, spacing, typography } from '../../theme/tokens';
 import {
   DashboardHeaderIconAction,
@@ -38,6 +43,9 @@ export const AccountsDashboardCard = memo(function AccountsDashboardCard({
   onSelectAll: () => void;
   onToggleAccount: (accountId: string) => void;
 }) {
+  const { width } = useWindowDimensions();
+  const accountColumns = getResponsiveAccountColumnsForItemCount(width, accountPreview.length);
+  const tileBasis = getResponsiveAccountTileBasisForColumns(accountColumns);
   const selectedAccountIdSet = new Set(selectedAccountIds);
   const allSelected = accountPreview.length > 0 &&
     accountPreview.every(({ account }) => selectedAccountIdSet.has(account.id));
@@ -70,6 +78,7 @@ export const AccountsDashboardCard = memo(function AccountsDashboardCard({
               balanceMinor={balanceMinor}
               selected={selectedAccountIdSet.has(account.id)}
               showCurrencyCodes={showCurrencyCodes}
+              tileBasis={tileBasis}
               onToggleAccount={onToggleAccount}
             />
           ))}
@@ -126,12 +135,14 @@ const AccountTile = memo(function AccountTile({
   balanceMinor,
   selected,
   showCurrencyCodes,
+  tileBasis,
   onToggleAccount,
 }: {
   account: Account;
   balanceMinor: number;
   selected: boolean;
   showCurrencyCodes: boolean;
+  tileBasis: AccountTileBasis;
   onToggleAccount: (accountId: string) => void;
 }) {
   const creditCardSummary = getCreditCardBalanceSummary({ account, balanceMinor });
@@ -150,6 +161,7 @@ const AccountTile = memo(function AccountTile({
           backgroundColor: selected ? getTransparentColor(account.themeColor, '38') : colors.surface,
           borderColor: selected ? account.themeColor : getTransparentColor(account.themeColor, '99'),
           borderLeftColor: account.themeColor,
+          width: tileBasis,
         },
         pressed && dashboardCardStyles.pressedRow,
       ]}
@@ -161,6 +173,8 @@ const AccountTile = memo(function AccountTile({
     </Pressable>
   );
 });
+
+type AccountTileBasis = ReturnType<typeof getResponsiveAccountTileBasisForColumns>;
 
 const styles = StyleSheet.create({
   accountBalance: {
@@ -191,8 +205,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     gap: spacing.xs,
     minHeight: 62,
+    minWidth: RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
     padding: spacing.sm,
-    width: '48%',
   },
   emptyAccountCard: {
     alignItems: 'center',
