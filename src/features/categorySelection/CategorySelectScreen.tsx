@@ -1,6 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { runOnJS } from 'react-native-worklets';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { CategoryIconBadge, CategoryRow, SubcategoryRow } from '../../components/CategoryDisplay';
 import { FormError } from '../../components/ui';
@@ -24,6 +31,12 @@ import {
   type CategorySelectionMode,
   type CategorySelectionResult,
 } from './categorySelectionModel';
+
+const SUBCATEGORY_REVEAL_DURATION_MS = 200;
+// Keep in sync with CategoryDisplay SubcategoryRow minHeight.
+const SUBCATEGORY_ROW_HEIGHT = 46;
+const SUBCATEGORY_ROW_GAP = spacing.xs;
+const SUBCATEGORY_LIST_TOP_PADDING = spacing.xs;
 
 type CategorySelectScreenProps = {
   categories?: CategoryDefinition[];
@@ -174,7 +187,7 @@ export function CategorySelectContent({
         const expanded = expandedCategoryId === category.id;
 
         return (
-          <View key={category.id} style={styles.categoryGroup}>
+          <View key={category.id}>
             <CategoryRow
               category={category}
               expanded={selectionMode === 'subcategory' ? expanded : categorySelected}
@@ -188,19 +201,21 @@ export function CategorySelectContent({
               }}
               trailingIcon={selectionMode === 'category' && categorySelected ? 'checkmark' : undefined}
             />
-            {selectionMode === 'subcategory' && expanded ? (
-              <View style={styles.subcategoryList}>
-                {category.subcategories.map((subcategory) => (
-                  <SubcategoryRow
-                    key={subcategory.id}
-                    onPress={() => onSelect(createSubcategorySelection(category.id, subcategory.id))}
-                    selected={categorySelected && selectedSubcategoryId === subcategory.id}
-                    color={subcategory.color}
-                    icon={subcategory.icon}
-                    name={subcategory.name}
-                  />
-                ))}
-              </View>
+            {selectionMode === 'subcategory' ? (
+              <SubcategoryReveal expanded={expanded} subcategoryCount={category.subcategories.length}>
+                <View style={styles.subcategoryList}>
+                  {category.subcategories.map((subcategory) => (
+                    <SubcategoryRow
+                      key={subcategory.id}
+                      onPress={() => onSelect(createSubcategorySelection(category.id, subcategory.id))}
+                      selected={categorySelected && selectedSubcategoryId === subcategory.id}
+                      color={subcategory.color}
+                      icon={subcategory.icon}
+                      name={subcategory.name}
+                    />
+                  ))}
+                </View>
+              </SubcategoryReveal>
             ) : null}
           </View>
         );
@@ -208,6 +223,100 @@ export function CategorySelectContent({
 
       {!categories.length ? <Text style={styles.emptyText}>No categories available.</Text> : null}
     </ScrollView>
+  );
+}
+
+function SubcategoryReveal({
+  children,
+  expanded,
+  subcategoryCount,
+}: {
+  children: ReactNode;
+  expanded: boolean;
+  subcategoryCount: number;
+}) {
+  const expandedHeight = getSubcategoryRevealHeight(subcategoryCount);
+  const [renderedChildren, setRenderedChildren] = useState<ReactNode>(expanded ? children : null);
+  const [shouldRender, setShouldRender] = useState(expanded);
+  const revealHeight = useSharedValue(expanded ? expandedHeight : 0);
+  const revealOpacity = useSharedValue(expanded ? 1 : 0);
+
+  const finishCollapse = useCallback(() => {
+    setRenderedChildren(null);
+    setShouldRender(false);
+  }, []);
+
+  useEffect(() => {
+    if (expanded) {
+      setRenderedChildren(children);
+      setShouldRender(true);
+    }
+  }, [children, expanded]);
+
+  useEffect(() => {
+    if (!expanded && !shouldRender) {
+      revealHeight.value = 0;
+      revealOpacity.value = 0;
+      return;
+    }
+
+    if (expanded) {
+      revealHeight.value = withTiming(expandedHeight, {
+        duration: SUBCATEGORY_REVEAL_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+      revealOpacity.value = withTiming(1, {
+        duration: 150,
+        easing: Easing.out(Easing.cubic),
+      });
+
+      return;
+    }
+
+    revealOpacity.value = withTiming(0, {
+      duration: 140,
+      easing: Easing.in(Easing.cubic),
+    });
+    revealHeight.value = withTiming(0, {
+      duration: SUBCATEGORY_REVEAL_DURATION_MS,
+      easing: Easing.in(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        runOnJS(finishCollapse)();
+      }
+    });
+  }, [expanded, expandedHeight, finishCollapse, revealHeight, revealOpacity, shouldRender]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: revealHeight.value,
+    opacity: revealOpacity.value,
+  }));
+
+  if (!shouldRender && !expanded) {
+    return null;
+  }
+
+  return (
+    <Animated.View
+      accessibilityElementsHidden={!expanded}
+      importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
+      pointerEvents={expanded ? 'auto' : 'none'}
+      style={[styles.subcategoryReveal, animatedStyle]}
+    >
+      {expanded ? children : renderedChildren}
+    </Animated.View>
+  );
+}
+
+function getSubcategoryRevealHeight(subcategoryCount: number): number {
+  if (subcategoryCount <= 0) {
+    return 0;
+  }
+
+  return (
+    SUBCATEGORY_LIST_TOP_PADDING +
+    (subcategoryCount * SUBCATEGORY_ROW_HEIGHT) +
+    ((subcategoryCount - 1) * SUBCATEGORY_ROW_GAP)
   );
 }
 
@@ -373,11 +482,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: spacing.xs,
   },
-  categoryGroup: {
-    gap: spacing.xs,
+  subcategoryReveal: {
+    overflow: 'hidden',
   },
   subcategoryList: {
     gap: spacing.xs,
+    paddingTop: SUBCATEGORY_LIST_TOP_PADDING,
   },
   emptyText: {
     color: colors.muted,

@@ -1,6 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ScaleDecorator } from 'react-native-draggable-flatlist';
+import { runOnJS } from 'react-native-worklets';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { ProgressBar, SurfaceCard } from '../../components/ui';
@@ -15,8 +23,17 @@ import { formatMoney } from '../../domain/money';
 import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { BudgetHistoryChart } from './BudgetHistoryChart';
+import {
+  BUDGET_HISTORY_LABEL_HEIGHT,
+  BUDGET_HISTORY_PLOT_HEIGHT,
+} from './budgetHistoryChartModel';
 
 export type BudgetHistoryMode = 'current' | 'compare';
+
+const BUDGET_HISTORY_REVEAL_DURATION_MS = 220;
+const BUDGET_HISTORY_REVEAL_CHROME_HEIGHT = 116;
+const BUDGET_HISTORY_REVEAL_HEIGHT =
+  BUDGET_HISTORY_PLOT_HEIGHT + BUDGET_HISTORY_LABEL_HEIGHT + BUDGET_HISTORY_REVEAL_CHROME_HEIGHT;
 
 export function BudgetUsageCard({
   anchorDate,
@@ -114,17 +131,111 @@ export function BudgetUsageCard({
           />
         </Pressable>
 
-        {isHistoryExpanded ? (
-          <BudgetHistoryChart
-            accentColor={row.color}
-            currencyCode={row.budget.currencyCode}
-            key={`${row.id}:${periodOffset}:${historyVariant}`}
-            points={historyPoints}
-            variant={historyVariant}
-          />
-        ) : null}
+        <BudgetHistoryReveal dragging={dragging} expanded={isHistoryExpanded}>
+          {isHistoryExpanded ? (
+            <BudgetHistoryChart
+              accentColor={row.color}
+              currencyCode={row.budget.currencyCode}
+              key={`${row.id}:${periodOffset}:${historyVariant}`}
+              points={historyPoints}
+              variant={historyVariant}
+            />
+          ) : null}
+        </BudgetHistoryReveal>
       </SurfaceCard>
     </ScaleDecorator>
+  );
+}
+
+function BudgetHistoryReveal({
+  children,
+  dragging,
+  expanded,
+}: {
+  children: ReactNode;
+  dragging: boolean;
+  expanded: boolean;
+}) {
+  const [renderedChildren, setRenderedChildren] = useState<ReactNode>(expanded ? children : null);
+  const [shouldRender, setShouldRender] = useState(expanded);
+  const revealHeight = useSharedValue(expanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0);
+  const revealOpacity = useSharedValue(expanded ? 1 : 0);
+
+  const finishCollapse = useCallback(() => {
+    setRenderedChildren(null);
+    setShouldRender(false);
+  }, []);
+
+  useEffect(() => {
+    if (expanded) {
+      setRenderedChildren(children);
+      setShouldRender(true);
+    }
+  }, [children, expanded]);
+
+  useEffect(() => {
+    if (dragging) {
+      revealHeight.value = expanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0;
+      revealOpacity.value = expanded ? 1 : 0;
+
+      if (!expanded) {
+        finishCollapse();
+      }
+
+      return;
+    }
+
+    if (!expanded && !shouldRender) {
+      revealHeight.value = 0;
+      revealOpacity.value = 0;
+      return;
+    }
+
+    if (expanded) {
+      revealHeight.value = withTiming(BUDGET_HISTORY_REVEAL_HEIGHT, {
+        duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+      });
+      revealOpacity.value = withTiming(1, {
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+      });
+
+      return;
+    }
+
+    revealOpacity.value = withTiming(0, {
+      duration: 150,
+      easing: Easing.in(Easing.cubic),
+    });
+    revealHeight.value = withTiming(0, {
+      duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
+      easing: Easing.in(Easing.cubic),
+    }, (finished) => {
+      if (finished) {
+        runOnJS(finishCollapse)();
+      }
+    });
+  }, [dragging, expanded, finishCollapse, revealHeight, revealOpacity, shouldRender]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: revealHeight.value,
+    opacity: revealOpacity.value,
+  }));
+
+  if (!shouldRender) {
+    return null;
+  }
+
+  return (
+    <Animated.View
+      accessibilityElementsHidden={!expanded}
+      importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
+      pointerEvents={expanded ? 'auto' : 'none'}
+      style={[styles.historyReveal, animatedStyle]}
+    >
+      {renderedChildren}
+    </Animated.View>
   );
 }
 
@@ -335,6 +446,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 2,
     padding: 2,
+  },
+  historyReveal: {
+    overflow: 'hidden',
+    width: '100%',
   },
   historyToggle: {
     alignItems: 'center',
