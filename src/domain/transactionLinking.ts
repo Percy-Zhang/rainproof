@@ -2,7 +2,7 @@ import { getLinkedStatsAdjustments } from './linkedStats';
 import { normalizeCurrencyCode } from './money';
 import { formatTransactionShortDate, getSplitLineChildDisplayText } from './transactionDisplay';
 import { isTransactionParentLinked } from './transactionLinks';
-import { getSubcategory } from './categories';
+import { getCategory, getSubcategory, getSubcategoryName } from './categories';
 import type {
   CategoryDefinition,
   CurrencyCode,
@@ -29,6 +29,8 @@ export type ExpenseLinkTargetCandidate = {
   eligible: boolean;
   disabledReason: string;
   isLinked: boolean;
+  searchMatchesParent: boolean;
+  searchMatchedLineIds: string[];
 };
 
 export type IncomeLinkSourceCandidate = {
@@ -39,6 +41,8 @@ export type IncomeLinkSourceCandidate = {
   eligible: boolean;
   disabledReason: string;
   isLinked: boolean;
+  searchMatchesParent: boolean;
+  searchMatchedLineIds: string[];
 };
 
 export type TransactionLinkEditSummary = {
@@ -123,6 +127,7 @@ export function getExpenseLinkTargetCandidates({
   lines,
   transactionLinks = [],
   query,
+  categories,
 }: {
   sourceTransactionId: string;
   sourceCurrencyCode: CurrencyCode | null;
@@ -130,16 +135,17 @@ export function getExpenseLinkTargetCandidates({
   lines: TransactionLine[];
   transactionLinks?: TransactionLink[];
   query: string;
+  categories?: CategoryDefinition[];
 }): ExpenseLinkTargetCandidate[] {
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = normalizeLinkSearchText(query);
   const normalizedSourceCurrencyCode = sourceCurrencyCode ? normalizeCurrencyCode(sourceCurrencyCode) : null;
+  const linesByTransactionId = groupLinesByTransactionId(lines);
 
   return transactions
     .filter((transaction) => transaction.kind === 'expense' && transaction.id !== sourceTransactionId)
     .map((transaction) => {
-      const allExpenseLines = lines.filter(
-        (line) => line.transactionId === transaction.id && line.amountMinor < 0,
-      );
+      const transactionLines = linesByTransactionId.get(transaction.id) ?? [];
+      const allExpenseLines = transactionLines.filter((line) => line.amountMinor < 0);
       const matchingCurrencyLines = normalizedSourceCurrencyCode
         ? allExpenseLines.filter(
             (line) => normalizeCurrencyCode(line.currencyCode) === normalizedSourceCurrencyCode,
@@ -152,6 +158,16 @@ export function getExpenseLinkTargetCandidates({
         .filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode)
         .reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
       const eligible = !!normalizedSourceCurrencyCode && currencyCode === normalizedSourceCurrencyCode;
+      const searchMatch = getLinkCandidateSearchMatch({
+        transaction,
+        lines: displayLines,
+        categories,
+        normalizedQuery,
+        parentValues: [
+          ...getLineCategorySearchValues(firstLine, categories),
+          currencyCode,
+        ],
+      });
 
       return {
         transaction,
@@ -163,6 +179,8 @@ export function getExpenseLinkTargetCandidates({
         eligible,
         disabledReason: eligible ? '' : 'Different currency',
         isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
+        searchMatchesParent: searchMatch.parentMatches,
+        searchMatchedLineIds: searchMatch.lineIds,
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)
@@ -171,15 +189,7 @@ export function getExpenseLinkTargetCandidates({
         return true;
       }
 
-      return [
-        candidate.transaction.title,
-        candidate.categoryId,
-        candidate.subcategoryId,
-        candidate.currencyCode,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedQuery);
+      return candidate.searchMatchesParent || candidate.searchMatchedLineIds.length > 0;
     })
     .sort(compareCandidateTransactionsDescending);
 }
@@ -191,6 +201,7 @@ export function getIncomeLinkSourceCandidates({
   lines,
   transactionLinks,
   query,
+  categories,
 }: {
   targetTransactionId: string;
   targetCurrencyCode: CurrencyCode | null;
@@ -198,16 +209,17 @@ export function getIncomeLinkSourceCandidates({
   lines: TransactionLine[];
   transactionLinks: TransactionLink[];
   query: string;
+  categories?: CategoryDefinition[];
 }): IncomeLinkSourceCandidate[] {
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = normalizeLinkSearchText(query);
   const normalizedTargetCurrencyCode = targetCurrencyCode ? normalizeCurrencyCode(targetCurrencyCode) : null;
+  const linesByTransactionId = groupLinesByTransactionId(lines);
 
   return transactions
     .filter((transaction) => transaction.kind === 'income' && transaction.id !== targetTransactionId)
     .map((transaction) => {
-      const allIncomeLines = lines.filter(
-        (line) => line.transactionId === transaction.id && line.amountMinor > 0,
-      );
+      const transactionLines = linesByTransactionId.get(transaction.id) ?? [];
+      const allIncomeLines = transactionLines.filter((line) => line.amountMinor > 0);
       const matchingCurrencyLines = normalizedTargetCurrencyCode
         ? allIncomeLines.filter(
             (line) => normalizeCurrencyCode(line.currencyCode) === normalizedTargetCurrencyCode,
@@ -220,6 +232,13 @@ export function getIncomeLinkSourceCandidates({
         .filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode)
         .reduce((sum, line) => sum + line.amountMinor, 0);
       const currencyMatches = !!normalizedTargetCurrencyCode && currencyCode === normalizedTargetCurrencyCode;
+      const searchMatch = getLinkCandidateSearchMatch({
+        transaction,
+        lines: displayLines,
+        categories,
+        normalizedQuery,
+        parentValues: [currencyCode],
+      });
 
       return {
         transaction,
@@ -229,6 +248,8 @@ export function getIncomeLinkSourceCandidates({
         eligible: currencyMatches,
         disabledReason: currencyMatches ? '' : 'Different currency',
         isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
+        searchMatchesParent: searchMatch.parentMatches,
+        searchMatchedLineIds: searchMatch.lineIds,
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)
@@ -237,15 +258,95 @@ export function getIncomeLinkSourceCandidates({
         return true;
       }
 
-      return [
-        candidate.transaction.title,
-        candidate.currencyCode,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(normalizedQuery);
+      return candidate.searchMatchesParent || candidate.searchMatchedLineIds.length > 0;
     })
     .sort(compareIncomeSourceCandidatesDescending);
+}
+
+type LinkCandidateSearchMatch = {
+  parentMatches: boolean;
+  lineIds: string[];
+};
+
+function getLinkCandidateSearchMatch({
+  transaction,
+  lines,
+  categories,
+  normalizedQuery,
+  parentValues,
+}: {
+  transaction: Transaction;
+  lines: TransactionLine[];
+  categories?: CategoryDefinition[];
+  normalizedQuery: string;
+  parentValues: string[];
+}): LinkCandidateSearchMatch {
+  if (!normalizedQuery) {
+    return { parentMatches: true, lineIds: [] };
+  }
+
+  const parentMatches = valuesMatchLinkSearch(
+    [
+      transaction.title,
+      ...parentValues,
+    ],
+    normalizedQuery,
+  );
+  const lineIds = lines
+    .filter((line) => valuesMatchLinkSearch(getLineSearchValues(line, categories), normalizedQuery))
+    .map((line) => line.id);
+
+  return { parentMatches, lineIds };
+}
+
+function getLineSearchValues(
+  line: TransactionLine,
+  categories?: CategoryDefinition[],
+): string[] {
+  return [
+    line.note,
+    line.currencyCode,
+    ...getLineCategorySearchValues(line, categories),
+  ];
+}
+
+function getLineCategorySearchValues(
+  line: TransactionLine | undefined,
+  categories?: CategoryDefinition[],
+): string[] {
+  if (!line) {
+    return [];
+  }
+
+  return [
+    line.categoryId,
+    line.subcategoryId,
+    line.categoryId ? getCategory(line.categoryId, categories).name : '',
+    line.subcategoryId ? getSubcategoryName(line.categoryId, line.subcategoryId, categories) : '',
+  ];
+}
+
+function valuesMatchLinkSearch(values: string[], normalizedQuery: string): boolean {
+  return values.some((value) => normalizeLinkSearchText(value).includes(normalizedQuery));
+}
+
+function normalizeLinkSearchText(value: string): string {
+  return value.trim().toLocaleLowerCase();
+}
+
+function groupLinesByTransactionId(lines: TransactionLine[]): Map<string, TransactionLine[]> {
+  const linesByTransactionId = new Map<string, TransactionLine[]>();
+
+  for (const line of lines) {
+    const existingLines = linesByTransactionId.get(line.transactionId);
+    if (existingLines) {
+      existingLines.push(line);
+    } else {
+      linesByTransactionId.set(line.transactionId, [line]);
+    }
+  }
+
+  return linesByTransactionId;
 }
 
 export function getTransactionLinkEditSummary({

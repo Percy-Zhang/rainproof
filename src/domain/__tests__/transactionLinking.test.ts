@@ -105,6 +105,8 @@ describe('transaction linking helpers', () => {
     });
 
     expect(candidates.map((candidate) => candidate.transaction.id)).toEqual(['expense-usd', 'expense-aud']);
+    expect(candidates.every((candidate) => candidate.searchMatchesParent)).toBe(true);
+    expect(candidates.every((candidate) => candidate.searchMatchedLineIds.length === 0)).toBe(true);
     expect(candidates.find((candidate) => candidate.transaction.id === 'expense-aud')?.eligible).toBe(true);
     expect(candidates.find((candidate) => candidate.transaction.id === 'expense-usd')).toEqual(
       expect.objectContaining({ eligible: false, disabledReason: 'Different currency' }),
@@ -131,6 +133,45 @@ describe('transaction linking helpers', () => {
         query: 'restaurants',
       }).map((candidate) => candidate.transaction.id),
     ).toEqual(['expense-usd']);
+  });
+
+  it('searches expense target split-line notes and category labels', () => {
+    const splitExpense = transaction('expense-split', 'expense', 'Weekend shop');
+    const matchingLine = {
+      ...line('expense-split-cleaning', 'expense-split', -1800, 'AUD', 'shopping', 'home-goods'),
+      note: 'Cleaning supplies',
+    };
+    const siblingLine = {
+      ...line('expense-split-snacks', 'expense-split', -700, 'AUD', 'food', 'groceries'),
+      note: 'Road snacks',
+    };
+
+    const noteMatches = getExpenseLinkTargetCandidates({
+      sourceTransactionId: 'income',
+      sourceCurrencyCode: 'AUD',
+      transactions: [...transactions, splitExpense],
+      lines: [...lines, matchingLine, siblingLine],
+      query: 'cleaning',
+    });
+
+    expect(noteMatches.map((candidate) => candidate.transaction.id)).toEqual(['expense-split']);
+    expect(noteMatches[0]).toEqual(
+      expect.objectContaining({
+        searchMatchesParent: false,
+        searchMatchedLineIds: ['expense-split-cleaning'],
+      }),
+    );
+
+    const categoryLabelMatches = getExpenseLinkTargetCandidates({
+      sourceTransactionId: 'income',
+      sourceCurrencyCode: 'AUD',
+      transactions: [...transactions, splitExpense],
+      lines: [...lines, matchingLine, siblingLine],
+      query: 'home goods',
+    });
+
+    expect(categoryLabelMatches.map((candidate) => candidate.transaction.id)).toEqual(['expense-split']);
+    expect(categoryLabelMatches[0].searchMatchedLineIds).toEqual(['expense-split-cleaning']);
   });
 
   it('marks already-linked parent expense targets in link selection data', () => {
@@ -194,6 +235,35 @@ describe('transaction linking helpers', () => {
         eligible: true,
       }),
     ]);
+  });
+
+  it('searches income source split-line notes from the expense-side flow', () => {
+    const splitIncome = transaction('income-split', 'income', 'Side income');
+    const matchingLine = {
+      ...line('income-split-overtime', 'income-split', 1200, 'AUD', 'income', 'overtime'),
+      note: 'Weekend overtime',
+    };
+    const siblingLine = {
+      ...line('income-split-salary', 'income-split', 5000, 'AUD', 'income', 'salary'),
+      note: 'Base pay',
+    };
+
+    const candidates = getIncomeLinkSourceCandidates({
+      targetTransactionId: 'expense-aud',
+      targetCurrencyCode: 'AUD',
+      transactions: [...transactions, splitIncome],
+      lines: [...lines, matchingLine, siblingLine],
+      transactionLinks: [],
+      query: 'overtime',
+    });
+
+    expect(candidates.map((candidate) => candidate.transaction.id)).toEqual(['income-split']);
+    expect(candidates[0]).toEqual(
+      expect.objectContaining({
+        searchMatchesParent: false,
+        searchMatchedLineIds: ['income-split-overtime'],
+      }),
+    );
   });
 
   it('summarizes linked income with the target expense item and amount', () => {

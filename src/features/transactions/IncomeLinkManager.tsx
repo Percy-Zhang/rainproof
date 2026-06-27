@@ -72,11 +72,13 @@ export function IncomeLinkManager({
         transactions: snapshot.transactions,
         lines: snapshot.transactionLines,
         transactionLinks: snapshot.transactionLinks,
+        categories: snapshot.categories,
         query,
       }).slice(0, 12),
     [
       query,
       selectedSourceScope?.currencyCode,
+      snapshot.categories,
       snapshot.transactionLines,
       snapshot.transactionLinks,
       snapshot.transactions,

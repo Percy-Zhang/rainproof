@@ -194,10 +194,15 @@ export function TargetCandidateOptions({
           isLinked: candidate.isLinked,
         },
       ];
+  const shouldFilterSplitOptions = !candidate.searchMatchesParent && candidate.searchMatchedLineIds.length > 0;
+  const matchedLineIds = new Set(candidate.searchMatchedLineIds);
+  const visibleOptions = shouldFilterSplitOptions
+    ? options.filter((option) => !option.targetLineId || matchedLineIds.has(option.targetLineId))
+    : options;
 
   return (
     <View style={styles.targetGroup}>
-      {options.map((option) => (
+      {visibleOptions.map((option) => (
         <TargetOptionRow key={option.id} option={option} snapshot={snapshot} onPress={() => onSelect(option)} />
       ))}
     </View>
