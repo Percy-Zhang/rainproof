@@ -1,55 +1,70 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { formatMoney } from '../../domain/money';
 import {
-  getExpenseLinkTargetMoney,
-  getIncomeLinkSourceCandidates,
-  getTransactionLinkEndpointDisplay,
-  type IncomeLinkSourceCandidate,
-} from '../../domain/transactionLinking';
+  createExpenseTransactionLinkAllocationDrafts,
+  formatMinorInput,
+  getExpenseTransactionLinkAllocationChanges,
+  getTargetAllocatedAmountMinor,
+  getTransactionLinkTargetScopes,
+  type ExpenseTransactionLinkAllocationDraft,
+  type TransactionLinkSourceOption,
+} from '../../domain/transactionLinkAllocationForm';
+import { getIncomeLinkSourceCandidates } from '../../domain/transactionLinking';
 import type {
   AppSnapshot,
-  NewTransactionLinkInput,
   Transaction,
+  TransactionLinkBatchInput,
   TransactionLinkType,
-  UpdateTransactionLinkInput,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
-import { InlineField } from './TransactionFormComponents';
-import { IncomeSourceRow } from './TransactionLinkCandidateRows';
-import { LinkedTransactionIndicator } from './LinkedTransactionIndicator';
 import {
-  getTransactionLinkTypeShortLabel,
-  transactionLinkTypeOptions,
-} from './TransactionLinkLabels';
+  ExpenseAllocationRow,
+  SourceCandidateOptions,
+  SummaryItem,
+  TargetScopeRow,
+} from './IncomeLinkManagerRows';
+import { InlineField } from './TransactionFormComponents';
+import { transactionLinkTypeOptions } from './TransactionLinkLabels';
 
 type ExpenseLinkManagerProps = {
   snapshot: AppSnapshot;
   transaction: Transaction;
-  onAddTransactionLink: (input: NewTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
+  onSaveTransactionLinkBatch: (input: TransactionLinkBatchInput) => Promise<void>;
+  onDone: () => void;
   onError: (message: string) => void;
 };
 
 export function ExpenseLinkManager({
   snapshot,
   transaction,
-  onAddTransactionLink,
-  onUpdateTransactionLink,
-  onDeleteTransactionLink,
+  onSaveTransactionLinkBatch,
+  onDone,
   onError,
 }: ExpenseLinkManagerProps) {
-  const targetLinks = snapshot.transactionLinks.filter((link) => link.targetTransactionId === transaction.id);
   const [linkType, setLinkType] = useState<TransactionLinkType>('refund');
+  const [selectedTargetScopeId, setSelectedTargetScopeId] = useState('target:whole');
   const [query, setQuery] = useState('');
-  const targetMoney = getExpenseLinkTargetMoney(transaction.id, snapshot.transactionLines);
+  const [allocations, setAllocations] = useState<ExpenseTransactionLinkAllocationDraft[]>(() =>
+    createExpenseTransactionLinkAllocationDrafts(transaction.id, snapshot.transactionLinks),
+  );
+  const [saving, setSaving] = useState(false);
+  const targetScopes = useMemo(
+    () => getTransactionLinkTargetScopes(transaction, snapshot.transactionLines, snapshot.transactionLinks),
+    [snapshot.transactionLines, snapshot.transactionLinks, transaction],
+  );
+  const selectedTargetScope =
+    targetScopes.find((scope) => scope.id === selectedTargetScopeId) ?? targetScopes[0];
+  const allocatedMinor = selectedTargetScope
+    ? getTargetAllocatedAmountMinor(allocations, selectedTargetScope.targetLineId)
+    : 0;
+  const remainingMinor = Math.max(0, (selectedTargetScope?.amountMinor ?? 0) - allocatedMinor);
   const candidates = useMemo(
     () =>
       getIncomeLinkSourceCandidates({
         targetTransactionId: transaction.id,
-        targetCurrencyCode: targetMoney?.currencyCode ?? null,
+        targetCurrencyCode: selectedTargetScope?.currencyCode ?? null,
         transactions: snapshot.transactions,
         lines: snapshot.transactionLines,
         transactionLinks: snapshot.transactionLinks,
@@ -58,116 +73,160 @@ export function ExpenseLinkManager({
       }).slice(0, 12),
     [
       query,
+      selectedTargetScope?.currencyCode,
       snapshot.categories,
       snapshot.transactionLines,
       snapshot.transactionLinks,
       snapshot.transactions,
-      targetMoney?.currencyCode,
       transaction.id,
     ],
   );
 
-  async function linkIncome(candidate: IncomeLinkSourceCandidate) {
-    if (!candidate.eligible) {
+  useEffect(() => {
+    setAllocations(createExpenseTransactionLinkAllocationDrafts(transaction.id, snapshot.transactionLinks));
+  }, [snapshot.transactionLinks, transaction.id]);
+
+  useEffect(() => {
+    if (targetScopes.length && !targetScopes.some((scope) => scope.id === selectedTargetScopeId)) {
+      setSelectedTargetScopeId(targetScopes[0].id);
+    }
+  }, [selectedTargetScopeId, targetScopes]);
+
+  function removeAllocation(allocationId: string) {
+    setAllocations((current) => current.filter((allocation) => allocation.id !== allocationId));
+  }
+
+  function addAllocation(option: TransactionLinkSourceOption) {
+    if (!selectedTargetScope) {
+      onError('This expense transaction needs a negative amount before linking.');
       return;
     }
 
-    try {
-      const existingLink = snapshot.transactionLinks.find(
-        (link) =>
-          link.sourceTransactionId === candidate.transaction.id &&
-          link.targetTransactionId === transaction.id &&
-          !link.sourceLineId &&
-          !link.targetLineId,
-      );
-      const input = {
-        sourceTransactionId: candidate.transaction.id,
-        targetTransactionId: transaction.id,
+    if (!option.eligible) {
+      onError(option.disabledReason || 'This income cannot be linked.');
+      return;
+    }
+
+    const duplicate = allocations.some(
+      (allocation) =>
+        allocation.sourceTransactionId === option.transaction.id &&
+        allocation.sourceLineId === option.sourceLineId &&
+        allocation.targetLineId === selectedTargetScope.targetLineId &&
+        allocation.linkType === linkType,
+    );
+    if (duplicate) {
+      onError('This allocation is already listed.');
+      return;
+    }
+
+    const amountMinor = Math.min(remainingMinor, option.amountMinor);
+    if (amountMinor <= 0) {
+      onError('No unallocated expense amount remains for this selection.');
+      return;
+    }
+
+    setAllocations((current) => [
+      ...current,
+      {
+        id: `draft-${Date.now()}-${option.id}`,
+        sourceTransactionId: option.transaction.id,
+        sourceLineId: option.sourceLineId,
+        targetLineId: selectedTargetScope.targetLineId,
         linkType,
-        amountMinor: candidate.amountMinor,
-        currencyCode: candidate.currencyCode,
-      };
-      if (existingLink) {
-        await onUpdateTransactionLink({ id: existingLink.id, ...input });
-      } else {
-        await onAddTransactionLink(input);
-      }
+        amount: formatMinorInput(amountMinor),
+        currencyCode: option.currencyCode,
+      },
+    ]);
+    onError('');
+  }
+
+  async function saveAllocations() {
+    setSaving(true);
+    let shouldClose = false;
+    try {
+      const changes = getExpenseTransactionLinkAllocationChanges({
+        targetTransactionId: transaction.id,
+        existingLinks: snapshot.transactionLinks,
+        allocations,
+      });
+
+      await onSaveTransactionLinkBatch(changes);
       onError('');
+      shouldClose = true;
     } catch (caught) {
-      onError(caught instanceof Error ? caught.message : 'Could not link income transaction.');
+      onError(caught instanceof Error ? caught.message : 'Could not save transaction links.');
+    } finally {
+      setSaving(false);
+      if (shouldClose) {
+        onDone();
+      }
     }
   }
 
-  async function unlink(linkId: string) {
-    try {
-      await onDeleteTransactionLink(linkId);
-      onError('');
-    } catch (caught) {
-      onError(caught instanceof Error ? caught.message : 'Could not unlink transaction.');
-    }
+  if (!selectedTargetScope) {
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>This expense transaction needs a negative amount before linking.</Text>
+      </View>
+    );
   }
 
   return (
     <>
-      {targetLinks.length ? (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Linked money received</Text>
-          <View style={styles.linkSummaryList}>
-            {targetLinks.map((link) => {
-              const sourceDisplay = getTransactionLinkEndpointDisplay({
-                transactionId: link.sourceTransactionId,
-                lineId: link.sourceLineId,
-                transactions: snapshot.transactions,
-                lines: snapshot.transactionLines,
-                categories: snapshot.categories,
-              });
-              const targetDisplay = getTransactionLinkEndpointDisplay({
-                transactionId: link.targetTransactionId,
-                lineId: link.targetLineId,
-                transactions: snapshot.transactions,
-                lines: snapshot.transactionLines,
-                categories: snapshot.categories,
-              });
-              const primaryDisplay = targetDisplay.kind === 'split-line' ? targetDisplay : sourceDisplay;
-              const title = primaryDisplay.kind === 'missing' ? 'Linked item unavailable' : primaryDisplay.title || 'Income';
-              const primaryContext = primaryDisplay.kind === 'missing' ? '' : primaryDisplay.context;
-              const secondaryTitle = targetDisplay.kind === 'split-line' && sourceDisplay.kind !== 'missing'
-                ? sourceDisplay.title
-                : '';
-              return (
-                <View key={link.id} style={styles.linkSummaryRow}>
-                  <View style={styles.linkSummaryText}>
-                    <View style={styles.linkSummaryTitleRow}>
-                      <LinkedTransactionIndicator compact />
-                      <Text numberOfLines={1} style={styles.linkSummaryTitle}>{title}</Text>
-                    </View>
-                    <Text numberOfLines={1} style={styles.linkSummaryMeta}>
-                      {[
-                        primaryContext,
-                        getTransactionLinkTypeShortLabel(link.linkType),
-                        formatMoney(link.amountMinor, link.currencyCode),
-                      ].filter(Boolean).join(' / ')}
-                    </Text>
-                    {secondaryTitle ? (
-                      <Text numberOfLines={1} style={styles.linkSummaryMeta}>{secondaryTitle}</Text>
-                    ) : null}
-                  </View>
-                  <Pressable
-                    accessibilityRole="button"
-                    onPress={() => unlink(link.id)}
-                    style={({ pressed }) => [styles.smallDangerButton, pressed && styles.pressed]}
-                  >
-                    <Text style={styles.smallDangerText}>Unlink</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Allocate money received for this expense</Text>
+        <View style={styles.summaryRow}>
+          <SummaryItem label="Expense" value={formatMoney(selectedTargetScope.amountMinor, selectedTargetScope.currencyCode)} />
+          <SummaryItem label="Linked" value={formatMoney(allocatedMinor, selectedTargetScope.currencyCode)} />
+          <SummaryItem label="Remaining" value={formatMoney(remainingMinor, selectedTargetScope.currencyCode)} />
         </View>
-      ) : null}
+
+        {targetScopes.length > 1 ? (
+          <View style={styles.optionList}>
+            <Text style={styles.selectedLabel}>Expense scope</Text>
+            {targetScopes.map((scope) => (
+              <TargetScopeRow
+                key={scope.id}
+                scope={scope}
+                snapshot={snapshot}
+                targetTransaction={transaction}
+                selected={scope.id === selectedTargetScope.id}
+                onPress={() => setSelectedTargetScopeId(scope.id)}
+              />
+            ))}
+          </View>
+        ) : null}
+      </View>
 
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Link incoming money</Text>
+        <Text style={styles.sectionTitle}>Linked money received</Text>
+        {allocations.length ? (
+          <View style={styles.allocationList}>
+            {allocations.map((allocation) => (
+              <ExpenseAllocationRow
+                key={allocation.id}
+                allocation={allocation}
+                snapshot={snapshot}
+                targetTransaction={transaction}
+                onRemove={() => removeAllocation(allocation.id)}
+              />
+            ))}
+          </View>
+        ) : (
+          <Text style={styles.emptyText}>No linked income yet.</Text>
+        )}
+        <Pressable
+          accessibilityRole="button"
+          disabled={saving}
+          onPress={saveAllocations}
+          style={({ pressed }) => [styles.saveButton, (pressed || saving) && styles.pressed]}
+        >
+          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save links'}</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>Add income link</Text>
         <View style={styles.optionList}>
           {transactionLinkTypeOptions.map((option) => (
             <Pressable
@@ -190,11 +249,12 @@ export function ExpenseLinkManager({
         <InlineField label="Find income" value={query} onChange={setQuery} placeholder="Search by item or currency" />
         <View style={styles.searchResults}>
           {candidates.map((candidate) => (
-            <IncomeSourceRow
+            <SourceCandidateOptions
               key={candidate.transaction.id}
               candidate={candidate}
               snapshot={snapshot}
-              onPress={() => linkIncome(candidate)}
+              currencyCode={selectedTargetScope.currencyCode}
+              onSelect={addAllocation}
             />
           ))}
           {!candidates.length ? <Text style={styles.emptyText}>No matching income transactions.</Text> : null}
@@ -217,6 +277,10 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: typography.body,
     fontWeight: '900',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
   },
   optionList: {
     gap: spacing.xs,
@@ -255,57 +319,29 @@ const styles = StyleSheet.create({
   optionTextSelected: {
     color: colors.primaryDark,
   },
-  searchResults: {
-    gap: spacing.xs,
-  },
-  linkSummaryList: {
-    gap: spacing.xs,
-  },
-  linkSummaryRow: {
-    alignItems: 'center',
-    backgroundColor: colors.background,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: spacing.sm,
-    padding: spacing.sm,
-  },
-  linkSummaryText: {
-    flex: 1,
-    gap: spacing.xs,
-    minWidth: 0,
-  },
-  linkSummaryTitle: {
-    color: colors.ink,
-    flex: 1,
-    fontSize: typography.body,
-    fontWeight: '900',
-    minWidth: 0,
-  },
-  linkSummaryTitleRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.xs,
-    minWidth: 0,
-  },
-  linkSummaryMeta: {
+  selectedLabel: {
     color: colors.muted,
     fontSize: typography.small,
-    fontWeight: '700',
+    fontWeight: '800',
+    textTransform: 'uppercase',
   },
-  smallDangerButton: {
+  allocationList: {
+    gap: spacing.sm,
+  },
+  searchResults: {
+    gap: spacing.sm,
+  },
+  saveButton: {
     alignItems: 'center',
-    borderColor: '#E4C3C3',
+    backgroundColor: colors.primary,
     borderRadius: 8,
-    borderWidth: 1,
     justifyContent: 'center',
-    minHeight: 34,
-    paddingHorizontal: spacing.sm,
+    minHeight: 42,
+    paddingHorizontal: spacing.md,
   },
-  smallDangerText: {
-    color: colors.danger,
-    fontSize: typography.small,
+  saveButtonText: {
+    color: colors.surface,
+    fontSize: typography.body,
     fontWeight: '900',
   },
   emptyText: {

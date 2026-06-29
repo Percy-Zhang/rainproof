@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { AccountIconBadge } from '../../components/AccountDisplay';
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { getAccountDisplayName } from '../../domain/accountThemes';
 import {
@@ -9,16 +10,21 @@ import {
 import { formatMoney } from '../../domain/money';
 import {
   getAllocationAmountMinor,
+  getTransactionLinkSourceOptions,
   getTransactionLinkTargetOptions,
+  type ExpenseTransactionLinkAllocationDraft,
   type TransactionLinkAllocationDraft,
   type TransactionLinkSourceScope,
+  type TransactionLinkSourceOption,
   type TransactionLinkTargetOption,
+  type TransactionLinkTargetScope,
 } from '../../domain/transactionLinkAllocationForm';
 import { formatTransactionShortDate } from '../../domain/transactionDisplay';
 import {
   getLinkedCounterpartDisplayForEndpoint,
   getTransactionLinkEndpointDisplay,
   type ExpenseLinkTargetCandidate,
+  type IncomeLinkSourceCandidate,
 } from '../../domain/transactionLinking';
 import type { AppSnapshot, Transaction } from '../../domain/types';
 import { sharedStyles } from '../../theme/sharedStyles';
@@ -100,6 +106,71 @@ export function SourceScopeRow({
   );
 }
 
+export function TargetScopeRow({
+  scope,
+  snapshot,
+  targetTransaction,
+  selected,
+  onPress,
+}: {
+  scope: TransactionLinkTargetScope;
+  snapshot: AppSnapshot;
+  targetTransaction: Transaction;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  const account = scope.line ? snapshot.accounts.find((item) => item.id === scope.line?.accountId) : undefined;
+  const targetDisplay = scope.line
+    ? getTransactionLinkEndpointDisplay({
+        transactionId: targetTransaction.id,
+        lineId: scope.targetLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        categories: snapshot.categories,
+      })
+    : null;
+  const label = targetDisplay?.title || 'Whole expense transaction';
+  const detail = targetDisplay?.metadata || scope.line?.note || (account ? getAccountDisplayName(account) : 'All expense lines');
+  const dateLabel = targetDisplay?.dateLabel || formatTransactionShortDate(targetTransaction.datetime);
+  const linkedDisplay = scope.isLinked
+    ? getLinkedCounterpartDisplayForEndpoint({
+        endpoint: 'target',
+        transactionId: targetTransaction.id,
+        lineId: scope.targetLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        categories: snapshot.categories,
+      })
+    : null;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.scopeRow,
+        selected && styles.scopeRowSelected,
+        scope.isLinked && styles.linkedOptionRow,
+        pressed && sharedStyles.pressed,
+      ]}
+    >
+      {scope.line ? <LineIcon line={scope.line} snapshot={snapshot} size="sm" /> : null}
+      <View style={styles.scopeText}>
+        <Text numberOfLines={1} style={styles.scopeTitle}>{label}</Text>
+        <Text numberOfLines={1} style={styles.scopeMeta}>{detail}</Text>
+        {linkedDisplay?.title ? (
+          <LinkedItemMeta title={linkedDisplay.title} testID={`linked-target-scope-detail-${scope.id}`} />
+        ) : null}
+      </View>
+      <View style={styles.rowEnd}>
+        <Text style={styles.expenseAmount}>{formatMoney(scope.amountMinor, scope.currencyCode)}</Text>
+        <Text style={styles.rowDate}>{dateLabel}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
 export function AllocationRow({
   allocation,
   snapshot,
@@ -144,6 +215,67 @@ export function AllocationRow({
           </View>
           <Text numberOfLines={1} style={styles.allocationMeta}>
             {targetDetail} / From {sourceDetail} / {getTransactionLinkTypeShortLabel(allocation.linkType)}
+          </Text>
+          <Text numberOfLines={1} style={styles.allocationAmount}>
+            {formatMoney(getAllocationAmountMinor(allocation), allocation.currencyCode)}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onRemove}
+          style={({ pressed }) => [styles.smallDangerButton, pressed && sharedStyles.pressed]}
+        >
+          <Text style={styles.smallDangerText}>Remove</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+export function ExpenseAllocationRow({
+  allocation,
+  snapshot,
+  targetTransaction,
+  onRemove,
+}: {
+  allocation: ExpenseTransactionLinkAllocationDraft;
+  snapshot: AppSnapshot;
+  targetTransaction: Transaction;
+  onRemove: () => void;
+}) {
+  const sourceTransaction = snapshot.transactions.find((transaction) => transaction.id === allocation.sourceTransactionId);
+  const sourceLine = allocation.sourceLineId
+    ? snapshot.transactionLines.find((line) => line.id === allocation.sourceLineId)
+    : undefined;
+  const sourceDisplay = getTransactionLinkEndpointDisplay({
+    transactionId: allocation.sourceTransactionId,
+    lineId: allocation.sourceLineId,
+    transactions: snapshot.transactions,
+    lines: snapshot.transactionLines,
+    categories: snapshot.categories,
+  });
+  const targetDisplay = getTransactionLinkEndpointDisplay({
+    transactionId: targetTransaction.id,
+    lineId: allocation.targetLineId,
+    transactions: snapshot.transactions,
+    lines: snapshot.transactionLines,
+    categories: snapshot.categories,
+  });
+  const title = sourceDisplay.kind === 'missing' ? 'Linked item unavailable' : sourceDisplay.title || sourceTransaction?.title || 'Income';
+  const sourceDetail = sourceDisplay.kind === 'missing' ? 'Could not resolve linked income' : sourceDisplay.metadata || 'Whole transaction';
+  const targetDetail = targetDisplay.kind === 'missing' ? 'expense unavailable' : targetDisplay.label || targetTransaction.title || 'Whole expense';
+
+  return (
+    <View style={styles.allocationRow}>
+      <View style={styles.allocationHeader}>
+        {sourceLine ? <LineIcon line={sourceLine} snapshot={snapshot} size="sm" /> : null}
+        <View style={styles.allocationText}>
+          <View style={styles.allocationTitleRow}>
+            <LinkedTransactionIndicator compact />
+            <Text numberOfLines={1} style={styles.allocationTitle}>{title}</Text>
+          </View>
+          <Text numberOfLines={1} style={styles.allocationMeta}>
+            {sourceDetail} / Toward {targetDetail} / {getTransactionLinkTypeShortLabel(allocation.linkType)}
           </Text>
           <Text numberOfLines={1} style={styles.allocationAmount}>
             {formatMoney(getAllocationAmountMinor(allocation), allocation.currencyCode)}
@@ -209,6 +341,52 @@ export function TargetCandidateOptions({
   );
 }
 
+export function SourceCandidateOptions({
+  candidate,
+  snapshot,
+  currencyCode,
+  onSelect,
+}: {
+  candidate: IncomeLinkSourceCandidate;
+  snapshot: AppSnapshot;
+  currencyCode: string;
+  onSelect: (option: TransactionLinkSourceOption) => void;
+}) {
+  const options = candidate.eligible
+    ? getTransactionLinkSourceOptions({
+        transaction: candidate.transaction,
+        lines: snapshot.transactionLines,
+        currencyCode,
+        transactionLinks: snapshot.transactionLinks,
+      })
+    : [
+        {
+          id: `${candidate.transaction.id}:disabled`,
+          transaction: candidate.transaction,
+          sourceLineId: null,
+          amountMinor: candidate.amountMinor,
+          currencyCode: candidate.currencyCode,
+          accountId: candidate.accountId,
+          eligible: false,
+          disabledReason: candidate.disabledReason,
+          isLinked: candidate.isLinked,
+        },
+      ];
+  const shouldFilterSplitOptions = !candidate.searchMatchesParent && candidate.searchMatchedLineIds.length > 0;
+  const matchedLineIds = new Set(candidate.searchMatchedLineIds);
+  const visibleOptions = shouldFilterSplitOptions
+    ? options.filter((option) => !option.sourceLineId || matchedLineIds.has(option.sourceLineId))
+    : options;
+
+  return (
+    <View style={styles.targetGroup}>
+      {visibleOptions.map((option) => (
+        <SourceOptionRow key={option.id} option={option} snapshot={snapshot} onPress={() => onSelect(option)} />
+      ))}
+    </View>
+  );
+}
+
 function TargetOptionRow({
   option,
   snapshot,
@@ -268,6 +446,71 @@ function TargetOptionRow({
       </View>
       <View style={styles.rowEnd}>
         <Text style={styles.expenseAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
+        <Text style={styles.rowDate}>{dateLabel}</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function SourceOptionRow({
+  option,
+  snapshot,
+  onPress,
+}: {
+  option: TransactionLinkSourceOption;
+  snapshot: AppSnapshot;
+  onPress: () => void;
+}) {
+  const account = snapshot.accounts.find((item) => item.id === option.accountId);
+  const sourceDisplay = option.line
+    ? getTransactionLinkEndpointDisplay({
+        transactionId: option.transaction.id,
+        lineId: option.sourceLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        categories: snapshot.categories,
+      })
+    : null;
+  const title = sourceDisplay?.title || option.transaction.title || 'Income';
+  const detail = sourceDisplay?.metadata || option.line?.note || (account ? getAccountDisplayName(account) : option.disabledReason || 'Income');
+  const dateLabel = sourceDisplay?.dateLabel || formatTransactionShortDate(option.transaction.datetime);
+  const linkedDisplay = option.isLinked
+    ? getLinkedCounterpartDisplayForEndpoint({
+        endpoint: 'source',
+        transactionId: option.transaction.id,
+        lineId: option.sourceLineId,
+        transactions: snapshot.transactions,
+        lines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        categories: snapshot.categories,
+      })
+    : null;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={!option.eligible}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.targetOptionRow,
+        option.line && styles.targetOptionChild,
+        option.isLinked && styles.linkedOptionRow,
+        !option.eligible && styles.targetOptionDisabled,
+        pressed && option.eligible && sharedStyles.pressed,
+      ]}
+    >
+      {option.line ? <LineIcon line={option.line} snapshot={snapshot} size="sm" /> : <AccountIconBadge account={account} size="sm" />}
+      <View style={styles.targetOptionText}>
+        <Text numberOfLines={1} style={styles.targetOptionTitle}>{title}</Text>
+        <Text numberOfLines={1} style={styles.targetOptionMeta}>
+          {option.eligible ? detail : option.disabledReason}
+        </Text>
+        {linkedDisplay?.title ? (
+          <LinkedItemMeta title={linkedDisplay.title} testID={`linked-source-option-detail-${option.id}`} />
+        ) : null}
+      </View>
+      <View style={styles.rowEnd}>
+        <Text style={styles.incomeAmount}>{formatMoney(option.amountMinor, option.currencyCode)}</Text>
         <Text style={styles.rowDate}>{dateLabel}</Text>
       </View>
     </Pressable>
