@@ -1,9 +1,19 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { ScaleDecorator } from 'react-native-draggable-flatlist';
 import { runOnJS } from 'react-native-worklets';
 import Animated, {
+  cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
@@ -30,10 +40,16 @@ import {
 
 export type BudgetHistoryMode = 'current' | 'compare';
 
-const BUDGET_HISTORY_REVEAL_DURATION_MS = 220;
+const BUDGET_HISTORY_REVEAL_DURATION_MS = 160;
+const BUDGET_HISTORY_REVEAL_OPACITY_IN_DURATION_MS = 120;
+const BUDGET_HISTORY_REVEAL_OPACITY_OUT_DURATION_MS = 100;
 const BUDGET_HISTORY_REVEAL_CHROME_HEIGHT = 116;
 const BUDGET_HISTORY_REVEAL_HEIGHT =
   BUDGET_HISTORY_PLOT_HEIGHT + BUDGET_HISTORY_LABEL_HEIGHT + BUDGET_HISTORY_REVEAL_CHROME_HEIGHT;
+
+type BudgetHistoryRevealHandle = {
+  animateToExpanded: (expanded: boolean) => void;
+};
 
 export function BudgetUsageCard({
   anchorDate,
@@ -62,6 +78,21 @@ export function BudgetUsageCard({
   const progressColor = getBudgetStatusColor(row.status);
   const range = getBudgetPeriodRange(row.budget.period, anchorDate, periodOffset);
   const periodLabel = getBudgetPeriodOffsetLabel(row.budget.period, periodOffset);
+  const historyRevealRef = useRef<BudgetHistoryRevealHandle>(null);
+  const visualHistoryExpandedRef = useRef(isHistoryExpanded);
+
+  useLayoutEffect(() => {
+    visualHistoryExpandedRef.current = isHistoryExpanded;
+  }, [isHistoryExpanded]);
+
+  const handleToggleHistory = useCallback(() => {
+    const nextExpanded = !visualHistoryExpandedRef.current;
+    visualHistoryExpandedRef.current = nextExpanded;
+    historyRevealRef.current?.animateToExpanded(nextExpanded);
+    onToggleHistory();
+  }, [onToggleHistory]);
+
+  const historyTogglePressHandlers = useImmediatePressHandlers(handleToggleHistory, !dragging);
 
   return (
     <ScaleDecorator>
@@ -116,7 +147,7 @@ export function BudgetUsageCard({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: isHistoryExpanded }}
-          onPress={onToggleHistory}
+          {...historyTogglePressHandlers}
           style={({ pressed }) => [styles.historyToggle, pressed && sharedStyles.pressed]}
           testID={`budget-history-toggle-${row.id}`}
         >
@@ -131,112 +162,211 @@ export function BudgetUsageCard({
           />
         </Pressable>
 
-        <BudgetHistoryReveal dragging={dragging} expanded={isHistoryExpanded}>
-          {isHistoryExpanded ? (
-            <BudgetHistoryChart
-              accentColor={row.color}
-              currencyCode={row.budget.currencyCode}
-              key={`${row.id}:${periodOffset}:${historyVariant}`}
-              points={historyPoints}
-              variant={historyVariant}
-            />
-          ) : null}
+        <BudgetHistoryReveal
+          ref={historyRevealRef}
+          dragging={dragging}
+          expanded={isHistoryExpanded}
+        >
+          <BudgetHistoryChart
+            accentColor={row.color}
+            currencyCode={row.budget.currencyCode}
+            key={`${row.id}:${periodOffset}:${historyVariant}`}
+            points={historyPoints}
+            variant={historyVariant}
+          />
         </BudgetHistoryReveal>
       </SurfaceCard>
     </ScaleDecorator>
   );
 }
 
-function BudgetHistoryReveal({
-  children,
-  dragging,
-  expanded,
-}: {
+type BudgetHistoryRevealProps = {
   children: ReactNode;
   dragging: boolean;
   expanded: boolean;
-}) {
-  const [renderedChildren, setRenderedChildren] = useState<ReactNode>(expanded ? children : null);
-  const [shouldRender, setShouldRender] = useState(expanded);
-  const revealHeight = useSharedValue(expanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0);
-  const revealOpacity = useSharedValue(expanded ? 1 : 0);
+};
 
-  const finishCollapse = useCallback(() => {
-    setRenderedChildren(null);
-    setShouldRender(false);
+const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryRevealProps>(
+  function BudgetHistoryReveal(
+    {
+      children,
+      dragging,
+      expanded,
+    },
+    ref,
+  ) {
+    const childrenRef = useRef(children);
+    childrenRef.current = children;
+    const pendingManualTargetRef = useRef<boolean | null>(null);
+    const revealExpandedRef = useRef(expanded);
+    const [renderedChildren, setRenderedChildren] = useState<ReactNode>(expanded ? children : null);
+    const [shouldRender, setShouldRender] = useState(expanded);
+    const revealHeight = useSharedValue(expanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0);
+    const revealOpacity = useSharedValue(expanded ? 1 : 0);
+
+    const finishCollapse = useCallback(() => {
+      if (revealExpandedRef.current) {
+        return;
+      }
+
+      setRenderedChildren(null);
+      setShouldRender(false);
+    }, []);
+
+    const prepareExpandedContent = useCallback(() => {
+      setRenderedChildren(childrenRef.current);
+      setShouldRender(true);
+    }, []);
+
+    const animateToExpanded = useCallback((nextExpanded: boolean, manual = false) => {
+      if (manual) {
+        pendingManualTargetRef.current = nextExpanded;
+      }
+
+      revealExpandedRef.current = nextExpanded;
+      cancelAnimation(revealHeight);
+      cancelAnimation(revealOpacity);
+
+      if (dragging) {
+        revealHeight.value = nextExpanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0;
+        revealOpacity.value = nextExpanded ? 1 : 0;
+
+        if (nextExpanded) {
+          prepareExpandedContent();
+        } else {
+          finishCollapse();
+        }
+
+        return;
+      }
+
+      if (nextExpanded) {
+        prepareExpandedContent();
+        revealHeight.value = withTiming(BUDGET_HISTORY_REVEAL_HEIGHT, {
+          duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
+          easing: Easing.out(Easing.cubic),
+        });
+        revealOpacity.value = withTiming(1, {
+          duration: BUDGET_HISTORY_REVEAL_OPACITY_IN_DURATION_MS,
+          easing: Easing.out(Easing.cubic),
+        });
+
+        return;
+      }
+
+      setShouldRender(true);
+      revealOpacity.value = withTiming(0, {
+        duration: BUDGET_HISTORY_REVEAL_OPACITY_OUT_DURATION_MS,
+        easing: Easing.in(Easing.cubic),
+      });
+      revealHeight.value = withTiming(0, {
+        duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
+        easing: Easing.in(Easing.cubic),
+      }, (finished) => {
+        if (finished) {
+          runOnJS(finishCollapse)();
+        }
+      });
+    }, [
+      dragging,
+      finishCollapse,
+      prepareExpandedContent,
+      revealHeight,
+      revealOpacity,
+    ]);
+
+    useImperativeHandle(ref, () => ({
+      animateToExpanded: (nextExpanded) => animateToExpanded(nextExpanded, true),
+    }), [animateToExpanded]);
+
+    useEffect(() => {
+      if (expanded) {
+        setRenderedChildren(children);
+        setShouldRender(true);
+      }
+    }, [children, expanded]);
+
+    useEffect(() => {
+      if (pendingManualTargetRef.current === expanded) {
+        pendingManualTargetRef.current = null;
+        return;
+      }
+
+      animateToExpanded(expanded);
+    }, [animateToExpanded, expanded]);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+      height: revealHeight.value,
+      opacity: revealOpacity.value,
+    }));
+
+    if (!shouldRender) {
+      return null;
+    }
+
+    return (
+      <Animated.View
+        accessibilityElementsHidden={!expanded}
+        importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
+        pointerEvents={expanded ? 'auto' : 'none'}
+        style={[styles.historyReveal, animatedStyle]}
+      >
+        {renderedChildren}
+      </Animated.View>
+    );
+  },
+);
+
+function useImmediatePressHandlers(onPress: () => void, immediate: boolean) {
+  const handledPressInRef = useRef(false);
+  const clearHandledPressInTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHandledPressInTimeout = useCallback(() => {
+    if (clearHandledPressInTimeoutRef.current) {
+      clearTimeout(clearHandledPressInTimeoutRef.current);
+      clearHandledPressInTimeoutRef.current = null;
+    }
   }, []);
 
-  useEffect(() => {
-    if (expanded) {
-      setRenderedChildren(children);
-      setShouldRender(true);
-    }
-  }, [children, expanded]);
+  useEffect(() => clearHandledPressInTimeout, [clearHandledPressInTimeout]);
 
-  useEffect(() => {
-    if (dragging) {
-      revealHeight.value = expanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0;
-      revealOpacity.value = expanded ? 1 : 0;
-
-      if (!expanded) {
-        finishCollapse();
-      }
-
+  const handlePressIn = useCallback(() => {
+    if (!immediate) {
       return;
     }
 
-    if (!expanded && !shouldRender) {
-      revealHeight.value = 0;
-      revealOpacity.value = 0;
+    clearHandledPressInTimeout();
+    handledPressInRef.current = true;
+    onPress();
+  }, [clearHandledPressInTimeout, immediate, onPress]);
+
+  const handlePressOut = useCallback(() => {
+    if (!immediate) {
       return;
     }
 
-    if (expanded) {
-      revealHeight.value = withTiming(BUDGET_HISTORY_REVEAL_HEIGHT, {
-        duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
-        easing: Easing.out(Easing.cubic),
-      });
-      revealOpacity.value = withTiming(1, {
-        duration: 160,
-        easing: Easing.out(Easing.cubic),
-      });
+    clearHandledPressInTimeout();
+    clearHandledPressInTimeoutRef.current = setTimeout(() => {
+      handledPressInRef.current = false;
+      clearHandledPressInTimeoutRef.current = null;
+    }, 250);
+  }, [clearHandledPressInTimeout, immediate]);
 
+  const handlePress = useCallback(() => {
+    if (immediate && handledPressInRef.current) {
+      handledPressInRef.current = false;
+      clearHandledPressInTimeout();
       return;
     }
 
-    revealOpacity.value = withTiming(0, {
-      duration: 150,
-      easing: Easing.in(Easing.cubic),
-    });
-    revealHeight.value = withTiming(0, {
-      duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
-      easing: Easing.in(Easing.cubic),
-    }, (finished) => {
-      if (finished) {
-        runOnJS(finishCollapse)();
-      }
-    });
-  }, [dragging, expanded, finishCollapse, revealHeight, revealOpacity, shouldRender]);
+    onPress();
+  }, [clearHandledPressInTimeout, immediate, onPress]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    height: revealHeight.value,
-    opacity: revealOpacity.value,
-  }));
-
-  if (!shouldRender) {
-    return null;
-  }
-
-  return (
-    <Animated.View
-      accessibilityElementsHidden={!expanded}
-      importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
-      pointerEvents={expanded ? 'auto' : 'none'}
-      style={[styles.historyReveal, animatedStyle]}
-    >
-      {renderedChildren}
-    </Animated.View>
-  );
+  return {
+    onPress: handlePress,
+    onPressIn: immediate ? handlePressIn : undefined,
+    onPressOut: immediate ? handlePressOut : undefined,
+  };
 }
 
 export function BudgetPeriodNavigator({
