@@ -1,7 +1,17 @@
-import { ScrollView, Text, View } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import {
+  ScrollView,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { CompactAccountSelector } from '../../components/CompactAccountSelector';
+import {
+  CompactAccountSelector,
+  type CompactAccountSelectorMode,
+} from '../../components/CompactAccountSelector';
 import { Chip, SectionHeader } from '../../components/ui';
 import type { AccountBalance, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
@@ -27,6 +37,12 @@ type StatsScreenProps = {
   showHeader?: boolean;
 };
 
+const STATS_ACCOUNT_HEADER_DELTA_IGNORE_THRESHOLD = 8;
+const STATS_ACCOUNT_HEADER_SCROLL_THRESHOLD = 48;
+const STATS_ACCOUNT_HEADER_MANUAL_GUARD_MS = 420;
+const STATS_ACCOUNT_HEADER_TRANSITION_GUARD_MS = 320;
+const STATS_ACCOUNT_HEADER_TOP_RESET_OFFSET = 6;
+
 export function StatsScreen({
   accountBalances,
   snapshot,
@@ -36,12 +52,103 @@ export function StatsScreen({
   showHeader = true,
 }: StatsScreenProps) {
   const insets = useSafeAreaInsets();
+  const [accountMode, setAccountMode] = useState<CompactAccountSelectorMode>('peek');
+  const accountModeRef = useRef<CompactAccountSelectorMode>('peek');
+  const headerTransitionUntilRef = useRef(0);
+  const manualHeaderLockUntilRef = useRef(0);
+  const lastScrollOffsetYRef = useRef(0);
+  const scrollDirectionRef = useRef<'up' | 'down' | null>(null);
+  const scrollDeltaRef = useRef(0);
   const viewModel = useStatsViewModel({
     bottomInset: insets.bottom,
     defaultSelectedAccountIds,
     onOpenStatsDrilldown,
     snapshot,
   });
+
+  const setAccountModeSynced = useCallback((nextMode: CompactAccountSelectorMode) => {
+    accountModeRef.current = nextMode;
+    setAccountMode(nextMode);
+  }, []);
+
+  const resetScrollIntentTracking = useCallback((offsetY?: number) => {
+    if (offsetY !== undefined) {
+      lastScrollOffsetYRef.current = offsetY;
+    }
+
+    scrollDirectionRef.current = null;
+    scrollDeltaRef.current = 0;
+  }, []);
+
+  const getRemainingHeaderGuardMs = useCallback(() => Math.max(
+    0,
+    Math.max(headerTransitionUntilRef.current, manualHeaderLockUntilRef.current) - Date.now(),
+  ), []);
+
+  const handleAccountExpandToggle = useCallback(() => {
+    const currentMode = accountModeRef.current;
+    const nextMode =
+      currentMode === 'summary'
+        ? 'peek'
+        : currentMode === 'peek'
+          ? 'expanded'
+          : 'peek';
+
+    manualHeaderLockUntilRef.current = Date.now() + STATS_ACCOUNT_HEADER_MANUAL_GUARD_MS;
+    headerTransitionUntilRef.current = Date.now() + STATS_ACCOUNT_HEADER_TRANSITION_GUARD_MS;
+    resetScrollIntentTracking();
+    setAccountModeSynced(nextMode);
+  }, [resetScrollIntentTracking, setAccountModeSynced]);
+
+  const compactAccountHeaderFromScroll = useCallback(() => {
+    if (accountModeRef.current === 'summary') {
+      return;
+    }
+
+    headerTransitionUntilRef.current = Date.now() + STATS_ACCOUNT_HEADER_TRANSITION_GUARD_MS;
+    setAccountModeSynced('summary');
+  }, [setAccountModeSynced]);
+
+  const handleStatsScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = event.nativeEvent.contentOffset.y;
+    const previousOffsetY = lastScrollOffsetYRef.current;
+    const deltaY = offsetY - previousOffsetY;
+    lastScrollOffsetYRef.current = offsetY;
+
+    if (Math.abs(deltaY) < STATS_ACCOUNT_HEADER_DELTA_IGNORE_THRESHOLD) {
+      return;
+    }
+
+    if (offsetY <= STATS_ACCOUNT_HEADER_TOP_RESET_OFFSET) {
+      resetScrollIntentTracking(offsetY);
+      return;
+    }
+
+    if (getRemainingHeaderGuardMs() > 0) {
+      return;
+    }
+
+    const nextDirection = deltaY > 0 ? 'down' : 'up';
+    if (scrollDirectionRef.current !== nextDirection) {
+      scrollDirectionRef.current = nextDirection;
+      scrollDeltaRef.current = 0;
+    }
+
+    scrollDeltaRef.current += deltaY;
+    if (nextDirection === 'down' && scrollDeltaRef.current >= STATS_ACCOUNT_HEADER_SCROLL_THRESHOLD) {
+      scrollDeltaRef.current = 0;
+      compactAccountHeaderFromScroll();
+      return;
+    }
+
+    if (nextDirection === 'up' && scrollDeltaRef.current <= -STATS_ACCOUNT_HEADER_SCROLL_THRESHOLD) {
+      scrollDeltaRef.current = 0;
+    }
+  }, [
+    compactAccountHeaderFromScroll,
+    getRemainingHeaderGuardMs,
+    resetScrollIntentTracking,
+  ]);
 
   return (
     <View style={styles.screen}>
@@ -58,7 +165,9 @@ export function StatsScreen({
           accountBalances={accountBalances}
           selectedAccountIds={viewModel.selectedAccountIds}
           title="Accounts"
+          mode={accountMode}
           onClearSelection={viewModel.clearSelectedAccounts}
+          onPressExpandToggle={handleAccountExpandToggle}
           onSelectAll={viewModel.selectAllAccounts}
           onToggleAccount={viewModel.toggleAccount}
           testID="stats-account-selector"
@@ -74,6 +183,8 @@ export function StatsScreen({
       <ScrollView
         contentContainerStyle={[styles.scrollContent, { paddingBottom: viewModel.bottomPadding }]}
         keyboardShouldPersistTaps="handled"
+        onScroll={handleStatsScroll}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
         <CashFlowCard cashFlow={viewModel.cashFlow} currencyCode={viewModel.currencyCode} />
