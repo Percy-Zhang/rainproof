@@ -25,6 +25,9 @@ export const transactionsScreenStyles = StyleSheet.create({
     gap: 0,
     padding: spacing.sm,
   },
+  searchReveal: {
+    overflow: 'hidden',
+  },
   label: {
     color: colors.muted,
     fontSize: typography.small,

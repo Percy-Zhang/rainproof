@@ -61,6 +61,31 @@ export function getAccountSelectionSummary(
   };
 }
 
+export function getCompactAccountSelectionSummary(
+  accounts: Account[],
+  selectedAccountIds: string[],
+): string {
+  const selectableAccounts = getSelectableAccounts(accounts);
+  const selectedAccountIdSet = new Set(selectedAccountIds);
+  const selectedAccounts = selectableAccounts.filter((account) => selectedAccountIdSet.has(account.id));
+  const selectedCount = selectedAccounts.length;
+
+  if (!selectedCount) {
+    return 'No accounts selected';
+  }
+
+  const currencyLabel = getCompactCurrencySummary(selectedAccounts);
+  if (selectedCount === selectableAccounts.length) {
+    return `All accounts \u00B7 ${currencyLabel}`;
+  }
+
+  if (selectedCount === 1) {
+    return `1 account \u00B7 ${currencyLabel}`;
+  }
+
+  return `${selectedCount} accounts \u00B7 ${currencyLabel}`;
+}
+
 export function getAccountSelectionBalanceLabel(account: Account, balanceMinor?: number): string {
   if (balanceMinor === undefined) {
     return account.currencyCode;
@@ -86,4 +111,20 @@ function getCurrencySummary(accounts: Account[]): string {
   }
 
   return currencyCodes.join(', ');
+}
+
+function getCompactCurrencySummary(accounts: Account[]): string {
+  const currencyCodes: CurrencyCode[] = [];
+  const currencyCodeSet = new Set<CurrencyCode>();
+
+  for (const account of accounts) {
+    if (currencyCodeSet.has(account.currencyCode)) {
+      continue;
+    }
+
+    currencyCodeSet.add(account.currencyCode);
+    currencyCodes.push(account.currencyCode);
+  }
+
+  return currencyCodes.length === 1 ? currencyCodes[0] : `${currencyCodes.length} currencies`;
 }

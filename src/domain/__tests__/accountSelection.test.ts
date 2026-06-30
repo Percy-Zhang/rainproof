@@ -1,4 +1,5 @@
 import {
+  getCompactAccountSelectionSummary,
   getAccountSelectionBalanceLabel,
   getAccountSelectionSummary,
   getInitialSelectedAccountIds,
@@ -61,6 +62,23 @@ describe('account selection helpers', () => {
       headline: 'No accounts selected',
       detail: 'No accounts selected',
     });
+  });
+
+  it('builds compact selected-account summaries for collapsed selectors', () => {
+    const accounts = [
+      account('Daily', 'AUD'),
+      account('Travel', 'USD'),
+      account('Savings', 'AUD'),
+    ];
+
+    expect(getCompactAccountSelectionSummary(accounts, ['Daily', 'Travel', 'Savings']))
+      .toBe('All accounts \u00B7 2 currencies');
+    expect(getCompactAccountSelectionSummary(accounts, ['Daily', 'Savings']))
+      .toBe('2 accounts \u00B7 AUD');
+    expect(getCompactAccountSelectionSummary(accounts, ['Travel']))
+      .toBe('1 account \u00B7 USD');
+    expect(getCompactAccountSelectionSummary(accounts, []))
+      .toBe('No accounts selected');
   });
 
   it('formats account selection balances in each account currency', () => {

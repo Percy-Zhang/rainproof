@@ -1,5 +1,5 @@
 import { getTransactionsInitialSelectedAccountIds } from '../useTransactionsViewModel';
-import { shouldCollapseTransactionsAccountSelector } from '../transactionsSearchFocus';
+import { shouldKeepTransactionsSearchVisible } from '../transactionsSearchFocus';
 import type { Account } from '../../../domain/types';
 
 function account(id: string, overrides: Partial<Account> = {}): Account {
@@ -54,9 +54,31 @@ describe('transactions account selection helpers', () => {
     ])).toEqual(['active']);
   });
 
-  it('collapses the account selector only while search is focused and the keyboard is visible', () => {
-    expect(shouldCollapseTransactionsAccountSelector({ searchFocused: true, keyboardVisible: true })).toBe(true);
-    expect(shouldCollapseTransactionsAccountSelector({ searchFocused: true, keyboardVisible: false })).toBe(false);
-    expect(shouldCollapseTransactionsAccountSelector({ searchFocused: false, keyboardVisible: true })).toBe(false);
+  it('keeps the search visible while search is focused, keyboard is visible, or text is active', () => {
+    expect(shouldKeepTransactionsSearchVisible({
+      keyboardVisible: true,
+      searchFocused: true,
+      searchQuery: '',
+    })).toBe(true);
+    expect(shouldKeepTransactionsSearchVisible({
+      keyboardVisible: false,
+      searchFocused: true,
+      searchQuery: '',
+    })).toBe(true);
+    expect(shouldKeepTransactionsSearchVisible({
+      keyboardVisible: true,
+      searchFocused: false,
+      searchQuery: '',
+    })).toBe(true);
+    expect(shouldKeepTransactionsSearchVisible({
+      keyboardVisible: false,
+      searchFocused: false,
+      searchQuery: 'coffee',
+    })).toBe(true);
+    expect(shouldKeepTransactionsSearchVisible({
+      keyboardVisible: false,
+      searchFocused: false,
+      searchQuery: '   ',
+    })).toBe(false);
   });
 });

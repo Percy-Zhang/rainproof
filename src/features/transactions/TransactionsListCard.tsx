@@ -1,5 +1,11 @@
 import { useMemo } from 'react';
-import { SectionList, Text, View } from 'react-native';
+import {
+  SectionList,
+  Text,
+  View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
+} from 'react-native';
 
 import { Card } from '../../components/ui';
 import {
@@ -25,7 +31,12 @@ export function TransactionsListCard({
   emptyMessage,
   groups,
   isLoading,
+  onMomentumScrollBegin,
+  onMomentumScrollEnd,
   onOpenTransaction,
+  onScrollBeginDrag,
+  onScrollEndDrag,
+  onScrollOffsetChange,
   showCurrencyCodes,
 }: {
   accounts: Account[];
@@ -36,7 +47,12 @@ export function TransactionsListCard({
   emptyMessage: string;
   groups: TransactionDisplayGroup[];
   isLoading?: boolean;
+  onMomentumScrollBegin?: (offsetY: number) => void;
+  onMomentumScrollEnd?: (offsetY: number) => void;
   onOpenTransaction: (transactionId: string) => void;
+  onScrollBeginDrag?: (offsetY: number) => void;
+  onScrollEndDrag?: (offsetY: number) => void;
+  onScrollOffsetChange?: (offsetY: number) => void;
   showCurrencyCodes: boolean;
 }) {
   const sections = useMemo<TransactionDisplaySection[]>(
@@ -52,6 +68,17 @@ export function TransactionsListCard({
         keyExtractor={(entry) => entry.id}
         style={styles.transactionSectionList}
         keyboardShouldPersistTaps="handled"
+        onMomentumScrollBegin={(event: NativeSyntheticEvent<NativeScrollEvent>) =>
+          onMomentumScrollBegin?.(event.nativeEvent.contentOffset.y)}
+        onMomentumScrollEnd={(event: NativeSyntheticEvent<NativeScrollEvent>) =>
+          onMomentumScrollEnd?.(event.nativeEvent.contentOffset.y)}
+        onScroll={(event: NativeSyntheticEvent<NativeScrollEvent>) =>
+          onScrollOffsetChange?.(event.nativeEvent.contentOffset.y)}
+        onScrollBeginDrag={(event: NativeSyntheticEvent<NativeScrollEvent>) =>
+          onScrollBeginDrag?.(event.nativeEvent.contentOffset.y)}
+        onScrollEndDrag={(event: NativeSyntheticEvent<NativeScrollEvent>) =>
+          onScrollEndDrag?.(event.nativeEvent.contentOffset.y)}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
         stickySectionHeadersEnabled={false}
         initialNumToRender={12}
