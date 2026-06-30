@@ -1,5 +1,12 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import { memo, useCallback, useMemo, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+} from 'react-native';
 import Svg, { Circle, Line, Polyline } from 'react-native-svg';
 
 import type { BudgetHistoryPoint } from '../../domain/budgets';
@@ -15,29 +22,47 @@ import {
   shouldShowBudgetHistoryBarLabel,
 } from './budgetHistoryChartModel';
 
-export function BudgetHistoryChart({
-  accentColor,
-  currencyCode,
-  points,
-  variant = 'bar',
-}: {
+type BudgetHistoryChartProps = {
   accentColor: string;
   currencyCode: string;
   points: BudgetHistoryPoint[];
   variant?: 'bar' | 'line';
-}) {
+};
+
+export const BudgetHistoryChart = memo(function BudgetHistoryChart({
+  accentColor,
+  currencyCode,
+  points,
+  variant = 'bar',
+}: BudgetHistoryChartProps) {
   const [selectedPointId, setSelectedPointId] = useState(points.at(-1)?.id ?? '');
   const [linePressableWidth, setLinePressableWidth] = useState(0);
-  const selectedPoint = points.find((point) => point.id === selectedPointId) ?? points.at(-1);
+  const selectedPoint = useMemo(
+    () => points.find((point) => point.id === selectedPointId) ?? points.at(-1),
+    [points, selectedPointId],
+  );
 
-  if (!selectedPoint) {
-    return null;
-  }
+  const scale = useMemo(
+    () => selectedPoint ? getBudgetHistoryChartScale(points, selectedPoint) : null,
+    [points, selectedPoint],
+  );
+  const lineModel = useMemo(
+    () => selectedPoint ? getBudgetHistoryLineChartModel(points, selectedPoint) : null,
+    [points, selectedPoint],
+  );
+  const lineAxisLabels = useMemo(
+    () => getBudgetHistoryLineAxisLabels(points),
+    [points],
+  );
 
-  const scale = getBudgetHistoryChartScale(points, selectedPoint);
-  const lineModel = getBudgetHistoryLineChartModel(points, selectedPoint);
+  const handleLineLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = event.nativeEvent.layout.width;
+    setLinePressableWidth((currentWidth) => (
+      Math.abs(currentWidth - nextWidth) < 1 ? currentWidth : nextWidth
+    ));
+  }, []);
 
-  function handleLinePress(event: GestureResponderEvent) {
+  const handleLinePress = useCallback((event: GestureResponderEvent) => {
     const width = linePressableWidth || BUDGET_HISTORY_LINE_WIDTH;
     const clampedX = Math.max(0, Math.min(width, event.nativeEvent.locationX));
     const selectedIndex = points.length <= 1
@@ -48,6 +73,10 @@ export function BudgetHistoryChart({
     if (nextPoint) {
       setSelectedPointId(nextPoint.id);
     }
+  }, [linePressableWidth, points]);
+
+  if (!selectedPoint || !scale || !lineModel) {
+    return null;
   }
 
   return (
@@ -79,7 +108,7 @@ export function BudgetHistoryChart({
           <Pressable
             accessibilityLabel={`${selectedPoint.rangeLabel}, ${formatMoney(selectedPoint.spentMinor, currencyCode)} used`}
             accessibilityRole="button"
-            onLayout={(event) => setLinePressableWidth(event.nativeEvent.layout.width)}
+            onLayout={handleLineLayout}
             onPress={handleLinePress}
             style={({ pressed }) => [styles.linePressable, pressed && styles.pressed]}
             testID="budget-history-line-chart"
@@ -118,7 +147,7 @@ export function BudgetHistoryChart({
             </Text>
           </Pressable>
           <View style={styles.lineAxisRow}>
-            {getBudgetHistoryLineAxisLabels(points).map((label) => (
+            {lineAxisLabels.map((label) => (
               <Text
                 key={`${label.index}:${label.label}`}
                 numberOfLines={1}
@@ -185,7 +214,7 @@ export function BudgetHistoryChart({
       </Text>
     </View>
   );
-}
+});
 
 function HistoryMetric({
   align = 'left',

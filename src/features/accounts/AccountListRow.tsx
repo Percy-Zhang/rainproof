@@ -1,6 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { ScaleDecorator } from 'react-native-draggable-flatlist';
 
 import { AccountIconBadge } from '../../components/AccountDisplay';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
@@ -13,6 +12,8 @@ import { formatMoney } from '../../domain/money';
 import type { Account } from '../../domain/types';
 import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
+
+const DRAG_PRESS_RETENTION_OFFSET = { bottom: 36, left: 36, right: 36, top: 36 };
 
 type AccountListRowProps = {
   account: Account;
@@ -47,7 +48,7 @@ export function AccountListRow({
     : account.notes || 'No notes yet.';
 
   return (
-    <ScaleDecorator>
+    <View style={styles.reorderRowFrame}>
       <View
         style={[
           styles.accountRow,
@@ -57,13 +58,16 @@ export function AccountListRow({
           },
           account.isArchived && styles.archivedRow,
           dragging && sharedStyles.draggingSurface,
+          dragging && sharedStyles.draggingLift,
           dashboardEditMode && !hiddenFromDashboard && styles.dashboardVisibleRow,
         ]}
       >
         <Pressable
           accessibilityLabel={`Reorder ${getAccountDisplayName(account)}`}
           accessibilityRole="button"
+          delayLongPress={150}
           onLongPress={onDrag}
+          pressRetentionOffset={DRAG_PRESS_RETENTION_OFFSET}
           style={({ pressed }) => [styles.dragHandle, pressed && sharedStyles.pressed]}
           testID={`account-drag-${account.id}`}
         >
@@ -71,6 +75,7 @@ export function AccountListRow({
         </Pressable>
         <Pressable
           accessibilityRole="button"
+          disabled={dragging}
           onPress={onPress}
           style={({ pressed }) => [styles.accountButton, pressed && sharedStyles.pressed]}
           testID={`account-row-${account.id}`}
@@ -96,7 +101,7 @@ export function AccountListRow({
           <Text style={[styles.balanceText, account.isArchived && styles.closedBalanceText]}>{balanceLabel}</Text>
         </Pressable>
       </View>
-    </ScaleDecorator>
+    </View>
   );
 }
 
@@ -160,6 +165,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     lineHeight: 17,
+  },
+  reorderRowFrame: {
+    paddingBottom: spacing.sm,
+    width: '100%',
   },
   balanceText: {
     color: colors.ink,

@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 
 import { defaultCategories } from '../../../domain/categories';
 import type { Account, AppSnapshot, Budget } from '../../../domain/types';
@@ -9,36 +10,39 @@ jest.mock('@expo/vector-icons', () => {
   return { Ionicons: 'Ionicons' };
 });
 
-jest.mock('react-native-draggable-flatlist', () => {
+jest.mock('../BudgetReorderList', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { View } = jest.requireActual<typeof import('react-native')>('react-native');
 
+  type MockRow = { id: string };
+  type MockRenderState = { dragging: boolean; reorderActive: boolean };
+
   return {
-    __esModule: true,
-    default: function MockDraggableFlatList(props: any) {
-      return React.createElement(
+    BudgetReorderList: ({
+      contentContainerStyle,
+      emptyComponent,
+      rows,
+      renderRow,
+    }: {
+      contentContainerStyle?: StyleProp<ViewStyle>;
+      emptyComponent: React.ReactNode;
+      rows: MockRow[];
+      renderRow: (row: MockRow, state: MockRenderState) => React.ReactNode;
+    }) => React.createElement(
+      View,
+      { style: { flex: 1 }, testID: 'budgets-reorder-list' },
+      React.createElement(
         View,
-        { style: props.containerStyle, testID: 'budgets-draggable-list' },
-        props.ListHeaderComponent
-          ? React.createElement(View, { testID: 'unexpected-list-header' }, props.ListHeaderComponent)
-          : null,
-        props.data.length
-          ? props.data.map((item: any, index: number) => (
-            React.createElement(
-              View,
-              { key: props.keyExtractor(item, index) },
-              props.renderItem({
-                drag: () => undefined,
-                getIndex: () => index,
-                isActive: false,
-                item,
-              }),
-            )
+        { style: contentContainerStyle },
+        rows.length
+          ? rows.map((row) => React.createElement(
+            View,
+            { key: row.id },
+            renderRow(row, { dragging: false, reorderActive: false }),
           ))
-          : props.ListEmptyComponent,
-      );
-    },
-    ScaleDecorator: ({ children }: { children: React.ReactNode }) => React.createElement(React.Fragment, null, children),
+          : emptyComponent,
+      ),
+    ),
   };
 });
 
@@ -63,7 +67,7 @@ describe('BudgetsScreen fixed controls', () => {
     expect(screen.getByTestId('budget-history-mode-current')).toBeTruthy();
     expect(screen.getByTestId('budget-history-mode-compare')).toBeTruthy();
     expect(screen.getByTestId('add-budget')).toBeTruthy();
-    expect(screen.getByTestId('budgets-draggable-list').props.style).toEqual({ flex: 1 });
+    expect(screen.getByTestId('budgets-reorder-list').props.style).toEqual({ flex: 1 });
     expect(screen.queryByTestId('unexpected-list-header')).toBeNull();
   });
 
@@ -75,6 +79,17 @@ describe('BudgetsScreen fixed controls', () => {
 
     fireEvent.press(screen.getByTestId('budget-history-mode-compare'));
     expect(screen.getByTestId('budget-history-chart').props.children).toBe('bar');
+  });
+
+  it('does not toggle history when the header touch moves like a scroll gesture', () => {
+    const screen = renderBudgets();
+    const toggle = screen.getByTestId('budget-history-toggle-food');
+
+    fireEvent(toggle, 'pressIn', { nativeEvent: { pageY: 100 } });
+    fireEvent(toggle, 'touchMove', { nativeEvent: { pageY: 112 } });
+    fireEvent.press(toggle);
+
+    expect(screen.queryByTestId('budget-history-chart')).toBeNull();
   });
 });
 

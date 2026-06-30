@@ -1,9 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import DraggableFlatList, {
-  type RenderItemParams,
-} from 'react-native-draggable-flatlist';
 
 import { ActionButton, Card, SectionHeader } from '../../components/ui';
 import type {
@@ -11,8 +8,15 @@ import type {
   AccountBalance,
   AppSnapshot,
 } from '../../domain/types';
+import {
+  haveIdsInSameOrder,
+  mergeIdsByPreferredOrder,
+  orderItemsById,
+  orderItemsByIdOrFallback,
+} from '../../domain/reorder';
 import { colors, spacing, typography } from '../../theme/tokens';
-import { AccountListRow } from './AccountListRow';
+import { useDeferredOrderPersistence } from '../useDeferredOrderPersistence';
+import { AccountsReorderList } from './AccountsReorderList';
 
 type AccountsScreenProps = {
   snapshot: AppSnapshot;
@@ -38,30 +42,96 @@ export function AccountsScreen({
     () => new Map(accountBalances.map((balance) => [balance.account.id, balance.balanceMinor])),
     [accountBalances],
   );
+  const snapshotAccountIds = useMemo(
+    () => snapshot.accounts.map((account) => account.id),
+    [snapshot.accounts],
+  );
+  const pendingAccountOrderIdsRef = useRef<string[] | null>(null);
+  const accountDragActiveRef = useRef(false);
+  const accountDropSettlingRef = useRef(false);
+  const accountDragStartIdsRef = useRef<string[] | null>(null);
+  const visualAccountIdsRef = useRef(snapshotAccountIds);
+  const latestSnapshotAccountsRef = useRef(snapshot.accounts);
+  const latestSnapshotAccountIdsRef = useRef(snapshotAccountIds);
+  const [accounts, setAccounts] = useState(() => snapshot.accounts);
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
+  const scheduleAccountOrderPersistence = useDeferredOrderPersistence(onUpdateAccountOrder);
 
-  function renderAccountRow({ item, drag, isActive }: RenderItemParams<Account>) {
-    return (
-      <AccountListRow
-        account={item}
-        balanceMinor={balanceByAccountId.get(item.id)}
-        dashboardEditMode={dashboardEditMode}
-        dragging={isActive}
-        showCurrencyCodes={showCurrencyCodes}
-        onDrag={drag}
-        onPress={() => {
-          if (dashboardEditMode) {
-            if (!item.isArchived) {
-              void onUpdateAccountDashboardVisibility(item.id, !item.showOnDashboard);
-            }
-            return;
-          }
+  const syncAccountsFromSnapshot = useCallback((
+    nextSnapshotAccounts = latestSnapshotAccountsRef.current,
+    nextSnapshotIds = latestSnapshotAccountIdsRef.current,
+  ) => {
+    setAccounts((currentRows) => {
+      const pendingIds = pendingAccountOrderIdsRef.current;
+      const currentIds = currentRows.map((account) => account.id);
+      if (!pendingIds) {
+        visualAccountIdsRef.current = nextSnapshotIds;
+        return nextSnapshotAccounts;
+      }
 
-          onEditAccount(item.id);
-        }}
-      />
-    );
-  }
+      const mergedIds = mergeIdsByPreferredOrder(nextSnapshotIds, pendingIds);
+      if (haveIdsInSameOrder(nextSnapshotIds, mergedIds)) {
+        pendingAccountOrderIdsRef.current = null;
+        visualAccountIdsRef.current = nextSnapshotIds;
+        if (haveIdsInSameOrder(currentIds, nextSnapshotIds)) {
+          return currentRows;
+        }
+
+        return nextSnapshotAccounts;
+      }
+
+      const nextAccounts = orderItemsById(nextSnapshotAccounts, mergedIds);
+      visualAccountIdsRef.current = nextAccounts.map((account) => account.id);
+      pendingAccountOrderIdsRef.current = mergedIds;
+      return nextAccounts;
+    });
+  }, []);
+
+  useEffect(() => {
+    latestSnapshotAccountsRef.current = snapshot.accounts;
+    latestSnapshotAccountIdsRef.current = snapshotAccountIds;
+
+    if (accountDragActiveRef.current || accountDropSettlingRef.current) {
+      return;
+    }
+
+    syncAccountsFromSnapshot(snapshot.accounts, snapshotAccountIds);
+  }, [snapshot.accounts, snapshotAccountIds, syncAccountsFromSnapshot]);
+
+  const handleDragBegin = useCallback(() => {
+    accountDragActiveRef.current = true;
+    accountDropSettlingRef.current = true;
+    accountDragStartIdsRef.current = visualAccountIdsRef.current;
+  }, []);
+
+  const handleDragEnd = useCallback((nextIds: string[]) => {
+    const dragStartIds = accountDragStartIdsRef.current ?? visualAccountIdsRef.current;
+    accountDragActiveRef.current = false;
+    accountDragStartIdsRef.current = null;
+
+    if (haveIdsInSameOrder(dragStartIds, nextIds)) {
+      accountDropSettlingRef.current = false;
+      syncAccountsFromSnapshot();
+      return;
+    }
+
+    pendingAccountOrderIdsRef.current = nextIds;
+    visualAccountIdsRef.current = nextIds;
+    setAccounts((currentAccounts) => orderItemsByIdOrFallback(currentAccounts, nextIds, currentAccounts));
+    accountDropSettlingRef.current = false;
+    scheduleAccountOrderPersistence(nextIds);
+  }, [scheduleAccountOrderPersistence, syncAccountsFromSnapshot]);
+
+  const handleAccountPress = useCallback((account: Account) => {
+    if (dashboardEditMode) {
+      if (!account.isArchived) {
+        void onUpdateAccountDashboardVisibility(account.id, !account.showOnDashboard);
+      }
+      return;
+    }
+
+    onEditAccount(account.id);
+  }, [dashboardEditMode, onEditAccount, onUpdateAccountDashboardVisibility]);
 
   return (
     <View style={styles.stack}>
@@ -109,18 +179,15 @@ export function AccountsScreen({
           </View>
         ) : null}
 
-        {snapshot.accounts.length ? (
-          <DraggableFlatList
-            data={snapshot.accounts}
-            keyExtractor={(account) => account.id}
-            onDragEnd={({ data }) => {
-              void onUpdateAccountOrder(data.map((account) => account.id));
-            }}
-            renderItem={renderAccountRow}
-            activationDistance={8}
-            containerStyle={styles.draggableList}
-            contentContainerStyle={styles.accountRows}
-            keyboardShouldPersistTaps="handled"
+        {accounts.length ? (
+          <AccountsReorderList
+            accounts={accounts}
+            balanceByAccountId={balanceByAccountId}
+            dashboardEditMode={dashboardEditMode}
+            showCurrencyCodes={showCurrencyCodes}
+            onDragBegin={handleDragBegin}
+            onDragEnd={handleDragEnd}
+            onPressAccount={handleAccountPress}
           />
         ) : (
           <View style={styles.emptyState}>
@@ -190,13 +257,6 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: typography.small,
     fontWeight: '800',
-  },
-  draggableList: {
-    flex: 1,
-  },
-  accountRows: {
-    gap: spacing.sm,
-    paddingBottom: spacing.xl,
   },
   emptyState: {
     alignItems: 'center',

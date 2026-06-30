@@ -1,9 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import DraggableFlatList, {
-  type RenderItemParams,
-} from 'react-native-draggable-flatlist';
 
 import { ActionButton, Card } from '../../components/ui';
 import {
@@ -12,9 +9,16 @@ import {
   getBudgetUsageDisplayRows,
   getBudgetUsagesForPeriods,
   sortBudgetUsageDisplayRowsByDisplayOrder,
+  type BudgetHistoryPoint,
   type BudgetUsageDisplayRow,
 } from '../../domain/budgets';
 import { defaultCategories } from '../../domain/categories';
+import {
+  haveIdsInSameOrder,
+  mergeIdsByPreferredOrder,
+  orderItemsById,
+  orderItemsByIdOrFallback,
+} from '../../domain/reorder';
 import type { AppSnapshot } from '../../domain/types';
 import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -24,6 +28,8 @@ import {
   BudgetUsageCard,
   type BudgetHistoryMode,
 } from './BudgetScreenComponents';
+import { BudgetReorderList } from './BudgetReorderList';
+import { useDeferredOrderPersistence } from '../useDeferredOrderPersistence';
 
 type BudgetsScreenProps = {
   snapshot: AppSnapshot;
@@ -31,6 +37,8 @@ type BudgetsScreenProps = {
   onEditBudget: (budgetId: string) => void;
   onUpdateBudgetOrder: (budgetIds: string[]) => Promise<void>;
 };
+
+const EMPTY_BUDGET_HISTORY_POINTS: BudgetHistoryPoint[] = [];
 
 export function BudgetsScreen({
   snapshot,
@@ -42,10 +50,91 @@ export function BudgetsScreen({
   const [expandedBudgetId, setExpandedBudgetId] = useState<string | null>(null);
   const [historyMode, setHistoryMode] = useState<BudgetHistoryMode>('current');
   const [periodOffset, setPeriodOffset] = useState(0);
-  const budgetRows = useMemo(
+  const snapshotBudgetRows = useMemo(
     () => getBudgetUsageRowsForSnapshot(snapshot, anchorDate, periodOffset),
     [anchorDate, periodOffset, snapshot],
   );
+  const snapshotBudgetRowIds = useMemo(
+    () => snapshotBudgetRows.map((row) => row.id),
+    [snapshotBudgetRows],
+  );
+  const pendingBudgetOrderIdsRef = useRef<string[] | null>(null);
+  const budgetDragActiveRef = useRef(false);
+  const budgetDropSettlingRef = useRef(false);
+  const budgetDragStartIdsRef = useRef<string[] | null>(null);
+  const visualBudgetRowIdsRef = useRef(snapshotBudgetRowIds);
+  const latestSnapshotBudgetRowsRef = useRef(snapshotBudgetRows);
+  const latestSnapshotBudgetRowIdsRef = useRef(snapshotBudgetRowIds);
+  const [budgetRows, setBudgetRows] = useState(() => snapshotBudgetRows);
+  const scheduleBudgetOrderPersistence = useDeferredOrderPersistence(onUpdateBudgetOrder);
+
+  const syncBudgetRowsFromSnapshot = useCallback((
+    nextSnapshotRows = latestSnapshotBudgetRowsRef.current,
+    nextSnapshotIds = latestSnapshotBudgetRowIdsRef.current,
+  ) => {
+    setBudgetRows((currentRows) => {
+      const pendingIds = pendingBudgetOrderIdsRef.current;
+      const currentIds = currentRows.map((row) => row.id);
+      if (!pendingIds) {
+        visualBudgetRowIdsRef.current = nextSnapshotIds;
+        return nextSnapshotRows;
+      }
+
+      const mergedIds = mergeIdsByPreferredOrder(nextSnapshotIds, pendingIds);
+      if (haveIdsInSameOrder(nextSnapshotIds, mergedIds)) {
+        pendingBudgetOrderIdsRef.current = null;
+        visualBudgetRowIdsRef.current = nextSnapshotIds;
+        if (haveIdsInSameOrder(currentIds, nextSnapshotIds)) {
+          return currentRows;
+        }
+
+        return nextSnapshotRows;
+      }
+
+      const nextRows = orderItemsById(nextSnapshotRows, mergedIds);
+      visualBudgetRowIdsRef.current = nextRows.map((row) => row.id);
+      pendingBudgetOrderIdsRef.current = mergedIds;
+      return nextRows;
+    });
+  }, []);
+
+  useEffect(() => {
+    latestSnapshotBudgetRowsRef.current = snapshotBudgetRows;
+    latestSnapshotBudgetRowIdsRef.current = snapshotBudgetRowIds;
+
+    if (budgetDragActiveRef.current || budgetDropSettlingRef.current) {
+      return;
+    }
+
+    syncBudgetRowsFromSnapshot(snapshotBudgetRows, snapshotBudgetRowIds);
+  }, [snapshotBudgetRowIds, snapshotBudgetRows, syncBudgetRowsFromSnapshot]);
+
+  const handleDragBegin = useCallback(() => {
+    budgetDragActiveRef.current = true;
+    budgetDropSettlingRef.current = true;
+    budgetDragStartIdsRef.current = visualBudgetRowIdsRef.current;
+    setExpandedBudgetId(null);
+  }, []);
+
+  const handleDragEnd = useCallback((nextIds: string[]) => {
+    const dragStartIds = budgetDragStartIdsRef.current ?? visualBudgetRowIdsRef.current;
+    budgetDragActiveRef.current = false;
+    budgetDragStartIdsRef.current = null;
+
+    if (haveIdsInSameOrder(dragStartIds, nextIds)) {
+      budgetDropSettlingRef.current = false;
+      syncBudgetRowsFromSnapshot();
+      return;
+    }
+
+    budgetDropSettlingRef.current = true;
+    pendingBudgetOrderIdsRef.current = nextIds;
+    visualBudgetRowIdsRef.current = nextIds;
+    setBudgetRows((currentRows) => orderItemsByIdOrFallback(currentRows, nextIds, currentRows));
+    budgetDropSettlingRef.current = false;
+    scheduleBudgetOrderPersistence(nextIds);
+  }, [scheduleBudgetOrderPersistence, syncBudgetRowsFromSnapshot]);
+
   const expandedHistory = useMemo(() => {
     const budget = snapshot.budgets.find((candidate) => candidate.id === expandedBudgetId && candidate.isActive);
 
@@ -69,24 +158,59 @@ export function BudgetsScreen({
       : getBudgetCompareHistoryPointsForBudget(input);
   }, [anchorDate, expandedBudgetId, historyMode, periodOffset, snapshot]);
 
-  function renderBudgetRow({ item, drag, isActive }: RenderItemParams<BudgetUsageDisplayRow>) {
-    const isHistoryExpanded = item.id === expandedBudgetId;
+  const handleToggleBudgetHistory = useCallback((budgetId: string) => {
+    setExpandedBudgetId((current) => current === budgetId ? null : budgetId);
+  }, []);
+
+  const handlePressBudget = useCallback((budgetId: string) => {
+    onEditBudget(budgetId);
+  }, [onEditBudget]);
+
+  const renderBudgetRow = useCallback((
+    row: BudgetUsageDisplayRow,
+    { dragging, reorderActive }: { dragging: boolean; reorderActive: boolean },
+  ) => {
+    const isHistoryExpanded = row.id === expandedBudgetId;
 
     return (
       <BudgetUsageCard
-        row={item}
+        row={row}
         anchorDate={anchorDate}
-        dragging={isActive}
-        historyPoints={isHistoryExpanded ? expandedHistory : []}
-        historyVariant={historyMode === 'compare' || item.budget.period === 'weekly' ? 'bar' : 'line'}
+        dragging={dragging}
+        historyPoints={isHistoryExpanded ? expandedHistory : EMPTY_BUDGET_HISTORY_POINTS}
+        historyVariant={historyMode === 'compare' || row.budget.period === 'weekly' ? 'bar' : 'line'}
+        interactionsDisabled={reorderActive}
         isHistoryExpanded={isHistoryExpanded}
-        onDrag={drag}
-        onToggleHistory={() => setExpandedBudgetId((current) => current === item.id ? null : item.id)}
-        onPress={() => onEditBudget(item.id)}
+        onDrag={noop}
+        onToggleHistory={handleToggleBudgetHistory}
+        onPress={handlePressBudget}
         periodOffset={periodOffset}
       />
     );
-  }
+  }, [
+    anchorDate,
+    expandedBudgetId,
+    expandedHistory,
+    handlePressBudget,
+    handleToggleBudgetHistory,
+    historyMode,
+    periodOffset,
+  ]);
+
+  const emptyBudgets = useMemo(() => (
+    <Card testID="budgets-empty-state">
+      <View style={styles.emptyIcon}>
+        <Ionicons name="wallet-outline" size={24} color={colors.primaryDark} />
+      </View>
+      <Text style={styles.emptyTitle}>No active budgets yet</Text>
+      <Text style={styles.emptyText}>
+        Add an overall, included, or excluded category budget with a calendar or rolling period.
+      </Text>
+      <ActionButton variant="secondary" onPress={onAddBudget}>
+        Add first budget
+      </ActionButton>
+    </Card>
+  ), [onAddBudget]);
 
   return (
     <View style={styles.shell}>
@@ -113,32 +237,13 @@ export function BudgetsScreen({
           }}
         />
       </View>
-      <DraggableFlatList
-        data={budgetRows}
-        keyExtractor={(row) => row.id}
-        renderItem={renderBudgetRow}
-        containerStyle={styles.list}
-        ListEmptyComponent={(
-          <Card testID="budgets-empty-state">
-            <View style={styles.emptyIcon}>
-              <Ionicons name="wallet-outline" size={24} color={colors.primaryDark} />
-            </View>
-            <Text style={styles.emptyTitle}>No active budgets yet</Text>
-            <Text style={styles.emptyText}>
-              Add an overall, included, or excluded category budget with a calendar or rolling period.
-            </Text>
-            <ActionButton variant="secondary" onPress={onAddBudget}>
-              Add first budget
-            </ActionButton>
-          </Card>
-        )}
-        onDragEnd={({ data }) => {
-          void onUpdateBudgetOrder(data.map((row) => row.id));
-        }}
-        activationDistance={8}
+      <BudgetReorderList
         contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+        emptyComponent={emptyBudgets}
+        rows={budgetRows}
+        renderRow={renderBudgetRow}
+        onDragBegin={handleDragBegin}
+        onDragEnd={handleDragEnd}
       />
     </View>
   );
@@ -163,12 +268,16 @@ function getBudgetUsageRowsForSnapshot(
 
   return sortBudgetUsageDisplayRowsByDisplayOrder(getBudgetUsageDisplayRows(usages, snapshot.categories));
 }
+
+function noop() {
+  return undefined;
+}
+
 const styles = StyleSheet.create({
   shell: {
     flex: 1,
   },
   content: {
-    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
     paddingBottom: spacing.xl,
@@ -188,9 +297,6 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     gap: spacing.sm,
     justifyContent: 'flex-end',
-  },
-  list: {
-    flex: 1,
   },
   summaryRow: {
     alignItems: 'center',

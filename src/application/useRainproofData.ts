@@ -12,6 +12,7 @@ import { getBudgetUsagesForPeriods } from '../domain/budgets';
 import { defaultCategories } from '../domain/categories';
 import { getEffectiveDisplayCurrency } from '../domain/currency';
 import { getDateRangeForPreset } from '../domain/dates';
+import { getUniqueOrderedIds, haveIdsInSameOrder } from '../domain/reorder';
 import type {
   AccountBalance,
   AddTransactionDefaults,
@@ -183,6 +184,10 @@ export function useRainproofData(): RainproofDataState {
   const transactionWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const dashboardSelectedAccountIdsWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
   const dashboardSelectedAccountIdsUpdateTokenRef = useRef(0);
+  const budgetOrderWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const budgetOrderUpdateTokenRef = useRef(0);
+  const accountOrderWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const accountOrderUpdateTokenRef = useRef(0);
   const [snapshot, setSnapshot] = useState<AppSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -849,6 +854,102 @@ export function useRainproofData(): RainproofDataState {
     }, () => getSnapshotPerfCounts(snapshot));
   }, [snapshot]);
 
+  const updateBudgetOrderOptimistically = useCallback((budgetIds: string[]): Promise<void> => {
+    const repository = repositoryRef.current;
+    const currentSnapshot = snapshotRef.current;
+    const nextBudgetIds = getUniqueOrderedIds(budgetIds);
+    if (!repository || !currentSnapshot || !nextBudgetIds.length) {
+      return Promise.resolve();
+    }
+
+    const currentActiveBudgetIds = currentSnapshot.budgets
+      .filter((budget) => budget.isActive)
+      .map((budget) => budget.id);
+    if (haveIdsInSameOrder(currentActiveBudgetIds, nextBudgetIds)) {
+      budgetOrderUpdateTokenRef.current += 1;
+      return Promise.resolve();
+    }
+
+    const updateToken = budgetOrderUpdateTokenRef.current + 1;
+    budgetOrderUpdateTokenRef.current = updateToken;
+
+    scheduleOptimisticMutationTask(() => {
+      applySnapshotPatch(patchBudgetOrder(nextBudgetIds, () => budgetOrderUpdateTokenRef.current === updateToken));
+      enqueueLatestBackgroundWrite({
+        onFailure: async (caught) => {
+          if (budgetOrderUpdateTokenRef.current !== updateToken) {
+            return;
+          }
+
+          setError(caught instanceof Error ? caught.message : 'Could not save budget order.');
+          try {
+            await refresh();
+          } catch (refreshError) {
+            setError(refreshError instanceof Error ? refreshError.message : 'Could not refresh budgets.');
+          }
+        },
+        onSuccess: () => {
+          if (budgetOrderUpdateTokenRef.current === updateToken) {
+            setError('');
+          }
+        },
+        queueRef: budgetOrderWriteQueueRef,
+        updateToken,
+        updateTokenRef: budgetOrderUpdateTokenRef,
+        write: () => repository.updateBudgetOrder(nextBudgetIds),
+      });
+    });
+
+    return Promise.resolve();
+  }, [applySnapshotPatch, refresh]);
+
+  const updateAccountOrderOptimistically = useCallback((accountIds: string[]): Promise<void> => {
+    const repository = repositoryRef.current;
+    const currentSnapshot = snapshotRef.current;
+    const nextAccountIds = getUniqueOrderedIds(accountIds);
+    if (!repository || !currentSnapshot || !nextAccountIds.length) {
+      return Promise.resolve();
+    }
+
+    const currentAccountIds = currentSnapshot.accounts.map((account) => account.id);
+    if (haveIdsInSameOrder(currentAccountIds, nextAccountIds)) {
+      accountOrderUpdateTokenRef.current += 1;
+      return Promise.resolve();
+    }
+
+    const updateToken = accountOrderUpdateTokenRef.current + 1;
+    accountOrderUpdateTokenRef.current = updateToken;
+
+    scheduleOptimisticMutationTask(() => {
+      applySnapshotPatch(patchAccountOrder(nextAccountIds, () => accountOrderUpdateTokenRef.current === updateToken));
+      enqueueLatestBackgroundWrite({
+        onFailure: async (caught) => {
+          if (accountOrderUpdateTokenRef.current !== updateToken) {
+            return;
+          }
+
+          setError(caught instanceof Error ? caught.message : 'Could not save account order.');
+          try {
+            await refresh();
+          } catch (refreshError) {
+            setError(refreshError instanceof Error ? refreshError.message : 'Could not refresh accounts.');
+          }
+        },
+        onSuccess: () => {
+          if (accountOrderUpdateTokenRef.current === updateToken) {
+            setError('');
+          }
+        },
+        queueRef: accountOrderWriteQueueRef,
+        updateToken,
+        updateTokenRef: accountOrderUpdateTokenRef,
+        write: () => repository.updateAccountOrder(nextAccountIds),
+      });
+    });
+
+    return Promise.resolve();
+  }, [applySnapshotPatch, refresh]);
+
   const actions = useMemo<RainproofActions>(
     () => ({
       addAccount: (input) => runMutation((repository) => repository.addAccount(input)),
@@ -862,7 +963,7 @@ export function useRainproofData(): RainproofDataState {
       saveTransactionLinkBatch: saveTransactionLinkBatchOptimistically,
       addBudget: (input) => runMutation((repository) => repository.addBudget(input)),
       updateBudget: (input) => runMutation((repository) => repository.updateBudget(input)),
-      updateBudgetOrder: (budgetIds) => runMutation((repository) => repository.updateBudgetOrder(budgetIds)),
+      updateBudgetOrder: updateBudgetOrderOptimistically,
       archiveBudget: (budgetId) => runMutation((repository) => repository.archiveBudget(budgetId)),
       addRecurringItem: (input) => runMutation((repository) => repository.addRecurringItem(input)),
       updateRecurringItem: (input) =>
@@ -944,7 +1045,7 @@ export function useRainproofData(): RainproofDataState {
       },
       updateAccountDashboardVisibility: (accountId, showOnDashboard) =>
         runMutation((repository) => repository.updateAccountDashboardVisibility(accountId, showOnDashboard)),
-      updateAccountOrder: (accountIds) => runMutation((repository) => repository.updateAccountOrder(accountIds)),
+      updateAccountOrder: updateAccountOrderOptimistically,
       closeAccount: (accountId) => runMutation((repository) => repository.closeAccount(accountId)),
       reopenAccount: (accountId) => runMutation((repository) => repository.reopenAccount(accountId)),
       deleteAccount: (accountId) => runMutation((repository) => repository.deleteAccount(accountId)),
@@ -959,6 +1060,8 @@ export function useRainproofData(): RainproofDataState {
       refresh,
       runMutation,
       saveTransactionLinkBatchOptimistically,
+      updateAccountOrderOptimistically,
+      updateBudgetOrderOptimistically,
       updateTransactionLinkOptimistically,
       updateTransactionOptimistically,
     ],
@@ -1008,6 +1111,77 @@ function patchDashboardSelectedAccountIdsSetting(accountIds: string[], shouldPat
   };
 }
 
+function patchBudgetOrder(budgetIds: string[], shouldPatch: () => boolean) {
+  const nextBudgetIds = getUniqueOrderedIds(budgetIds);
+
+  return (snapshot: AppSnapshot): AppSnapshot => {
+    if (!shouldPatch()) {
+      return snapshot;
+    }
+
+    const nextBudgets = reorderSortableItems(snapshot.budgets, nextBudgetIds);
+    if (nextBudgets === snapshot.budgets) {
+      return snapshot;
+    }
+
+    return {
+      ...snapshot,
+      budgets: nextBudgets,
+    };
+  };
+}
+
+function patchAccountOrder(accountIds: string[], shouldPatch: () => boolean) {
+  const nextAccountIds = getUniqueOrderedIds(accountIds);
+
+  return (snapshot: AppSnapshot): AppSnapshot => {
+    if (!shouldPatch()) {
+      return snapshot;
+    }
+
+    const nextAccounts = reorderSortableItems(snapshot.accounts, nextAccountIds);
+    if (nextAccounts === snapshot.accounts) {
+      return snapshot;
+    }
+
+    return {
+      ...snapshot,
+      accounts: nextAccounts,
+    };
+  };
+}
+
+function reorderSortableItems<T extends { id: string; sortOrder: number }>(
+  items: T[],
+  preferredIds: readonly string[],
+): T[] {
+  const currentIds = items.map((item) => item.id);
+  const preferredIdSet = new Set(preferredIds);
+  const nextIds = [
+    ...preferredIds.filter((id) => currentIds.includes(id)),
+    ...currentIds.filter((id) => !preferredIdSet.has(id)),
+  ];
+
+  if (
+    haveIdsInSameOrder(currentIds, nextIds) &&
+    items.every((item, index) => item.sortOrder === index)
+  ) {
+    return items;
+  }
+
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  return nextIds
+    .map((id, index) => {
+      const item = itemById.get(id);
+      if (!item) {
+        return null;
+      }
+
+      return item.sortOrder === index ? item : { ...item, sortOrder: index };
+    })
+    .filter((item): item is T => Boolean(item));
+}
+
 function areStringArraysEqual(left: string[] | null | undefined, right: string[]): boolean {
   return Array.isArray(left) &&
     left.length === right.length &&
@@ -1048,6 +1222,41 @@ function enqueueBackgroundWrite(
   const nextWrite = queueRef.current.then(write, write);
   queueRef.current = nextWrite.catch(() => undefined);
   void nextWrite;
+}
+
+function enqueueLatestBackgroundWrite({
+  onFailure,
+  onSuccess,
+  queueRef,
+  updateToken,
+  updateTokenRef,
+  write,
+}: {
+  onFailure: (caught: unknown) => Promise<void>;
+  onSuccess: () => void;
+  queueRef: BackgroundWriteQueueRef;
+  updateToken: number;
+  updateTokenRef: { current: number };
+  write: () => Promise<void>;
+}): void {
+  const nextWrite = queueRef.current
+    .catch(() => undefined)
+    .then(async () => {
+      if (updateTokenRef.current !== updateToken) {
+        return;
+      }
+
+      await write();
+    });
+
+  queueRef.current = nextWrite.catch(() => undefined);
+  void nextWrite
+    .then(() => {
+      if (updateTokenRef.current === updateToken) {
+        onSuccess();
+      }
+    })
+    .catch(onFailure);
 }
 
 function scheduleOptimisticMutationTask(task: () => void): void {

@@ -132,7 +132,9 @@ export function useTransactionsViewModel({
         return deriveTransactionDisplayEntries({
           accountIds: appliedSelectedAccountIds,
           range,
-          snapshot,
+          transactionLines: snapshot.transactionLines,
+          transactionLinks: snapshot.transactionLinks,
+          transactions: snapshot.transactions,
         });
       },
       (entries) => ({
@@ -157,10 +159,10 @@ export function useTransactionsViewModel({
       'transactionsViewModel.filterSearch',
       () => {
         return deriveVisibleTransactionEntries({
+          accounts: snapshot.accounts,
           entries: displayEntries,
           categories,
           searchQuery: appliedSearchQuery,
-          snapshot,
         });
       },
       (entries) => ({
@@ -181,8 +183,10 @@ export function useTransactionsViewModel({
         'transactionsViewModel.balanceAfter',
         () =>
           deriveBalanceAfterByEntryId({
+            accounts: snapshot.accounts,
             entries: visibleEntries,
-            snapshot,
+            transactionLines: snapshot.transactionLines,
+            transactions: snapshot.transactions,
           }),
         {
           accounts: snapshot.accounts.length,
@@ -386,53 +390,61 @@ function areAccountIdListsEqual(left: string[], right: string[]): boolean {
 function deriveTransactionDisplayEntries({
   accountIds,
   range,
-  snapshot,
+  transactionLines,
+  transactionLinks,
+  transactions,
 }: {
   accountIds: string[];
   range: ReturnType<typeof getDateRangeForPreset>;
-  snapshot: AppSnapshot;
+  transactionLines: AppSnapshot['transactionLines'];
+  transactionLinks: AppSnapshot['transactionLinks'];
+  transactions: AppSnapshot['transactions'];
 }) {
-  const transactionsInRange = snapshot.transactions.filter((transaction) =>
+  const transactionsInRange = transactions.filter((transaction) =>
     isWithinDateRange(transaction.datetime, range));
   return getTransactionDisplayEntries({
     transactions: transactionsInRange,
-    lines: snapshot.transactionLines,
-    transactionLinks: snapshot.transactionLinks,
+    lines: transactionLines,
+    transactionLinks,
     accountIds,
   });
 }
 
 function deriveVisibleTransactionEntries({
+  accounts,
   categories,
   entries,
   searchQuery,
-  snapshot,
 }: {
+  accounts: AppSnapshot['accounts'];
   categories: AppSnapshot['categories'];
   entries: ReturnType<typeof getTransactionDisplayEntries>;
   searchQuery: string;
-  snapshot: AppSnapshot;
 }) {
   const searchedEntries = filterTransactionDisplayEntriesBySearch({
     entries,
     query: searchQuery,
-    accounts: snapshot.accounts,
+    accounts,
     categories,
   });
   return [...searchedEntries].sort(compareTransactionDisplayEntriesDescending);
 }
 
 function deriveBalanceAfterByEntryId({
+  accounts,
   entries,
-  snapshot,
+  transactionLines,
+  transactions,
 }: {
+  accounts: AppSnapshot['accounts'];
   entries: ReturnType<typeof getTransactionDisplayEntries>;
-  snapshot: AppSnapshot;
+  transactionLines: AppSnapshot['transactionLines'];
+  transactions: AppSnapshot['transactions'];
 }) {
   return getBalanceAfterDisplayEntriesForEntries({
-    accounts: snapshot.accounts,
-    transactions: snapshot.transactions,
-    lines: snapshot.transactionLines,
+    accounts,
+    transactions,
+    lines: transactionLines,
     entries,
   });
 }

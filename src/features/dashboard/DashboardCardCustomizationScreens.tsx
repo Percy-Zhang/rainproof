@@ -1,10 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import DraggableFlatList, {
-  ScaleDecorator,
-  type RenderItemParams,
-} from 'react-native-draggable-flatlist';
 
 import { Card } from '../../components/ui';
 import {
@@ -18,8 +14,11 @@ import {
   type DashboardCardAddOption,
   type DashboardCardAvailability,
 } from '../../domain/dashboardCards';
+import { haveIdsInSameOrder } from '../../domain/reorder';
 import type { DashboardCardId, DashboardCardSetting } from '../../domain/types';
+import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { DashboardCardReorderList } from './DashboardCardReorderList';
 import { DashboardCardPreview } from './DashboardCardPreview';
 
 type DashboardEditScreenProps = {
@@ -43,58 +42,71 @@ export function DashboardEditScreen({
 }: DashboardEditScreenProps) {
   const [draftSettings, setDraftSettings] = useState(() => normalizeDashboardCardSettings(settings));
   const visibleSettings = useMemo(() => getVisibleDashboardCardSettings(draftSettings), [draftSettings]);
+  const visibleSettingIds = useMemo(
+    () => visibleSettings.map((setting) => setting.id),
+    [visibleSettings],
+  );
 
   useEffect(() => {
     setDraftSettings(normalizeDashboardCardSettings(settings));
   }, [settings]);
 
-  async function commit(nextSettings: DashboardCardSetting[]) {
+  const commit = useCallback(async (nextSettings: DashboardCardSetting[]) => {
     setDraftSettings(nextSettings);
     await onUpdateSettings(nextSettings);
-  }
+  }, [onUpdateSettings]);
 
-  function hideCard(cardId: DashboardCardId) {
+  const hideCard = useCallback((cardId: DashboardCardId) => {
     void commit(hideDashboardCardSetting(draftSettings, cardId));
-  }
+  }, [commit, draftSettings]);
 
-  function reorderVisibleCards(nextVisibleSettings: DashboardCardSetting[]) {
+  const reorderVisibleCards = useCallback((nextVisibleIds: DashboardCardId[]) => {
+    if (haveIdsInSameOrder(visibleSettingIds, nextVisibleIds)) {
+      return;
+    }
+
     void commit(
-      reorderVisibleDashboardCardSettings(draftSettings, nextVisibleSettings.map((setting) => setting.id)),
+      reorderVisibleDashboardCardSettings(draftSettings, nextVisibleIds),
     );
-  }
+  }, [commit, draftSettings, visibleSettingIds]);
+
+  const headerComponent = useMemo(() => (
+    <View style={styles.headerBlock}>
+      <Text style={styles.note}>Drag cards to reorder them. Remove a card to hide it from Dashboard.</Text>
+      <Pressable
+        accessibilityRole="button"
+        onPress={onOpenAddCards}
+        style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed]}
+        testID="dashboard-edit-open-add-cards"
+      >
+        <Ionicons name="add" size={19} color={colors.surface} />
+        <Text style={styles.primaryActionText}>Add card</Text>
+      </Pressable>
+    </View>
+  ), [onOpenAddCards]);
+
+  const renderEditCardRow = useCallback((
+    setting: DashboardCardSetting,
+    { dragging, reorderActive }: { dragging: boolean; reorderActive: boolean },
+  ) => (
+    <DashboardEditCardRow
+      availability={availability}
+      canHide={visibleSettings.length > 1}
+      dragging={dragging}
+      reorderActive={reorderActive}
+      setting={setting}
+      onHideCard={hideCard}
+    />
+  ), [availability, hideCard, visibleSettings.length]);
 
   return (
     <View style={styles.stack}>
-      <DraggableFlatList
-        activationDistance={8}
-        containerStyle={styles.draggableList}
+      <DashboardCardReorderList
         contentContainerStyle={styles.listContent}
-        data={visibleSettings}
-        keyboardShouldPersistTaps="handled"
-        keyExtractor={(setting) => setting.id}
-        ListHeaderComponent={(
-          <View style={styles.headerBlock}>
-            <Text style={styles.note}>Drag cards to reorder them. Remove a card to hide it from Dashboard.</Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={onOpenAddCards}
-              style={({ pressed }) => [styles.primaryAction, pressed && styles.pressed]}
-              testID="dashboard-edit-open-add-cards"
-            >
-              <Ionicons name="add" size={19} color={colors.surface} />
-              <Text style={styles.primaryActionText}>Add card</Text>
-            </Pressable>
-          </View>
-        )}
-        onDragEnd={({ data }) => reorderVisibleCards(data)}
-        renderItem={(params) => (
-          <DashboardEditCardRow
-            {...params}
-            availability={availability}
-            canHide={visibleSettings.length > 1}
-            onHideCard={hideCard}
-          />
-        )}
+        headerComponent={headerComponent}
+        rows={visibleSettings}
+        renderRow={renderEditCardRow}
+        onDragEnd={reorderVisibleCards}
       />
     </View>
   );
@@ -160,32 +172,41 @@ export function DashboardAddCardsScreen({
 function DashboardEditCardRow({
   availability,
   canHide,
-  drag,
-  isActive,
-  item,
+  dragging,
+  reorderActive,
+  setting,
   onHideCard,
-}: RenderItemParams<DashboardCardSetting> & {
+}: {
   availability: DashboardCardAvailability;
   canHide: boolean;
+  dragging: boolean;
+  reorderActive: boolean;
+  setting: DashboardCardSetting;
   onHideCard: (cardId: DashboardCardId) => void;
 }) {
-  const definition = getDashboardCardDefinition(item.id);
-  const available = availability[item.id] !== false;
+  const definition = getDashboardCardDefinition(setting.id);
+  const available = availability[setting.id] !== false;
+  const hideEnabled = canHide && !reorderActive;
   const reason = available ? '' : definition.unavailableReason ?? 'This card is not available yet.';
 
   return (
-    <ScaleDecorator>
-      <View style={[styles.editCardRow, isActive && styles.draggingRow]} testID={`dashboard-edit-card-${item.id}`}>
+    <View style={styles.editCardFrame}>
+      <View
+        style={[
+          styles.editCardRow,
+          dragging && sharedStyles.draggingSurface,
+          dragging && sharedStyles.draggingLift,
+        ]}
+        testID={`dashboard-edit-card-${setting.id}`}
+      >
         <View style={styles.editCardHeader}>
-          <Pressable
+          <View
             accessibilityLabel={`Reorder ${definition.title}`}
-            accessibilityRole="button"
-            onLongPress={drag}
-            style={({ pressed }) => [styles.dragHandle, pressed && styles.pressed]}
-            testID={`dashboard-card-drag-${item.id}`}
+            style={styles.dragHandle}
+            testID={`dashboard-card-drag-${setting.id}`}
           >
             <Ionicons name="reorder-three-outline" size={24} color={colors.primaryDark} />
-          </Pressable>
+          </View>
 
           <View style={styles.rowText}>
             <Text style={styles.rowTitle}>{definition.title}</Text>
@@ -196,18 +217,22 @@ function DashboardEditCardRow({
           <Pressable
             accessibilityLabel={`Remove ${definition.title}`}
             accessibilityRole="button"
-            disabled={!canHide}
-            onPress={() => onHideCard(item.id)}
-            style={({ pressed }) => [styles.hideButton, !canHide && styles.disabledButton, pressed && canHide && styles.pressed]}
-            testID={`dashboard-card-hide-${item.id}`}
+            disabled={!hideEnabled}
+            onPress={() => onHideCard(setting.id)}
+            style={({ pressed }) => [
+              styles.hideButton,
+              !hideEnabled && styles.disabledButton,
+              pressed && hideEnabled && styles.pressed,
+            ]}
+            testID={`dashboard-card-hide-${setting.id}`}
           >
-            <Ionicons name="close" size={20} color={canHide ? colors.danger : colors.muted} />
+            <Ionicons name="close" size={20} color={hideEnabled ? colors.danger : colors.muted} />
           </Pressable>
         </View>
 
-        <DashboardCardPreview cardId={item.id} disabled={!available} />
+        <DashboardCardPreview cardId={setting.id} disabled={!available} />
       </View>
-    </ScaleDecorator>
+    </View>
   );
 }
 
@@ -301,21 +326,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 38,
   },
-  draggableList: {
-    flex: 1,
-  },
-  draggingRow: {
-    elevation: 8,
-    opacity: 0.95,
-    shadowColor: colors.shadow,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-  },
   editCardHeader: {
     alignItems: 'center',
     flexDirection: 'row',
     gap: spacing.sm,
+  },
+  editCardFrame: {
+    paddingBottom: spacing.md,
+    width: '100%',
   },
   editCardRow: {
     backgroundColor: colors.surface,

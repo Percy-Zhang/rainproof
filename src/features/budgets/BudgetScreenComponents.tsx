@@ -5,18 +5,19 @@ import {
   useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  memo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { ScaleDecorator } from 'react-native-draggable-flatlist';
+import { Pressable, StyleSheet, Text, type GestureResponderEvent, View } from 'react-native';
 import { runOnJS } from 'react-native-worklets';
 import Animated, {
   cancelAnimation,
   Easing,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
   withTiming,
 } from 'react-native-reanimated';
 
@@ -40,46 +41,55 @@ import {
 
 export type BudgetHistoryMode = 'current' | 'compare';
 
-const BUDGET_HISTORY_REVEAL_DURATION_MS = 160;
-const BUDGET_HISTORY_REVEAL_OPACITY_IN_DURATION_MS = 120;
-const BUDGET_HISTORY_REVEAL_OPACITY_OUT_DURATION_MS = 100;
+const BUDGET_HISTORY_REVEAL_IN_DURATION_MS = 200;
+const BUDGET_HISTORY_REVEAL_IN_DELAY_MS = 32;
+const BUDGET_HISTORY_REVEAL_OUT_DURATION_MS = 170;
+const BUDGET_HISTORY_REVEAL_CONTENT_OFFSET = -8;
 const BUDGET_HISTORY_REVEAL_CHROME_HEIGHT = 116;
 const BUDGET_HISTORY_REVEAL_HEIGHT =
   BUDGET_HISTORY_PLOT_HEIGHT + BUDGET_HISTORY_LABEL_HEIGHT + BUDGET_HISTORY_REVEAL_CHROME_HEIGHT;
+const DRAG_PRESS_RETENTION_OFFSET = { bottom: 36, left: 36, right: 36, top: 36 };
+const HISTORY_TOGGLE_SCROLL_CANCEL_Y = 10;
+const HISTORY_TOGGLE_PRESS_RETENTION_OFFSET = { bottom: 4, left: 8, right: 8, top: 4 };
 
 type BudgetHistoryRevealHandle = {
   animateToExpanded: (expanded: boolean) => void;
 };
 
-export function BudgetUsageCard({
+type BudgetUsageCardProps = {
+  anchorDate: Date;
+  dragging: boolean;
+  historyPoints: BudgetHistoryPoint[];
+  historyVariant: 'bar' | 'line';
+  interactionsDisabled?: boolean;
+  isHistoryExpanded: boolean;
+  onDrag: () => void;
+  onToggleHistory: (budgetId: string) => void;
+  row: BudgetUsageDisplayRow;
+  onPress: (budgetId: string) => void;
+  periodOffset: number;
+};
+
+export const BudgetUsageCard = memo(function BudgetUsageCard({
   anchorDate,
   dragging,
   historyPoints,
   historyVariant,
+  interactionsDisabled = false,
   isHistoryExpanded,
   onDrag,
   row,
   onToggleHistory,
   onPress,
   periodOffset,
-}: {
-  anchorDate: Date;
-  dragging: boolean;
-  historyPoints: BudgetHistoryPoint[];
-  historyVariant: 'bar' | 'line';
-  isHistoryExpanded: boolean;
-  onDrag: () => void;
-  onToggleHistory: () => void;
-  row: BudgetUsageDisplayRow;
-  onPress: () => void;
-  periodOffset: number;
-}) {
+}: BudgetUsageCardProps) {
   const status = getStatusCopy(row);
   const progressColor = getBudgetStatusColor(row.status);
   const range = getBudgetPeriodRange(row.budget.period, anchorDate, periodOffset);
   const periodLabel = getBudgetPeriodOffsetLabel(row.budget.period, periodOffset);
   const historyRevealRef = useRef<BudgetHistoryRevealHandle>(null);
   const visualHistoryExpandedRef = useRef(isHistoryExpanded);
+  const controlsDisabled = dragging || interactionsDisabled;
 
   useLayoutEffect(() => {
     visualHistoryExpandedRef.current = isHistoryExpanded;
@@ -89,23 +99,32 @@ export function BudgetUsageCard({
     const nextExpanded = !visualHistoryExpandedRef.current;
     visualHistoryExpandedRef.current = nextExpanded;
     historyRevealRef.current?.animateToExpanded(nextExpanded);
-    onToggleHistory();
-  }, [onToggleHistory]);
+    onToggleHistory(row.id);
+  }, [onToggleHistory, row.id]);
 
-  const historyTogglePressHandlers = useImmediatePressHandlers(handleToggleHistory, !dragging);
+  const handlePress = useCallback(() => {
+    onPress(row.id);
+  }, [onPress, row.id]);
+
+  const historyTogglePressHandlers = useScrollAwarePressHandlers(handleToggleHistory, !controlsDisabled);
 
   return (
-    <ScaleDecorator>
+    <View style={styles.reorderRowFrame}>
       <SurfaceCard
-        style={dragging && sharedStyles.draggingSurface}
+        style={[
+          dragging && sharedStyles.draggingSurface,
+          dragging && sharedStyles.draggingLift,
+        ]}
         testID={`budget-row-${row.id}`}
       >
         <Pressable
           accessibilityHint="Long press to reorder."
           accessibilityRole="button"
           delayLongPress={150}
+          disabled={controlsDisabled}
           onLongPress={onDrag}
-          onPress={onPress}
+          onPress={handlePress}
+          pressRetentionOffset={DRAG_PRESS_RETENTION_OFFSET}
           style={({ pressed }) => [styles.budgetContent, pressed && sharedStyles.pressed]}
         >
           <View style={styles.budgetHeader}>
@@ -147,7 +166,9 @@ export function BudgetUsageCard({
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: isHistoryExpanded }}
+          disabled={controlsDisabled}
           {...historyTogglePressHandlers}
+          pressRetentionOffset={HISTORY_TOGGLE_PRESS_RETENTION_OFFSET}
           style={({ pressed }) => [styles.historyToggle, pressed && sharedStyles.pressed]}
           testID={`budget-history-toggle-${row.id}`}
         >
@@ -164,8 +185,8 @@ export function BudgetUsageCard({
 
         <BudgetHistoryReveal
           ref={historyRevealRef}
-          dragging={dragging}
           expanded={isHistoryExpanded}
+          snapChanges={controlsDisabled}
         >
           <BudgetHistoryChart
             accentColor={row.color}
@@ -176,22 +197,41 @@ export function BudgetUsageCard({
           />
         </BudgetHistoryReveal>
       </SurfaceCard>
-    </ScaleDecorator>
+    </View>
+  );
+}, areBudgetUsageCardPropsEqual);
+
+function areBudgetUsageCardPropsEqual(
+  previous: BudgetUsageCardProps,
+  next: BudgetUsageCardProps,
+) {
+  return (
+    previous.anchorDate === next.anchorDate &&
+    previous.dragging === next.dragging &&
+    previous.historyPoints === next.historyPoints &&
+    previous.historyVariant === next.historyVariant &&
+    previous.interactionsDisabled === next.interactionsDisabled &&
+    previous.isHistoryExpanded === next.isHistoryExpanded &&
+    previous.onDrag === next.onDrag &&
+    previous.onPress === next.onPress &&
+    previous.onToggleHistory === next.onToggleHistory &&
+    previous.periodOffset === next.periodOffset &&
+    previous.row === next.row
   );
 }
 
 type BudgetHistoryRevealProps = {
   children: ReactNode;
-  dragging: boolean;
   expanded: boolean;
+  snapChanges: boolean;
 };
 
 const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryRevealProps>(
   function BudgetHistoryReveal(
     {
       children,
-      dragging,
       expanded,
+      snapChanges,
     },
     ref,
   ) {
@@ -202,7 +242,8 @@ const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryR
     const [renderedChildren, setRenderedChildren] = useState<ReactNode>(expanded ? children : null);
     const [shouldRender, setShouldRender] = useState(expanded);
     const revealHeight = useSharedValue(expanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0);
-    const revealOpacity = useSharedValue(expanded ? 1 : 0);
+    const contentOpacity = useSharedValue(expanded ? 1 : 0);
+    const contentTranslateY = useSharedValue(expanded ? 0 : BUDGET_HISTORY_REVEAL_CONTENT_OFFSET);
 
     const finishCollapse = useCallback(() => {
       if (revealExpandedRef.current) {
@@ -225,11 +266,13 @@ const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryR
 
       revealExpandedRef.current = nextExpanded;
       cancelAnimation(revealHeight);
-      cancelAnimation(revealOpacity);
+      cancelAnimation(contentOpacity);
+      cancelAnimation(contentTranslateY);
 
-      if (dragging) {
+      if (snapChanges) {
         revealHeight.value = nextExpanded ? BUDGET_HISTORY_REVEAL_HEIGHT : 0;
-        revealOpacity.value = nextExpanded ? 1 : 0;
+        contentOpacity.value = nextExpanded ? 1 : 0;
+        contentTranslateY.value = nextExpanded ? 0 : BUDGET_HISTORY_REVEAL_CONTENT_OFFSET;
 
         if (nextExpanded) {
           prepareExpandedContent();
@@ -242,37 +285,48 @@ const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryR
 
       if (nextExpanded) {
         prepareExpandedContent();
-        revealHeight.value = withTiming(BUDGET_HISTORY_REVEAL_HEIGHT, {
-          duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
-          easing: Easing.out(Easing.cubic),
-        });
-        revealOpacity.value = withTiming(1, {
-          duration: BUDGET_HISTORY_REVEAL_OPACITY_IN_DURATION_MS,
-          easing: Easing.out(Easing.cubic),
-        });
+        revealHeight.value = BUDGET_HISTORY_REVEAL_HEIGHT;
+        contentOpacity.value = 0;
+        contentTranslateY.value = BUDGET_HISTORY_REVEAL_CONTENT_OFFSET;
+        contentOpacity.value = withDelay(
+          BUDGET_HISTORY_REVEAL_IN_DELAY_MS,
+          withTiming(1, {
+            duration: BUDGET_HISTORY_REVEAL_IN_DURATION_MS,
+            easing: Easing.out(Easing.cubic),
+          }),
+        );
+        contentTranslateY.value = withDelay(
+          BUDGET_HISTORY_REVEAL_IN_DELAY_MS,
+          withTiming(0, {
+            duration: BUDGET_HISTORY_REVEAL_IN_DURATION_MS,
+            easing: Easing.out(Easing.cubic),
+          }),
+        );
 
         return;
       }
 
       setShouldRender(true);
-      revealOpacity.value = withTiming(0, {
-        duration: BUDGET_HISTORY_REVEAL_OPACITY_OUT_DURATION_MS,
-        easing: Easing.in(Easing.cubic),
-      });
-      revealHeight.value = withTiming(0, {
-        duration: BUDGET_HISTORY_REVEAL_DURATION_MS,
+      contentOpacity.value = withTiming(0, {
+        duration: BUDGET_HISTORY_REVEAL_OUT_DURATION_MS,
         easing: Easing.in(Easing.cubic),
       }, (finished) => {
         if (finished) {
+          revealHeight.value = 0;
           runOnJS(finishCollapse)();
         }
       });
+      contentTranslateY.value = withTiming(BUDGET_HISTORY_REVEAL_CONTENT_OFFSET, {
+        duration: BUDGET_HISTORY_REVEAL_OUT_DURATION_MS,
+        easing: Easing.in(Easing.cubic),
+      });
     }, [
-      dragging,
+      contentOpacity,
+      contentTranslateY,
       finishCollapse,
       prepareExpandedContent,
       revealHeight,
-      revealOpacity,
+      snapChanges,
     ]);
 
     useImperativeHandle(ref, () => ({
@@ -292,12 +346,20 @@ const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryR
         return;
       }
 
+      if (revealExpandedRef.current === expanded) {
+        return;
+      }
+
       animateToExpanded(expanded);
     }, [animateToExpanded, expanded]);
 
-    const animatedStyle = useAnimatedStyle(() => ({
+    const layoutAnimatedStyle = useAnimatedStyle(() => ({
       height: revealHeight.value,
-      opacity: revealOpacity.value,
+    }));
+
+    const contentAnimatedStyle = useAnimatedStyle(() => ({
+      opacity: contentOpacity.value,
+      transform: [{ translateY: contentTranslateY.value }],
     }));
 
     if (!shouldRender) {
@@ -309,63 +371,64 @@ const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryR
         accessibilityElementsHidden={!expanded}
         importantForAccessibility={expanded ? 'auto' : 'no-hide-descendants'}
         pointerEvents={expanded ? 'auto' : 'none'}
-        style={[styles.historyReveal, animatedStyle]}
+        style={[styles.historyReveal, layoutAnimatedStyle]}
       >
-        {renderedChildren}
+        <Animated.View style={[styles.historyRevealContent, contentAnimatedStyle]}>
+          {renderedChildren}
+        </Animated.View>
       </Animated.View>
     );
   },
 );
 
-function useImmediatePressHandlers(onPress: () => void, immediate: boolean) {
-  const handledPressInRef = useRef(false);
-  const clearHandledPressInTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+function useScrollAwarePressHandlers(onPress: () => void, enabled: boolean) {
+  const startPageYRef = useRef<number | null>(null);
+  const cancelledByScrollRef = useRef(false);
 
-  const clearHandledPressInTimeout = useCallback(() => {
-    if (clearHandledPressInTimeoutRef.current) {
-      clearTimeout(clearHandledPressInTimeoutRef.current);
-      clearHandledPressInTimeoutRef.current = null;
-    }
+  const resetTouchTracking = useCallback(() => {
+    startPageYRef.current = null;
+    cancelledByScrollRef.current = false;
   }, []);
 
-  useEffect(() => clearHandledPressInTimeout, [clearHandledPressInTimeout]);
-
-  const handlePressIn = useCallback(() => {
-    if (!immediate) {
+  const handlePressIn = useCallback((event: GestureResponderEvent) => {
+    if (!enabled) {
       return;
     }
 
-    clearHandledPressInTimeout();
-    handledPressInRef.current = true;
-    onPress();
-  }, [clearHandledPressInTimeout, immediate, onPress]);
+    startPageYRef.current = event.nativeEvent.pageY;
+    cancelledByScrollRef.current = false;
+  }, [enabled]);
 
-  const handlePressOut = useCallback(() => {
-    if (!immediate) {
+  const handleTouchMove = useCallback((event: GestureResponderEvent) => {
+    if (!enabled || startPageYRef.current === null || cancelledByScrollRef.current) {
       return;
     }
 
-    clearHandledPressInTimeout();
-    clearHandledPressInTimeoutRef.current = setTimeout(() => {
-      handledPressInRef.current = false;
-      clearHandledPressInTimeoutRef.current = null;
-    }, 250);
-  }, [clearHandledPressInTimeout, immediate]);
+    if (Math.abs(event.nativeEvent.pageY - startPageYRef.current) > HISTORY_TOGGLE_SCROLL_CANCEL_Y) {
+      cancelledByScrollRef.current = true;
+    }
+  }, [enabled]);
 
   const handlePress = useCallback(() => {
-    if (immediate && handledPressInRef.current) {
-      handledPressInRef.current = false;
-      clearHandledPressInTimeout();
+    if (!enabled) {
+      resetTouchTracking();
+      return;
+    }
+
+    const wasCancelledByScroll = cancelledByScrollRef.current;
+    resetTouchTracking();
+    if (wasCancelledByScroll) {
       return;
     }
 
     onPress();
-  }, [clearHandledPressInTimeout, immediate, onPress]);
+  }, [enabled, onPress, resetTouchTracking]);
 
   return {
     onPress: handlePress,
-    onPressIn: immediate ? handlePressIn : undefined,
-    onPressOut: immediate ? handlePressOut : undefined,
+    onPressIn: enabled ? handlePressIn : undefined,
+    onTouchCancel: resetTouchTracking,
+    onTouchMove: enabled ? handleTouchMove : undefined,
   };
 }
 
@@ -581,6 +644,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     width: '100%',
   },
+  historyRevealContent: {
+    width: '100%',
+  },
   historyToggle: {
     alignItems: 'center',
     borderTopColor: colors.faint,
@@ -629,6 +695,10 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',
+  },
+  reorderRowFrame: {
+    paddingBottom: spacing.md,
+    width: '100%',
   },
   scopeText: {
     color: colors.muted,

@@ -21,11 +21,13 @@ export const sharedStyles = StyleSheet.create({
   },
   draggingSurface: {
     elevation: 8,
-    opacity: 0.95,
     shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
     shadowRadius: 14,
+  },
+  draggingLift: {
+    transform: [{ scale: 1.08 }],
   },
   compactListCard: {
     backgroundColor: colors.surface,
