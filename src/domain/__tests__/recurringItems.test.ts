@@ -1,7 +1,11 @@
 import {
   advanceRecurringDueDate,
+  buildAddTransactionPrefillFromRecurringItem,
+  buildRecurringDueDateShiftInput,
   buildTransactionInputFromRecurringItem,
+  buildUpcomingPaymentPostSaveInput,
   calculateNextRecurringDueDate,
+  calculatePreviousRecurringDueDate,
   classifyRecurringItemsByDueDate,
   dateOnlyToLocalDate,
   getLatestRecurringTransactionHistoryByItem,
@@ -43,6 +47,22 @@ describe('recurring item helpers', () => {
     expect(calculateNextRecurringDueDate('2026-05-01', 'yearly')).toBe('2027-05-01');
   });
 
+  it('does not advance one-time upcoming payments as recurring schedules', () => {
+    expect(() => calculateNextRecurringDueDate('2026-05-01', 'one_time')).toThrow(
+      'One-time upcoming payments do not repeat.',
+    );
+    expect(() => calculatePreviousRecurringDueDate('2026-05-01', 'one_time')).toThrow(
+      'One-time upcoming payments cannot move between periods.',
+    );
+  });
+
+  it('calculates previous recurring due dates', () => {
+    expect(calculatePreviousRecurringDueDate('2026-05-08', 'weekly')).toBe('2026-05-01');
+    expect(calculatePreviousRecurringDueDate('2026-05-15', 'fortnightly')).toBe('2026-05-01');
+    expect(calculatePreviousRecurringDueDate('2026-06-30', 'monthly')).toBe('2026-05-31');
+    expect(calculatePreviousRecurringDueDate('2027-05-01', 'yearly')).toBe('2026-05-01');
+  });
+
   it('handles month-end recurrence deterministically', () => {
     expect(calculateNextRecurringDueDate('2026-01-31', 'monthly')).toBe('2026-02-28');
     expect(calculateNextRecurringDueDate('2026-02-28', 'monthly')).toBe('2026-03-31');
@@ -76,6 +96,7 @@ describe('recurring item helpers', () => {
         recurringItem({ id: 'due', name: 'Due soon', nextDueDate: '2026-05-20' }),
         recurringItem({ id: 'upcoming', name: 'Upcoming', nextDueDate: '2026-06-10' }),
         recurringItem({ id: 'inactive', name: 'Inactive', nextDueDate: '2026-05-16', isActive: false }),
+        recurringItem({ id: 'completed', name: 'Completed', frequency: 'one_time', completedAt: now }),
       ],
       { fromDate: '2026-05-15', dueSoonDays: 7 },
     );
@@ -97,11 +118,13 @@ describe('recurring item helpers', () => {
         subcategoryId: 'rent',
         frequency: 'monthly',
         nextDueDate: '2026-05-31',
+        completedAt: null,
       }),
     ).toEqual(
       expect.objectContaining({
         name: 'Rent',
         currencyCode: 'AUD',
+        completedAt: null,
         isActive: true,
       }),
     );
@@ -117,7 +140,7 @@ describe('recurring item helpers', () => {
         frequency: 'monthly',
         nextDueDate: 'bad',
       }),
-    ).toThrow('Recurring item name is required.');
+    ).toThrow('Upcoming payment name is required.');
   });
 
   it('builds a normal expense transaction input from a recurring item', () => {
@@ -200,6 +223,143 @@ describe('recurring item helpers', () => {
     );
   });
 
+  it('builds Add Transaction prefill from an upcoming payment', () => {
+    const prefill = buildAddTransactionPrefillFromRecurringItem({
+      accounts,
+      item: recurringItem({
+        name: 'Internet',
+        amountMinor: 8999,
+        categoryId: 'entertainment',
+        subcategoryId: 'streaming',
+        note: 'Monthly plan',
+        nextDueDate: '2026-05-20',
+      }),
+      now: new Date(2026, 4, 15, 7, 30),
+    });
+
+    expect(prefill).toEqual({
+      kind: 'expense',
+      splitMode: 'standard',
+      title: 'Internet',
+      amountExpression: '89.99',
+      date: '2026-05-20',
+      time: '07:30',
+      accountId: 'everyday',
+      categoryId: 'entertainment',
+      subcategoryId: 'streaming',
+      notes: 'Monthly plan',
+      splitLines: [],
+    });
+  });
+
+  it('builds split expense Add Transaction prefill from an upcoming payment', () => {
+    const prefill = buildAddTransactionPrefillFromRecurringItem({
+      accounts,
+      item: recurringItem({
+        name: 'Rates',
+        amountMinor: 12000,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        splitLines: [
+          recurringSplitLine({
+            id: 'recurring-line-1',
+            amountMinor: 7000,
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+            note: 'Council',
+            sortOrder: 0,
+          }),
+          recurringSplitLine({
+            id: 'recurring-line-2',
+            amountMinor: 5000,
+            categoryId: 'entertainment',
+            subcategoryId: 'streaming',
+            note: 'Water',
+            sortOrder: 1,
+          }),
+        ],
+      }),
+      now: new Date(2026, 4, 15, 7, 30),
+    });
+
+    expect(prefill).toEqual(expect.objectContaining({
+      kind: 'expense',
+      splitMode: 'standard',
+      title: 'Rates',
+      amountExpression: '120.00',
+      date: '2026-05-01',
+      accountId: 'everyday',
+      categoryId: 'housing',
+      subcategoryId: 'rent',
+    }));
+    expect(prefill.splitLines).toEqual([
+      {
+        id: 'recurring-line-1',
+        amount: '70.00',
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        note: 'Council',
+      },
+      {
+        id: 'recurring-line-2',
+        amount: '50.00',
+        categoryId: 'entertainment',
+        subcategoryId: 'streaming',
+        note: 'Water',
+      },
+    ]);
+  });
+
+  it('builds post-save updates for one-time and recurring upcoming payments', () => {
+    expect(
+      buildUpcomingPaymentPostSaveInput(
+        recurringItem({ id: 'one-time', frequency: 'one_time', nextDueDate: '2026-05-20' }),
+        accounts,
+        '2026-05-20T09:00:00.000Z',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        id: 'one-time',
+        nextDueDate: '2026-05-20',
+        completedAt: '2026-05-20T09:00:00.000Z',
+      }),
+    );
+
+    expect(
+      buildUpcomingPaymentPostSaveInput(
+        recurringItem({ id: 'monthly', frequency: 'monthly', nextDueDate: '2026-05-20' }),
+        accounts,
+        '2026-05-20T09:00:00.000Z',
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        id: 'monthly',
+        nextDueDate: '2026-06-20',
+        completedAt: null,
+      }),
+    );
+  });
+
+  it('builds due-date shift updates for recurring plans only', () => {
+    expect(
+      buildRecurringDueDateShiftInput(
+        recurringItem({ id: 'monthly', frequency: 'monthly', nextDueDate: '2026-05-31' }),
+        'next',
+        accounts,
+      ),
+    ).toEqual(expect.objectContaining({ id: 'monthly', nextDueDate: '2026-06-30', completedAt: null }));
+    expect(
+      buildRecurringDueDateShiftInput(
+        recurringItem({ id: 'monthly', frequency: 'monthly', nextDueDate: '2026-05-31' }),
+        'previous',
+        accounts,
+      ),
+    ).toEqual(expect.objectContaining({ id: 'monthly', nextDueDate: '2026-04-30', completedAt: null }));
+    expect(() =>
+      buildRecurringDueDateShiftInput(recurringItem({ frequency: 'one_time' }), 'next', accounts),
+    ).toThrow('One-time upcoming payments cannot move between periods.');
+  });
+
   it('selects the newest undoable transaction for each recurring item', () => {
     const latestByItem = getLatestRecurringTransactionHistoryByItem([
       recurringHistory({ id: 'rent-1', recurringItemId: 'rent', sequence: 1 }),
@@ -225,9 +385,27 @@ function recurringItem(overrides: Partial<RecurringItem>): RecurringItem {
     note: '',
     frequency: 'monthly',
     nextDueDate: '2026-05-01',
+    completedAt: null,
+    splitLines: [],
     isActive: true,
     createdAt: now,
     updatedAt: now,
+    ...overrides,
+  };
+}
+
+function recurringSplitLine(
+  overrides: Partial<RecurringItem['splitLines'][number]>,
+): RecurringItem['splitLines'][number] {
+  return {
+    id: 'recurring-line-1',
+    recurringItemId: 'recurring-1',
+    amountMinor: 1000,
+    categoryId: 'housing',
+    subcategoryId: 'rent',
+    note: '',
+    sortOrder: 0,
+    createdAt: now,
     ...overrides,
   };
 }

@@ -3,7 +3,9 @@ import { compareTransactionsDescending } from '../domain/aggregates';
 import type {
   AddTransactionDefaults,
   AppSnapshot,
+  CreateUpcomingPaymentTransactionInput,
   NewTransactionInput,
+  RecurringItem,
   Transaction,
   TransactionLink,
   TransactionLine,
@@ -23,6 +25,8 @@ export type OptimisticAddTransactionRollback = {
   previousAddTransactionDefaults?: AddTransactionDefaults;
   transactionId: string;
 };
+
+export type OptimisticRecurringItemStateRollback = IndexedSnapshotItem<RecurringItem>;
 
 export type IndexedSnapshotItem<T> = {
   index: number;
@@ -145,6 +149,68 @@ export function rollbackSnapshotAfterOptimisticAddTransaction(
     settings: nextSettings,
     transactions: snapshot.transactions.filter((transaction) => transaction.id !== rollback.transactionId),
     transactionLines: snapshot.transactionLines.filter((line) => !rollbackLineIds.has(line.id)),
+  };
+}
+
+export function getRollbackForRecurringItemStateChange(
+  snapshot: AppSnapshot,
+  recurringItemId: string,
+): OptimisticRecurringItemStateRollback | null {
+  const index = snapshot.recurringItems.findIndex((item) => item.id === recurringItemId);
+  if (index < 0) {
+    return null;
+  }
+
+  return {
+    index,
+    item: snapshot.recurringItems[index],
+  };
+}
+
+export function patchSnapshotAfterRecurringItemStateChangeWithRollback(
+  snapshot: AppSnapshot,
+  input: CreateUpcomingPaymentTransactionInput['recurringItemInput'],
+  rollback: OptimisticRecurringItemStateRollback,
+): AppSnapshot | null {
+  const nextRecurringItem = getRecurringItemAfterStateChange(input, rollback.item);
+  if (!nextRecurringItem) {
+    return null;
+  }
+
+  const currentItem = snapshot.recurringItems.find((item) => item.id === rollback.item.id);
+  if (!currentItem || !areRecurringItemsEqualForStatePatch(currentItem, rollback.item)) {
+    return null;
+  }
+
+  const nextRecurringItems = snapshot.recurringItems.map((item) =>
+    item.id === rollback.item.id ? nextRecurringItem : item);
+
+  return {
+    ...snapshot,
+    recurringBills: nextRecurringItems,
+    recurringItems: nextRecurringItems,
+  };
+}
+
+export function rollbackSnapshotAfterOptimisticRecurringItemStateChange(
+  snapshot: AppSnapshot,
+  rollback: OptimisticRecurringItemStateRollback,
+  optimisticItem: RecurringItem,
+): AppSnapshot | null {
+  const currentItem = snapshot.recurringItems.find((item) => item.id === rollback.item.id);
+  if (!currentItem || !areRecurringItemsEqualForStatePatch(currentItem, optimisticItem)) {
+    return null;
+  }
+
+  const nextRecurringItems = restoreIndexedItems(
+    snapshot.recurringItems.filter((item) => item.id !== rollback.item.id),
+    [rollback],
+  );
+
+  return {
+    ...snapshot,
+    recurringBills: nextRecurringItems,
+    recurringItems: nextRecurringItems,
   };
 }
 
@@ -718,6 +784,61 @@ function getRolledBackSettings(
     ...snapshot.settings,
     addTransactionDefaults: normalizeAddTransactionDefaults(rollback.previousAddTransactionDefaults),
   };
+}
+
+function getRecurringItemAfterStateChange(
+  input: CreateUpcomingPaymentTransactionInput['recurringItemInput'],
+  previousItem: RecurringItem,
+): RecurringItem | null {
+  if (!doesRecurringItemInputMatchExistingPlan(input, previousItem)) {
+    return null;
+  }
+
+  return {
+    ...previousItem,
+    completedAt: input.completedAt?.trim() || null,
+    isActive: input.isActive ?? true,
+    nextDueDate: input.nextDueDate,
+  };
+}
+
+function areRecurringItemsEqualForStatePatch(left: RecurringItem, right: RecurringItem): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function doesRecurringItemInputMatchExistingPlan(
+  input: CreateUpcomingPaymentTransactionInput['recurringItemInput'],
+  item: RecurringItem,
+): boolean {
+  return input.id === item.id &&
+    input.name.trim() === item.name &&
+    input.kind === item.kind &&
+    input.amountMinor === item.amountMinor &&
+    input.currencyCode.trim().toUpperCase() === item.currencyCode &&
+    input.accountId.trim() === item.accountId &&
+    input.categoryId.trim() === item.categoryId &&
+    (input.subcategoryId?.trim() || null) === item.subcategoryId &&
+    (input.note?.trim() ?? '') === item.note &&
+    input.frequency === item.frequency &&
+    areRecurringSplitLineInputsEqual(input.splitLines ?? [], item.splitLines);
+}
+
+function areRecurringSplitLineInputsEqual(
+  inputLines: NonNullable<CreateUpcomingPaymentTransactionInput['recurringItemInput']['splitLines']>,
+  existingLines: RecurringItem['splitLines'],
+): boolean {
+  if (inputLines.length !== existingLines.length) {
+    return false;
+  }
+
+  return inputLines.every((line, index) => {
+    const existingLine = existingLines[index];
+    return Boolean(existingLine) &&
+      line.amountMinor === existingLine.amountMinor &&
+      line.categoryId.trim() === existingLine.categoryId &&
+      line.subcategoryId.trim() === existingLine.subcategoryId &&
+      (line.note?.trim() ?? '') === existingLine.note;
+  });
 }
 
 function doesTransactionMatchInput(transaction: Transaction, input: NewTransactionInput): boolean {

@@ -161,10 +161,131 @@ describe('SQLite finance repository migrations', () => {
           subcategoryId: 'salary',
           frequency: 'fortnightly',
           nextDueDate: '2026-06-05',
+          completedAt: null,
           isActive: true,
         }),
       ]);
       expect(snapshot.transactionTemplates).toEqual([]);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('repairs stale current recurring item schema before reading or writing upcoming payments', async () => {
+    const fixture = createFixture();
+    try {
+      await fixture.db.execAsync(`
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY NOT NULL,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE accounts (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          nickname TEXT NOT NULL DEFAULT '',
+          type TEXT NOT NULL,
+          currency_code TEXT NOT NULL,
+          opening_balance_minor INTEGER NOT NULL,
+          credit_limit_minor INTEGER,
+          notes TEXT NOT NULL DEFAULT '',
+          institution_name TEXT NOT NULL DEFAULT '',
+          include_in_rainy_day INTEGER NOT NULL DEFAULT 0,
+          theme_color TEXT NOT NULL DEFAULT '#1876A8',
+          icon_name TEXT NOT NULL DEFAULT '',
+          show_on_dashboard INTEGER NOT NULL DEFAULT 1,
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          is_archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        INSERT INTO accounts (
+          id, name, nickname, type, currency_code, opening_balance_minor, credit_limit_minor, notes,
+          institution_name, include_in_rainy_day, theme_color, icon_name, show_on_dashboard,
+          sort_order, is_archived, created_at, updated_at
+        ) VALUES (
+          'acct_everyday', 'Everyday', '', 'checking', 'AUD', 0, NULL, '', '', 0,
+          '#1876A8', '', 1, 0, 0, '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'
+        );
+
+        CREATE TABLE recurring_items (
+          id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          amount_minor INTEGER NOT NULL,
+          currency_code TEXT NOT NULL,
+          account_id TEXT NOT NULL DEFAULT '',
+          category_id TEXT NOT NULL DEFAULT '',
+          subcategory_id TEXT,
+          note TEXT NOT NULL DEFAULT '',
+          frequency TEXT NOT NULL DEFAULT 'monthly',
+          next_due_date TEXT NOT NULL,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          CHECK (kind IN ('expense', 'income')),
+          CHECK (amount_minor > 0),
+          CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'yearly')),
+          CHECK (next_due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
+        );
+
+        INSERT INTO recurring_items (
+          id, name, kind, amount_minor, currency_code, account_id, category_id,
+          subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
+        ) VALUES (
+          'old_recurring_rent', 'Rent', 'expense', 220000, 'AUD', 'acct_everyday',
+          'housing', 'rent', '', 'monthly', '2026-07-01', 1,
+          '2026-05-01T00:00:00.000Z', '2026-05-01T00:00:00.000Z'
+        );
+
+        PRAGMA user_version = ${SCHEMA_VERSION};
+      `);
+
+      await fixture.repository.initialize('AUD');
+
+      expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
+      expect(await getColumnNames(fixture.db, 'recurring_items')).toEqual(
+        expect.arrayContaining(['completed_at']),
+      );
+      const recurringTable = await fixture.db.getFirstAsync<{ sql: string }>(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        'recurring_items',
+      );
+      expect(recurringTable?.sql).toContain("'one_time'");
+
+      const snapshot = await fixture.repository.getSnapshot();
+      expect(snapshot.recurringItems).toEqual([
+        expect.objectContaining({
+          id: 'old_recurring_rent',
+          name: 'Rent',
+          frequency: 'monthly',
+          completedAt: null,
+        }),
+      ]);
+
+      await fixture.repository.addRecurringItem({
+        name: 'One-time repair check',
+        kind: 'expense',
+        amountMinor: 12345,
+        currencyCode: 'AUD',
+        accountId: 'acct_everyday',
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'one_time',
+        nextDueDate: '2026-08-01',
+      });
+
+      const repairedSnapshot = await fixture.repository.getSnapshot();
+      expect(repairedSnapshot.recurringItems).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            name: 'One-time repair check',
+            frequency: 'one_time',
+            completedAt: null,
+          }),
+        ]),
+      );
     } finally {
       fixture.cleanup();
     }
@@ -359,7 +480,7 @@ describe('SQLite finance repository migrations', () => {
       const snapshot = await fixture.repository.getSnapshot();
       expect(await getUserVersion(fixture.db)).toBe(SCHEMA_VERSION);
       expect(await getColumnNames(fixture.db, 'recurring_items')).toEqual(
-        expect.arrayContaining(['kind', 'subcategory_id', 'note', 'frequency', 'next_due_date']),
+        expect.arrayContaining(['kind', 'subcategory_id', 'note', 'frequency', 'next_due_date', 'completed_at']),
       );
       expect(snapshot.recurringItems).toEqual([
         expect.objectContaining({
@@ -374,6 +495,7 @@ describe('SQLite finance repository migrations', () => {
           note: '',
           frequency: 'monthly',
           nextDueDate: getNextMonthlyDueDateForDay(12),
+          completedAt: null,
           isActive: true,
         }),
       ]);

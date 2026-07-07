@@ -45,7 +45,6 @@ import {
   BudgetPeriodSelectRouteScreen,
   BudgetScopeSelectRouteScreen,
   CategorySelectRouteScreen,
-  CreateRecurringTransactionRouteScreen,
   EditBudgetRouteScreen,
   EditTransactionTemplateRouteScreen,
   LinkTransactionRouteScreen,
@@ -108,11 +107,6 @@ export function RootNavigator() {
             <RootStack.Screen
               name="EditRecurringItem"
               component={EditRecurringItemRouteScreen}
-              options={{ headerShown: false }}
-            />
-            <RootStack.Screen
-              name="CreateRecurringTransaction"
-              component={CreateRecurringTransactionRouteScreen}
               options={{ headerShown: false }}
             />
             <RootStack.Screen
@@ -239,7 +233,8 @@ function MainDrawerNavigator() {
         component={RecurringDrawerScreen}
         options={{
           drawerIcon: ({ color, size }) => <Ionicons name="repeat-outline" color={color} size={size} />,
-          title: 'Recurring',
+          drawerLabel: 'Upcoming',
+          title: 'Upcoming Payments',
         }}
       />
       <Drawer.Screen

@@ -19,6 +19,7 @@ import type {
 import type { SplitTransactionMode } from '../../domain/splitTransactions';
 import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing } from '../../theme/tokens';
+import { SplitPlanSummaryRow } from '../transactions/SplitPlanSummaryRow';
 
 export function TemplatePreview({
   amount,
@@ -140,21 +141,12 @@ export function SplitTemplateSummaryRow({
     : 'Normal template';
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [sharedStyles.rowSurface, styles.selectorRow, pressed && sharedStyles.pressed]}
+    <SplitPlanSummaryRow
+      detail={detail}
       testID="transaction-template-split-row"
-    >
-      <View style={styles.emptyIcon}>
-        <Ionicons name="git-branch-outline" size={18} color={colors.primaryDark} />
-      </View>
-      <View style={styles.selectorText}>
-        <Text numberOfLines={1} style={sharedStyles.strongBodyText}>{title}</Text>
-        <Text numberOfLines={1} style={sharedStyles.mutedSmallText}>{detail}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={18} color={colors.muted} />
-    </Pressable>
+      title={title}
+      onPress={onPress}
+    />
   );
 }
 

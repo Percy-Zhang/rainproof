@@ -140,6 +140,7 @@ describe('storage mappers', () => {
         note: 'Family plan',
         frequency: 'monthly',
         next_due_date: '2026-05-14',
+        completed_at: null,
         is_active: 1,
         created_at: '2026-05-01T00:00:00.000Z',
         updated_at: '2026-05-01T00:00:00.000Z',
@@ -153,6 +154,7 @@ describe('storage mappers', () => {
         note: 'Family plan',
         frequency: 'monthly',
         nextDueDate: '2026-05-14',
+        completedAt: null,
         isActive: true,
       }),
     );

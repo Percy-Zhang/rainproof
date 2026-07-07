@@ -12,7 +12,6 @@ export {
 } from './DashboardRouteScreens';
 export {
   AddRecurringItemRouteScreen,
-  CreateRecurringTransactionRouteScreen,
   EditRecurringItemRouteScreen,
 } from './RecurringRouteScreens';
 export { RainyDayFundRouteScreen } from './RainyDayRouteScreens';

@@ -8,13 +8,21 @@ import type {
   Budget,
   NewBudgetInput,
   NewRecurringItemInput,
+  NewRecurringItemSplitLineInput,
   RecurringItem,
   UpdateBudgetInput,
   UpdateRecurringItemInput,
 } from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
-import { mapBudget, mapRecurringItem, type BudgetRow, type RecurringItemRow } from './mappers';
+import {
+  mapBudget,
+  mapRecurringItem,
+  mapRecurringItemSplitLine,
+  type BudgetRow,
+  type RecurringItemRow,
+  type RecurringItemSplitLineRow,
+} from './mappers';
 
 export async function addBudgetStorage(
   db: RepositoryDatabase,
@@ -138,7 +146,12 @@ export async function listRecurringItemsStorage(db: RepositoryDatabase): Promise
     `SELECT * FROM recurring_items
      ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC`,
   );
-  return rows.map(mapRecurringItem);
+  const lineRows = await db.getAllAsync<RecurringItemSplitLineRow>(
+    'SELECT * FROM recurring_item_split_lines ORDER BY recurring_item_id ASC, sort_order ASC, created_at ASC, id ASC',
+  );
+  const linesByItemId = groupRecurringItemSplitLinesByItemId(lineRows);
+
+  return rows.map((row) => mapRecurringItem(row, linesByItemId.get(row.id) ?? []));
 }
 
 export async function addRecurringItemStorage(
@@ -147,31 +160,38 @@ export async function addRecurringItemStorage(
 ): Promise<void> {
   const now = new Date().toISOString();
   const validated = validateRecurringItemInput(input);
-  await db.runAsync(
-    `INSERT INTO recurring_items (
-      id, name, kind, amount_minor, currency_code, account_id, category_id,
-      subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    createLocalId('recurring'),
-    validated.name,
-    validated.kind,
-    validated.amountMinor,
-    normalizeCurrencyCode(validated.currencyCode),
-    validated.accountId,
-    validated.categoryId,
-    validated.subcategoryId,
-    validated.note,
-    validated.frequency,
-    validated.nextDueDate,
-    validated.isActive ? 1 : 0,
-    now,
-    now,
-  );
+  const recurringItemId = createLocalId('recurring');
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `INSERT INTO recurring_items (
+        id, name, kind, amount_minor, currency_code, account_id, category_id,
+        subcategory_id, note, frequency, next_due_date, completed_at, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      recurringItemId,
+      validated.name,
+      validated.kind,
+      validated.amountMinor,
+      normalizeCurrencyCode(validated.currencyCode),
+      validated.accountId,
+      validated.categoryId,
+      validated.subcategoryId,
+      validated.note,
+      validated.frequency,
+      validated.nextDueDate,
+      validated.completedAt,
+      validated.isActive ? 1 : 0,
+      now,
+      now,
+    );
+    await replaceRecurringItemSplitLines(db, recurringItemId, validated.splitLines, now);
+  });
 }
 
 export async function updateRecurringItemStorage(
   db: RepositoryDatabase,
   input: UpdateRecurringItemInput,
+  options: { withinTransaction?: boolean } = {},
 ): Promise<void> {
   const now = new Date().toISOString();
   const validated = validateRecurringItemInput(input);
@@ -180,26 +200,36 @@ export async function updateRecurringItemStorage(
     throw new Error('Recurring item not found.');
   }
 
-  await db.runAsync(
-    `UPDATE recurring_items
-     SET name = ?, kind = ?, amount_minor = ?, currency_code = ?, account_id = ?,
-         category_id = ?, subcategory_id = ?, note = ?, frequency = ?, next_due_date = ?,
-         is_active = ?, updated_at = ?
-     WHERE id = ?`,
-    validated.name,
-    validated.kind,
-    validated.amountMinor,
-    normalizeCurrencyCode(validated.currencyCode),
-    validated.accountId,
-    validated.categoryId,
-    validated.subcategoryId,
-    validated.note,
-    validated.frequency,
-    validated.nextDueDate,
-    validated.isActive ? 1 : 0,
-    now,
-    input.id,
-  );
+  const write = async () => {
+    await db.runAsync(
+      `UPDATE recurring_items
+       SET name = ?, kind = ?, amount_minor = ?, currency_code = ?, account_id = ?,
+           category_id = ?, subcategory_id = ?, note = ?, frequency = ?, next_due_date = ?,
+           completed_at = ?, is_active = ?, updated_at = ?
+       WHERE id = ?`,
+      validated.name,
+      validated.kind,
+      validated.amountMinor,
+      normalizeCurrencyCode(validated.currencyCode),
+      validated.accountId,
+      validated.categoryId,
+      validated.subcategoryId,
+      validated.note,
+      validated.frequency,
+      validated.nextDueDate,
+      validated.completedAt,
+      validated.isActive ? 1 : 0,
+      now,
+      input.id,
+    );
+    await replaceRecurringItemSplitLines(db, input.id, validated.splitLines, now);
+  };
+
+  if (options.withinTransaction) {
+    await write();
+  } else {
+    await db.withTransactionAsync(write);
+  }
 }
 
 export async function archiveRecurringItemStorage(
@@ -219,6 +249,46 @@ export async function deleteRecurringItemStorage(
   recurringItemId: string,
 ): Promise<void> {
   await db.runAsync('DELETE FROM recurring_items WHERE id = ?', recurringItemId);
+}
+
+function groupRecurringItemSplitLinesByItemId(
+  rows: RecurringItemSplitLineRow[],
+): Map<string, ReturnType<typeof mapRecurringItemSplitLine>[]> {
+  const result = new Map<string, ReturnType<typeof mapRecurringItemSplitLine>[]>();
+
+  for (const row of rows) {
+    const line = mapRecurringItemSplitLine(row);
+    const existing = result.get(line.recurringItemId) ?? [];
+    existing.push(line);
+    result.set(line.recurringItemId, existing);
+  }
+
+  return result;
+}
+
+async function replaceRecurringItemSplitLines(
+  db: RepositoryDatabase,
+  recurringItemId: string,
+  lines: NewRecurringItemSplitLineInput[],
+  now: string,
+): Promise<void> {
+  await db.runAsync('DELETE FROM recurring_item_split_lines WHERE recurring_item_id = ?', recurringItemId);
+
+  for (const [index, line] of lines.entries()) {
+    await db.runAsync(
+      `INSERT INTO recurring_item_split_lines (
+        id, recurring_item_id, amount_minor, category_id, subcategory_id, note, sort_order, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      createLocalId('recurring_split_line'),
+      recurringItemId,
+      line.amountMinor,
+      line.categoryId,
+      line.subcategoryId,
+      line.note ?? '',
+      index,
+      now,
+    );
+  }
 }
 
 async function assertNoDuplicateActiveBudgetScope(

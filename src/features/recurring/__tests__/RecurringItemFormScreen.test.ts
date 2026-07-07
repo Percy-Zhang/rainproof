@@ -1,6 +1,7 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { fireEvent, render } from '@testing-library/react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { defaultCategories } from '../../../domain/categories';
 import type { Account, AppSnapshot } from '../../../domain/types';
@@ -32,6 +33,23 @@ describe('RecurringItemFormScreen account picker', () => {
 
     expect(screen.getByTestId('recurring-account-row')).toBeTruthy();
   });
+
+  it('opens split expense editing for upcoming payments', () => {
+    const screen = renderForm();
+
+    fireEvent.press(screen.getByTestId('recurring-split-row'));
+
+    expect(screen.getByTestId('recurring-split-page')).toBeTruthy();
+    expect(screen.getByText('Split upcoming payment')).toBeTruthy();
+  });
+
+  it('hides split controls for income upcoming payments', () => {
+    const screen = renderForm();
+
+    fireEvent.press(screen.getByTestId('recurring-kind-income'));
+
+    expect(screen.queryByTestId('recurring-split-row')).toBeNull();
+  });
 });
 
 function renderForm() {
@@ -39,14 +57,21 @@ function renderForm() {
     React.createElement(
       NavigationContainer,
       null,
-      React.createElement(RecurringItemFormScreen, {
-        mode: 'add',
-        snapshot: snapshot(),
-        onAddRecurringItem: jest.fn(async () => undefined),
-        onOpenCategorySelect: jest.fn(),
-        onCancel: jest.fn(),
-        onDone: jest.fn(),
-      }),
+      React.createElement(
+        SafeAreaProvider,
+        { initialMetrics: {
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        } },
+        React.createElement(RecurringItemFormScreen, {
+          mode: 'add',
+          snapshot: snapshot(),
+          onAddRecurringItem: jest.fn(async () => undefined),
+          onOpenCategorySelect: jest.fn(),
+          onCancel: jest.fn(),
+          onDone: jest.fn(),
+        }),
+      ),
     ),
   );
 }

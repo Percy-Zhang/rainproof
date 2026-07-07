@@ -259,6 +259,13 @@ export function recurringUpdateInput(
     note: recurringItem.note,
     frequency: recurringItem.frequency,
     nextDueDate,
+    completedAt: recurringItem.completedAt,
+    splitLines: recurringItem.splitLines.map((line) => ({
+      amountMinor: line.amountMinor,
+      categoryId: line.categoryId,
+      subcategoryId: line.subcategoryId,
+      note: line.note,
+    })),
     isActive: recurringItem.isActive,
   };
 }
@@ -409,9 +416,20 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
     'note',
     'frequency',
     'next_due_date',
+    'completed_at',
     'is_active',
     'created_at',
     'updated_at',
+  ],
+  recurring_item_split_lines: [
+    'id',
+    'recurring_item_id',
+    'amount_minor',
+    'category_id',
+    'subcategory_id',
+    'note',
+    'sort_order',
+    'created_at',
   ],
   recurring_transaction_history: [
     'id',
@@ -492,6 +510,7 @@ const expectedCurrentTableColumns: Record<string, string[]> = {
 
 const expectedCurrentIndexes: Record<string, string[]> = {
   budgets: ['idx_budgets_active_scope'],
+  recurring_item_split_lines: ['idx_recurring_item_split_lines_item_sort'],
   recurring_items: ['idx_recurring_items_active_due'],
   recurring_transaction_history: ['idx_recurring_transaction_history_item_sequence'],
   transaction_lines: ['idx_transaction_lines_account_id', 'idx_transaction_lines_transaction_id'],

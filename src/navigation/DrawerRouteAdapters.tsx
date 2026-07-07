@@ -163,9 +163,9 @@ function RecurringDrawerRoute({ actions, rootNavigation, snapshot }: DrawerRoute
       snapshot={snapshot}
       onAddRecurringItem={() => rootNavigation?.navigate('AddRecurringItem')}
       onCreateTransaction={(recurringItemId) =>
-        rootNavigation?.navigate('CreateRecurringTransaction', { recurringItemId })}
+        rootNavigation?.navigate('AddTransaction', { upcomingPaymentId: recurringItemId })}
       onEditRecurringItem={(recurringItemId) => rootNavigation?.navigate('EditRecurringItem', { recurringItemId })}
-      onUndoRecurringTransaction={actions.undoLatestRecurringTransaction}
+      onUpdateRecurringItem={actions.updateUpcomingPaymentDueDate}
     />
   );
 }

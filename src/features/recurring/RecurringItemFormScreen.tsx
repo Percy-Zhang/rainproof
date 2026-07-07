@@ -8,6 +8,7 @@ import { ActionButton, Chip, FormError, TextField } from '../../components/ui';
 import {
   FormChipRow,
   FormDangerZone,
+  FormInlineAction,
   FormPreviewRow,
   FormScreenShell,
   FormSection,
@@ -28,6 +29,14 @@ import {
 } from '../../domain/categories';
 import { formatLongDateLabel } from '../../domain/dates';
 import { formatMoney, parseMoneyInput } from '../../domain/money';
+import {
+  createSplitTransactionFormLine,
+  formatMinorInput,
+  getSplitLineCategoryKind,
+  getSplitTransactionFormSummary,
+  type SplitTransactionFormLine,
+} from '../../domain/splitTransactionForm';
+import type { SplitTransactionLineKind } from '../../domain/splitTransactions';
 import {
   dateOnlyToLocalDate,
   getRecurringCurrencyCodeForAccount,
@@ -58,6 +67,8 @@ import {
   TransactionPickerScreen,
   useAutocompleteOptions,
 } from '../transactions/TransactionFormComponents';
+import { SplitPlanSummaryRow } from '../transactions/SplitPlanSummaryRow';
+import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from '../transactions/SplitTransactionEditor';
 
 type RecurringItemFormScreenProps =
   | {
@@ -90,13 +101,21 @@ const kindOptions: { value: RecurringItemKind; label: string }[] = [
   { value: 'income', label: 'Income' },
 ];
 const frequencyOptions: { value: RecurringFrequency; label: string }[] = [
+  { value: 'one_time', label: 'One-time' },
   { value: 'weekly', label: 'Weekly' },
   { value: 'fortnightly', label: 'Fortnightly' },
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Yearly' },
 ];
 
-type RecurringFormPage = 'form' | 'account';
+type RecurringFormPage = 'form' | 'account' | 'split';
+
+let recurringSplitLineCounter = 0;
+
+function createRecurringSplitLineId(): string {
+  recurringSplitLineCounter += 1;
+  return `recurring-split-line-${recurringSplitLineCounter}`;
+}
 
 export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   const { mode, snapshot, onCancel, onDone } = props;
@@ -114,6 +133,16 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   const [categoryId, setCategoryId] = useState(initialCategory.id);
   const [subcategoryId, setSubcategoryId] = useState(
     editingItem?.subcategoryId ?? getDefaultSubcategoryId(initialCategory),
+  );
+  const [splitLines, setSplitLines] = useState<SplitTransactionFormLine[]>(() =>
+    (editingItem?.kind === 'expense' ? editingItem.splitLines : []).map((line) =>
+      createSplitTransactionFormLine({
+        id: line.id,
+        amount: formatMinorInput(line.amountMinor),
+        categoryId: line.categoryId,
+        subcategoryId: line.subcategoryId,
+        note: line.note,
+      })),
   );
   const [note, setNote] = useState(editingItem?.note ?? '');
   const [frequency, setFrequency] = useState<RecurringFrequency>(editingItem?.frequency ?? 'monthly');
@@ -148,11 +177,17 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
     ],
   );
   const nameSuggestions = useAutocompleteOptions(itemNameSuggestionValues, name);
+  const amountMinor = parseRecurringAmountInput(amount);
+  const splitSummary = getSplitTransactionFormSummary(amountMinor, splitLines);
 
   useFocusEffect(
     useCallback(() => {
       const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
         if (page === 'account') {
+          setPage('form');
+          return true;
+        }
+        if (page === 'split') {
           setPage('form');
           return true;
         }
@@ -169,6 +204,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
     setKind(nextKind);
     setCategoryId(nextCategory.id);
     setSubcategoryId(getDefaultSubcategoryId(nextCategory));
+    setSplitLines([]);
     setConfirmArchive(false);
     setError('');
   }
@@ -183,7 +219,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
   async function submit() {
     try {
       if (!selectedAccount) {
-        throw new Error(accountId ? 'Recurring item account needs attention.' : 'Recurring item account is required.');
+        throw new Error(accountId ? 'Upcoming payment account needs attention.' : 'Upcoming payment account is required.');
       }
 
       const amountMinor = parseMoneyInput(amount);
@@ -199,7 +235,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
       setError('');
       onDone();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not save recurring item.');
+      setError(caught instanceof Error ? caught.message : 'Could not save upcoming payment.');
     }
   }
 
@@ -218,7 +254,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
       setError('');
       onDone();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Could not archive recurring item.');
+      setError(caught instanceof Error ? caught.message : 'Could not archive upcoming payment.');
     }
   }
 
@@ -234,8 +270,137 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
       note,
       frequency,
       nextDueDate: nextDueDate.trim(),
+      completedAt: editingItem?.completedAt ?? null,
+      splitLines: kind === 'expense'
+        ? splitLines.map((line) => ({
+          amountMinor: Math.abs(parseMoneyInput(line.amount)),
+          categoryId: line.categoryId,
+          subcategoryId: line.subcategoryId,
+          note: line.note,
+        }))
+        : [],
       isActive: true,
     };
+  }
+
+  function getSplitBaseCategorySelection(lineKind: SplitTransactionLineKind = 'expense') {
+    const selectedCategory = getCategory(categoryId, categories);
+    const category =
+      selectedCategory.type === lineKind
+        ? selectedCategory
+        : getDefaultCategoryForKind(lineKind, categories);
+    return {
+      categoryId: category.id,
+      subcategoryId:
+        category.id === selectedCategory.id
+          ? subcategoryId ?? getDefaultSubcategoryId(category)
+          : getDefaultSubcategoryId(category),
+    };
+  }
+
+  function startSplitUpcomingPayment() {
+    if (kind !== 'expense') {
+      return;
+    }
+
+    const selection = getSplitBaseCategorySelection();
+    const totalMinor = parseRecurringAmountInput(amount);
+    setCategoryId(selection.categoryId);
+    setSubcategoryId(selection.subcategoryId);
+    setSplitLines([
+      createSplitTransactionFormLine({
+        id: createRecurringSplitLineId(),
+        amount: totalMinor > 0 ? formatMinorInput(totalMinor) : '',
+        categoryId: selection.categoryId,
+        subcategoryId: selection.subcategoryId,
+      }),
+      createSplitTransactionFormLine({
+        id: createRecurringSplitLineId(),
+        categoryId: selection.categoryId,
+        subcategoryId: selection.subcategoryId,
+      }),
+    ]);
+    setError('');
+  }
+
+  function openSplitEditor() {
+    if (kind !== 'expense') {
+      return;
+    }
+
+    if (splitLines.length < 2) {
+      startSplitUpcomingPayment();
+    }
+
+    setPage('split');
+  }
+
+  function stopSplitUpcomingPayment() {
+    if (splitLines.length === 1) {
+      setCategoryId(splitLines[0].categoryId);
+      setSubcategoryId(splitLines[0].subcategoryId);
+    }
+    setSplitLines([]);
+    setPage('form');
+    setError('');
+  }
+
+  function addSplitLine() {
+    const remainingMinor = getSplitTransactionFormSummary(parseRecurringAmountInput(amount), splitLines).remainingMinor;
+    const selection = getSplitBaseCategorySelection();
+    setSplitLines((current) => [
+      ...current,
+      createSplitTransactionFormLine({
+        id: createRecurringSplitLineId(),
+        amount: remainingMinor > 0 ? formatMinorInput(remainingMinor) : '',
+        categoryId: selection.categoryId,
+        subcategoryId: selection.subcategoryId,
+      }),
+    ]);
+  }
+
+  function updateSplitLine(lineId: string, patch: Partial<SplitTransactionFormLine>) {
+    setSplitLines((current) => current.map((line) => (line.id === lineId ? { ...line, ...patch } : line)));
+  }
+
+  function removeSplitLine(lineId: string) {
+    const nextLines = splitLines.filter((line) => line.id !== lineId);
+    if (nextLines.length === 1) {
+      setCategoryId(nextLines[0].categoryId);
+      setSubcategoryId(nextLines[0].subcategoryId);
+      setSplitLines([]);
+      setPage('form');
+      return;
+    }
+
+    setSplitLines(nextLines);
+  }
+
+  function openSplitLineCategorySelect(lineId: string) {
+    const line = splitLines.find((candidate) => candidate.id === lineId);
+    const lineKind = getSplitLineCategoryKind({
+      line,
+      parentKind: 'expense',
+      splitMode: 'standard',
+    });
+    const selection = getSplitBaseCategorySelection(lineKind);
+    props.onOpenCategorySelect(
+      {
+        kind: lineKind,
+        selectedCategoryId: line?.categoryId ?? selection.categoryId,
+        selectedSubcategoryId: line?.subcategoryId ?? selection.subcategoryId,
+        selectionMode: 'subcategory',
+        showSuggestions: false,
+        title: 'Split line category',
+      },
+      ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
+        const nextCategory = getCategory(nextCategoryId, categories);
+        updateSplitLine(lineId, {
+          categoryId: nextCategory.id,
+          subcategoryId: nextSubcategoryId ?? getDefaultSubcategoryId(nextCategory),
+        });
+      },
+    );
   }
 
   function openDatePicker() {
@@ -268,7 +433,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
         selectedSubcategoryId: subcategoryId,
         selectionMode: 'subcategory',
         showSuggestions: false,
-        title: 'Recurring category',
+        title: 'Upcoming payment category',
       },
       ({ categoryId: nextCategoryId, subcategoryId: nextSubcategoryId }) => {
         const nextCategory = getCategory(nextCategoryId, categoryOptions);
@@ -301,9 +466,41 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
     );
   }
 
+  if (page === 'split') {
+    return (
+      <FormScreenShell
+        title="Split upcoming payment"
+        onBack={() => setPage('form')}
+        onSave={() => setPage('form')}
+        saveLabel="Done"
+        saveTestID="done-recurring-split"
+      >
+        <SplitTransactionEditorScrollContainer testID="recurring-split-page">
+          <SplitTransactionEditor
+            categories={categories}
+            currencyCode={currencyCode}
+            itemNameSuggestions={itemNameSuggestionValues}
+            lines={splitLines}
+            parentKind="expense"
+            showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
+            splitMode="standard"
+            totalMinor={amountMinor}
+            onAddLine={addSplitLine}
+            onChangeLineKind={() => undefined}
+            onChangeSplitMode={() => undefined}
+            onPickCategory={openSplitLineCategorySelect}
+            onRemoveLine={removeSplitLine}
+            onUpdateLine={updateSplitLine}
+          />
+          <FormInlineAction label="Use as normal upcoming payment" onPress={stopSplitUpcomingPayment} />
+        </SplitTransactionEditorScrollContainer>
+      </FormScreenShell>
+    );
+  }
+
   return (
     <FormScreenShell
-      title={mode === 'add' ? 'Add recurring' : 'Edit recurring'}
+      title={mode === 'add' ? 'Add upcoming payment' : 'Edit upcoming payment'}
       onBack={onCancel}
       onSave={submit}
       saveTestID={mode === 'add' ? 'save-new-recurring-item' : 'save-recurring-item'}
@@ -335,7 +532,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
           label="Amount"
           value={amount}
           onChangeText={setAmount}
-          placeholder="0.00"
+          placeholder={splitLines.length >= 2 ? 'Required for split upcoming payments' : '0.00'}
           keyboardType="decimal-pad"
         />
 
@@ -396,6 +593,26 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
           />
         </FormSection>
 
+        {kind === 'expense' ? (
+          <FormSection label="Split lines">
+            <SplitPlanSummaryRow
+              title={splitLines.length >= 2 ? 'Split expense plan' : 'Normal expense plan'}
+              detail={getRecurringSplitSummaryLabel({
+                currencyCode,
+                isBalanced: splitSummary.isBalanced,
+                lineCount: splitLines.length,
+                showCurrencyCodes: snapshot.settings.multiCurrencyEnabled,
+                totalMinor: amountMinor,
+              })}
+              onPress={openSplitEditor}
+              testID="recurring-split-row"
+            />
+            {splitLines.length >= 2 ? (
+              <FormInlineAction label="Use as normal upcoming payment" onPress={stopSplitUpcomingPayment} />
+            ) : null}
+          </FormSection>
+        ) : null}
+
         <TextField
           label="Note"
           value={note}
@@ -411,6 +628,7 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
           currencyCode={currencyCode}
           kind={kind}
           nextDueDate={nextDueDate}
+          splitLineCount={splitLines.length}
           subcategoryId={subcategoryId}
         />
 
@@ -418,11 +636,11 @@ export function RecurringItemFormScreen(props: RecurringItemFormScreenProps) {
 
         {mode === 'edit' ? (
           <FormDangerZone
-            label="Recurring item status"
-            warning={confirmArchive ? 'Archived recurring items are hidden from the default recurring list.' : undefined}
+            label="Upcoming payment status"
+            warning={confirmArchive ? 'Archived upcoming payments are hidden from the active upcoming payments list.' : undefined}
           >
             <ActionButton variant="danger" onPress={archiveRecurringItem} testID="archive-recurring-item">
-              {confirmArchive ? 'Confirm archive' : 'Archive recurring item'}
+              {confirmArchive ? 'Confirm archive' : 'Archive upcoming payment'}
             </ActionButton>
           </FormDangerZone>
         ) : null}
@@ -450,6 +668,28 @@ function getRecurringAccountLabel(
   ].filter(Boolean).join(' / ');
 }
 
+function getRecurringSplitSummaryLabel({
+  currencyCode,
+  isBalanced,
+  lineCount,
+  showCurrencyCodes,
+  totalMinor,
+}: {
+  currencyCode: string;
+  isBalanced: boolean;
+  lineCount: number;
+  showCurrencyCodes: boolean;
+  totalMinor: number;
+}): string {
+  if (lineCount < 2) {
+    return 'Create a split expense plan';
+  }
+
+  return `${lineCount} lines / ${isBalanced ? 'Ready' : 'Needs total'} / ${formatMoney(totalMinor, currencyCode, {
+    showCurrencyCode: showCurrencyCodes,
+  })}`;
+}
+
 function RecurringPreview({
   amount,
   categories,
@@ -457,6 +697,7 @@ function RecurringPreview({
   currencyCode,
   kind,
   nextDueDate,
+  splitLineCount,
   subcategoryId,
 }: {
   amount: string;
@@ -465,19 +706,29 @@ function RecurringPreview({
   currencyCode: string;
   kind: RecurringItemKind;
   nextDueDate: string;
+  splitLineCount: number;
   subcategoryId: string | null;
 }) {
   const subcategory = getSubcategory(categoryId, subcategoryId ?? '', categories);
   const category = getCategory(categoryId, categories);
   const label = subcategory?.name ?? category.name;
   const amountLabel = amount.trim() ? `${currencyCode} ${amount.trim()}` : `${currencyCode} 0.00`;
+  const splitDetail = splitLineCount >= 2 ? ` / ${splitLineCount} split lines` : '';
 
   return (
     <FormPreviewRow
       color={subcategory?.color ?? category.color}
       icon={subcategory?.icon ?? category.icon}
       title={label}
-      detail={`${kind === 'income' ? 'Income' : 'Expense'} / ${amountLabel} / Due ${nextDueDate || 'YYYY-MM-DD'}`}
+      detail={`${kind === 'income' ? 'Income' : 'Expense'}${splitDetail} / ${amountLabel} / Due ${nextDueDate || 'YYYY-MM-DD'}`}
     />
   );
+}
+
+function parseRecurringAmountInput(value: string): number {
+  try {
+    return Math.abs(parseMoneyInput(value));
+  } catch {
+    return 0;
+  }
 }

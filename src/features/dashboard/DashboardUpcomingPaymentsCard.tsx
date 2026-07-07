@@ -33,7 +33,7 @@ export function UpcomingPaymentsDashboardCard({
         <View style={dashboardCardStyles.sectionCardHeader}>
           <View style={dashboardCardStyles.headerText}>
             <Text style={dashboardCardStyles.cardTitle}>{getDashboardCardDefinition('upcomingPayments').title}</Text>
-            <Text style={dashboardCardStyles.smallMuted}>Recurring items that need attention next.</Text>
+            <Text style={dashboardCardStyles.smallMuted}>Planned payments that need attention next.</Text>
           </View>
           <Text style={dashboardCardStyles.headerActionText}>View</Text>
         </View>

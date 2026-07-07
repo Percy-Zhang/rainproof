@@ -114,6 +114,9 @@ export function parseRainproofBackup(value: unknown): RainproofBackup {
   }
 
   const backup = cloneJsonData(value) as RainproofBackup;
+  for (const recurringItem of backup.data.recurringItems) {
+    recurringItem.splitLines = Array.isArray(recurringItem.splitLines) ? recurringItem.splitLines : [];
+  }
   validateBackupReferences(backup.data);
   return backup;
 }
@@ -153,6 +156,12 @@ function validateBackupReferences(data: RainproofBackupData): void {
   for (const recurringItem of data.recurringItems) {
     if (recurringItem.accountId) {
       assertReference(accountIds, recurringItem.accountId, 'recurring item account');
+    }
+    for (const line of recurringItem.splitLines) {
+      if (line.recurringItemId !== recurringItem.id || !recurringItemIds.has(line.recurringItemId)) {
+        throw new Error('The backup contains an invalid recurring item split line.');
+      }
+      assertSafeInteger(line.amountMinor, 'recurring item split line amount');
     }
   }
   for (const history of data.recurringTransactionHistory) {

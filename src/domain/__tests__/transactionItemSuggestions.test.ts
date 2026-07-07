@@ -58,12 +58,13 @@ describe('transaction item-name suggestions', () => {
     expect(suggestions).toEqual(['Bakery', 'Coffee', 'Coffee quick add']);
   });
 
-  it('includes active recurring item names and excludes inactive recurring items', () => {
+  it('includes active recurring item names and excludes inactive or completed recurring items', () => {
     const suggestions = getTransactionItemNameSuggestionValues({
       transactions: [],
       recurringItems: [
         recurring({ id: 'recurring-1', name: 'Rent' }),
         recurring({ id: 'recurring-2', name: 'Old subscription', isActive: false }),
+        recurring({ id: 'recurring-3', name: 'Completed bill', frequency: 'one_time', completedAt: '2026-05-02T00:00:00.000Z' }),
       ],
     });
 
@@ -175,6 +176,8 @@ function recurring(overrides: Partial<RecurringItem>): RecurringItem {
     note: '',
     frequency: 'monthly',
     nextDueDate: '2026-05-28',
+    completedAt: null,
+    splitLines: [],
     isActive: true,
     createdAt: '2026-05-01T00:00:00.000Z',
     updatedAt: '2026-05-01T00:00:00.000Z',

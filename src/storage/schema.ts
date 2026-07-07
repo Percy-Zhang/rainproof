@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 17;
+export const SCHEMA_VERSION = 19;
 
 export const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -122,17 +122,35 @@ CREATE TABLE IF NOT EXISTS recurring_items (
   note TEXT NOT NULL DEFAULT '',
   frequency TEXT NOT NULL DEFAULT 'monthly',
   next_due_date TEXT NOT NULL,
+  completed_at TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (kind IN ('expense', 'income')),
   CHECK (amount_minor > 0),
-  CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'yearly')),
+  CHECK (frequency IN ('one_time', 'weekly', 'fortnightly', 'monthly', 'yearly')),
   CHECK (next_due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 );
 
 CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
 ON recurring_items(is_active, next_due_date);
+
+CREATE TABLE IF NOT EXISTS recurring_item_split_lines (
+  id TEXT PRIMARY KEY NOT NULL,
+  recurring_item_id TEXT NOT NULL REFERENCES recurring_items(id) ON DELETE CASCADE,
+  amount_minor INTEGER NOT NULL,
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  CHECK (amount_minor > 0),
+  CHECK (category_id <> ''),
+  CHECK (subcategory_id <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_item_split_lines_item_sort
+ON recurring_item_split_lines(recurring_item_id, sort_order, created_at, id);
 
 CREATE TABLE IF NOT EXISTS recurring_transaction_history (
   id TEXT PRIMARY KEY NOT NULL,

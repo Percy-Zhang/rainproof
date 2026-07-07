@@ -2,13 +2,17 @@ import {
   defaultCategories,
   getDefaultSubcategoryId,
 } from './categories';
-import { parseDateTimeInput } from './dates';
+import { formatOptionalMoneyInput } from './accountForm';
+import { parseDateTimeInput, toTimeInputValue } from './dates';
 import { isCurrencyCode, normalizeCurrencyCode } from './money';
+import { formatMinorInput } from './splitTransactionForm';
+import type { AddTransactionTemplatePrefill } from './transactionTemplates';
 import type {
   Account,
   CategoryDefinition,
   NewTransactionInput,
   NewRecurringItemInput,
+  NewRecurringItemSplitLineInput,
   RecurringFrequency,
   RecurringItem,
   RecurringTransactionHistory,
@@ -55,6 +59,8 @@ export type ValidatedRecurringItemInput = {
   note: string;
   frequency: RecurringFrequency;
   nextDueDate: string;
+  completedAt: string | null;
+  splitLines: NewRecurringItemSplitLineInput[];
   isActive: boolean;
 };
 
@@ -65,7 +71,7 @@ type LocalDateParts = {
 };
 
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-const recurringFrequencies: RecurringFrequency[] = ['weekly', 'fortnightly', 'monthly', 'yearly'];
+const recurringFrequencies: RecurringFrequency[] = ['one_time', 'weekly', 'fortnightly', 'monthly', 'yearly'];
 
 export function validateRecurringItemInput(
   input: NewRecurringItemInput | UpdateRecurringItemInput,
@@ -76,37 +82,42 @@ export function validateRecurringItemInput(
   const subcategoryId = input.subcategoryId?.trim() || null;
   const note = input.note?.trim() ?? '';
   const currencyCode = input.currencyCode.trim().toUpperCase();
+  const completedAt = input.completedAt?.trim() || null;
 
   if (!name) {
-    throw new Error('Recurring item name is required.');
+    throw new Error('Upcoming payment name is required.');
   }
 
   if (input.kind !== 'expense' && input.kind !== 'income') {
-    throw new Error('Recurring item type must be income or expense.');
+    throw new Error('Upcoming payment type must be income or expense.');
   }
 
   if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) {
-    throw new Error('Recurring item amount must be greater than zero.');
+    throw new Error('Upcoming payment amount must be greater than zero.');
   }
 
   if (!isCurrencyCode(currencyCode)) {
-    throw new Error('Recurring item currency is required.');
+    throw new Error('Upcoming payment currency is required.');
   }
 
   if (!accountId) {
-    throw new Error('Recurring item account is required.');
+    throw new Error('Upcoming payment account is required.');
   }
 
   if (!categoryId) {
-    throw new Error('Recurring item category is required.');
+    throw new Error('Upcoming payment category is required.');
   }
 
   if (!recurringFrequencies.includes(input.frequency)) {
-    throw new Error('Recurring item frequency is required.');
+    throw new Error('Upcoming payment frequency is required.');
   }
 
   if (!isValidDateOnly(input.nextDueDate)) {
-    throw new Error('Recurring item due date must use YYYY-MM-DD.');
+    throw new Error('Upcoming payment due date must use YYYY-MM-DD.');
+  }
+  const splitLines = normalizeRecurringSplitLines(input.splitLines);
+  if (splitLines.length > 0) {
+    validateRecurringSplitLines(input.kind, splitLines, input.amountMinor);
   }
 
   return {
@@ -120,6 +131,8 @@ export function validateRecurringItemInput(
     note,
     frequency: input.frequency,
     nextDueDate: input.nextDueDate,
+    completedAt,
+    splitLines,
     isActive: input.isActive ?? true,
   };
 }
@@ -131,6 +144,8 @@ export function calculateNextRecurringDueDate(
   assertDateOnly(currentDueDate);
 
   switch (frequency) {
+    case 'one_time':
+      throw new Error('One-time upcoming payments do not repeat.');
     case 'weekly':
       return addDaysDateOnly(currentDueDate, 7);
     case 'fortnightly':
@@ -139,6 +154,26 @@ export function calculateNextRecurringDueDate(
       return addMonthsDateOnly(currentDueDate, 1);
     case 'yearly':
       return addMonthsDateOnly(currentDueDate, 12);
+  }
+}
+
+export function calculatePreviousRecurringDueDate(
+  currentDueDate: string,
+  frequency: RecurringFrequency,
+): string {
+  assertDateOnly(currentDueDate);
+
+  switch (frequency) {
+    case 'one_time':
+      throw new Error('One-time upcoming payments cannot move between periods.');
+    case 'weekly':
+      return addDaysDateOnly(currentDueDate, -7);
+    case 'fortnightly':
+      return addDaysDateOnly(currentDueDate, -14);
+    case 'monthly':
+      return addMonthsDateOnly(currentDueDate, -1);
+    case 'yearly':
+      return addMonthsDateOnly(currentDueDate, -12);
   }
 }
 
@@ -180,7 +215,7 @@ export function classifyRecurringItemsByDueDate(
   };
 
   for (const item of items) {
-    if (!item.isActive || !isValidDateOnly(item.nextDueDate)) {
+    if (!item.isActive || item.completedAt || !isValidDateOnly(item.nextDueDate)) {
       continue;
     }
 
@@ -268,6 +303,93 @@ export function buildTransactionInputFromRecurringItem({
   };
 }
 
+export function buildAddTransactionPrefillFromRecurringItem({
+  accounts,
+  categories = defaultCategories,
+  item,
+  now = new Date(),
+}: {
+  accounts: Account[];
+  categories?: CategoryDefinition[];
+  item: RecurringItem;
+  now?: Date;
+}): AddTransactionTemplatePrefill {
+  const account = accounts.find((candidate) => candidate.id === item.accountId && !candidate.isArchived);
+  if (!account) {
+    throw new Error('Upcoming payment account needs attention.');
+  }
+
+  const category = categories.find((candidate) => candidate.id === item.categoryId);
+  if (!category || category.type !== item.kind) {
+    throw new Error('Upcoming payment category needs attention.');
+  }
+
+  const subcategoryId = resolveRecurringSubcategoryId(item, category, 'Upcoming payment');
+
+  return {
+    kind: item.kind,
+    splitMode: 'standard',
+    title: item.name,
+    amountExpression: formatOptionalMoneyInput(item.amountMinor),
+    date: item.nextDueDate,
+    time: toTimeInputValue(now),
+    accountId: account.id,
+    categoryId: item.categoryId,
+    subcategoryId,
+    notes: item.note,
+    splitLines: item.kind === 'expense'
+      ? item.splitLines.map((line) => ({
+        id: line.id,
+        amount: formatMinorInput(line.amountMinor),
+        categoryId: line.categoryId,
+        subcategoryId: line.subcategoryId,
+        note: line.note,
+      }))
+      : [],
+  };
+}
+
+export function buildUpcomingPaymentPostSaveInput(
+  item: RecurringItem,
+  accounts: Account[] = [],
+  completedAt = new Date().toISOString(),
+): UpdateRecurringItemInput {
+  const baseInput = buildRecurringItemUpdateInput(item, accounts);
+
+  if (item.frequency === 'one_time') {
+    return {
+      ...baseInput,
+      nextDueDate: item.nextDueDate,
+      completedAt,
+    };
+  }
+
+  return {
+    ...baseInput,
+    nextDueDate: advanceRecurringDueDate(item),
+    completedAt: null,
+  };
+}
+
+export function buildRecurringDueDateShiftInput(
+  item: RecurringItem,
+  direction: 'previous' | 'next',
+  accounts: Account[] = [],
+): UpdateRecurringItemInput {
+  if (item.frequency === 'one_time') {
+    throw new Error('One-time upcoming payments cannot move between periods.');
+  }
+
+  const baseInput = buildRecurringItemUpdateInput(item, accounts);
+  return {
+    ...baseInput,
+    nextDueDate: direction === 'previous'
+      ? calculatePreviousRecurringDueDate(item.nextDueDate, item.frequency)
+      : calculateNextRecurringDueDate(item.nextDueDate, item.frequency),
+    completedAt: null,
+  };
+}
+
 export function isValidDateOnly(value: string): boolean {
   try {
     parseDateOnly(value);
@@ -293,6 +415,7 @@ export function getRecurringCurrencyCodeForAccount(accounts: Account[], accountI
 function resolveRecurringSubcategoryId(
   item: Pick<RecurringItem, 'subcategoryId'>,
   category: CategoryDefinition,
+  label = 'Recurring item',
 ): string {
   if (!item.subcategoryId) {
     return getDefaultSubcategoryId(category);
@@ -300,10 +423,81 @@ function resolveRecurringSubcategoryId(
 
   const subcategory = category.subcategories.find((candidate) => candidate.id === item.subcategoryId);
   if (!subcategory) {
-    throw new Error('Recurring item subcategory needs attention.');
+    throw new Error(`${label} subcategory needs attention.`);
   }
 
   return subcategory.id;
+}
+
+function buildRecurringItemUpdateInput(
+  item: RecurringItem,
+  accounts: Account[] = [],
+): UpdateRecurringItemInput {
+  const accountCurrencyCode = getRecurringCurrencyCodeForAccount(accounts, item.accountId);
+
+  return {
+    id: item.id,
+    name: item.name,
+    kind: item.kind,
+    amountMinor: item.amountMinor,
+    currencyCode: accountCurrencyCode || item.currencyCode,
+    accountId: item.accountId,
+    categoryId: item.categoryId,
+    subcategoryId: item.subcategoryId,
+    note: item.note,
+    frequency: item.frequency,
+    nextDueDate: item.nextDueDate,
+    completedAt: item.completedAt,
+    splitLines: item.splitLines.map((line) => ({
+      amountMinor: line.amountMinor,
+      categoryId: line.categoryId,
+      subcategoryId: line.subcategoryId,
+      note: line.note,
+    })),
+    isActive: item.isActive,
+  };
+}
+
+function normalizeRecurringSplitLines(
+  lines: NewRecurringItemSplitLineInput[] | undefined,
+): NewRecurringItemSplitLineInput[] {
+  return (lines ?? []).map((line) => ({
+    amountMinor: line.amountMinor,
+    categoryId: line.categoryId.trim(),
+    subcategoryId: line.subcategoryId.trim(),
+    note: line.note?.trim() ?? '',
+  }));
+}
+
+function validateRecurringSplitLines(
+  kind: RecurringItemKind,
+  lines: NewRecurringItemSplitLineInput[],
+  amountMinor: number,
+): void {
+  if (kind !== 'expense') {
+    throw new Error('Upcoming Payment split lines are only supported for expenses.');
+  }
+
+  if (lines.length < 2) {
+    throw new Error('Split upcoming payments need at least two lines.');
+  }
+
+  let splitTotalMinor = 0;
+  for (const line of lines) {
+    if (!Number.isInteger(line.amountMinor) || line.amountMinor <= 0) {
+      throw new Error('Split line amounts must be greater than zero.');
+    }
+
+    if (!line.categoryId || !line.subcategoryId) {
+      throw new Error('Choose a category and subcategory for every split line.');
+    }
+
+    splitTotalMinor += line.amountMinor;
+  }
+
+  if (splitTotalMinor !== amountMinor) {
+    throw new Error('Split line amounts must equal the upcoming payment amount.');
+  }
 }
 
 function compareUpcomingRecurringItems(left: UpcomingRecurringItem, right: UpcomingRecurringItem): number {

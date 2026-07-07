@@ -23,13 +23,14 @@ describe('dashboard recurring summary', () => {
     ]);
   });
 
-  it('excludes inactive items and limits rows without changing active count', () => {
+  it('excludes inactive and completed items and limits rows without changing active count', () => {
     const summary = getDashboardRecurringSummary(
       [
         recurringItem({ id: 'one', nextDueDate: '2026-05-16' }),
         recurringItem({ id: 'two', nextDueDate: '2026-05-17' }),
         recurringItem({ id: 'three', nextDueDate: '2026-05-18' }),
         recurringItem({ id: 'inactive', nextDueDate: '2026-05-14', isActive: false }),
+        recurringItem({ id: 'completed', frequency: 'one_time', nextDueDate: '2026-05-14', completedAt: now }),
       ],
       { fromDate: '2026-05-15', limit: 2 },
     );
@@ -37,6 +38,20 @@ describe('dashboard recurring summary', () => {
     expect(summary.activeCount).toBe(3);
     expect(summary.rows.map((item) => item.id)).toEqual(['one', 'two']);
   });
+
+  it('includes active one-time and recurring upcoming payments', () => {
+    const summary = getDashboardRecurringSummary(
+      [
+        recurringItem({ id: 'one-time', frequency: 'one_time', nextDueDate: '2026-05-16' }),
+        recurringItem({ id: 'recurring', frequency: 'monthly', nextDueDate: '2026-05-17' }),
+      ],
+      { fromDate: '2026-05-15' },
+    );
+
+    expect(summary.activeCount).toBe(2);
+    expect(summary.rows.map((item) => item.id)).toEqual(['one-time', 'recurring']);
+  });
+
 
   it('returns no rows when there are no active recurring items', () => {
     expect(getDashboardRecurringSummary([
@@ -61,6 +76,8 @@ function recurringItem(overrides: Partial<RecurringItem>): RecurringItem {
     note: '',
     frequency: 'monthly',
     nextDueDate: '2026-05-01',
+    completedAt: null,
+    splitLines: [],
     isActive: true,
     createdAt: now,
     updatedAt: now,

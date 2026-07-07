@@ -39,6 +39,7 @@ describe('SQLite finance repository recurring and templates', () => {
           note: 'Base pay',
           frequency: 'fortnightly',
           nextDueDate: '2026-05-29',
+          completedAt: null,
           isActive: true,
         }),
       );
@@ -69,6 +70,7 @@ describe('SQLite finance repository recurring and templates', () => {
           subcategoryId: 'wages',
           frequency: 'monthly',
           nextDueDate: '2026-06-15',
+          completedAt: null,
           isActive: true,
         }),
       );
@@ -79,6 +81,219 @@ describe('SQLite finance repository recurring and templates', () => {
 
       await repository.deleteRecurringItem(item.id);
       expect((await repository.getSnapshot()).recurringItems).toEqual([]);
+    });
+  });
+
+  it('persists and replaces split expense upcoming payment lines without creating ledger activity', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+
+      await repository.addRecurringItem({
+        name: 'Quarterly rates',
+        kind: 'expense',
+        amountMinor: 12000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-29',
+        splitLines: [
+          { amountMinor: 7000, categoryId: 'housing', subcategoryId: 'rent', note: 'Council' },
+          { amountMinor: 5000, categoryId: 'food', subcategoryId: 'groceries', note: 'Water' },
+        ],
+      });
+
+      let snapshot = await repository.getSnapshot();
+      const item = snapshot.recurringItems[0];
+      expect(item.splitLines.map(({ amountMinor, categoryId, subcategoryId, note, sortOrder }) => ({
+        amountMinor,
+        categoryId,
+        subcategoryId,
+        note,
+        sortOrder,
+      }))).toEqual([
+        { amountMinor: 7000, categoryId: 'housing', subcategoryId: 'rent', note: 'Council', sortOrder: 0 },
+        { amountMinor: 5000, categoryId: 'food', subcategoryId: 'groceries', note: 'Water', sortOrder: 1 },
+      ]);
+      expect(snapshot.transactions).toEqual([]);
+      expect(snapshot.transactionLines).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)).toEqual({ [everyday.id]: 0 });
+
+      await repository.updateRecurringItem({
+        id: item.id,
+        name: item.name,
+        kind: 'expense',
+        amountMinor: 12000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'monthly',
+        nextDueDate: '2026-06-29',
+        completedAt: null,
+        splitLines: [
+          { amountMinor: 8000, categoryId: 'housing', subcategoryId: 'rent', note: 'Rates' },
+          { amountMinor: 4000, categoryId: 'food', subcategoryId: 'groceries', note: 'Water' },
+        ],
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.recurringItems[0].splitLines.map(({ amountMinor, note }) => ({ amountMinor, note }))).toEqual([
+        { amountMinor: 8000, note: 'Rates' },
+        { amountMinor: 4000, note: 'Water' },
+      ]);
+      expect(snapshot.transactions).toEqual([]);
+    });
+  });
+
+  it('creates a split transaction from a split upcoming payment and advances only the plan', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      await repository.addRecurringItem({
+        name: 'Rates',
+        kind: 'expense',
+        amountMinor: 12000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-10',
+        splitLines: [
+          { amountMinor: 7000, categoryId: 'housing', subcategoryId: 'rent', note: 'Council' },
+          { amountMinor: 5000, categoryId: 'food', subcategoryId: 'groceries', note: 'Water' },
+        ],
+      });
+      let snapshot = await repository.getSnapshot();
+      const upcomingPayment = snapshot.recurringItems[0];
+      const transactionInput = {
+        kind: 'expense' as const,
+        title: 'Rates',
+        datetime: '2026-05-10T12:00:00.000Z',
+        lines: [
+          {
+            accountId: everyday.id,
+            amountMinor: -7000,
+            currencyCode: 'AUD',
+            categoryId: 'housing',
+            subcategoryId: 'rent',
+            note: 'Council',
+          },
+          {
+            accountId: everyday.id,
+            amountMinor: -5000,
+            currencyCode: 'AUD',
+            categoryId: 'food',
+            subcategoryId: 'groceries',
+            note: 'Water',
+          },
+        ],
+      };
+      const preparedRecords = repository.prepareAddTransaction(transactionInput);
+
+      await repository.createUpcomingPaymentTransaction({
+        recurringItemId: upcomingPayment.id,
+        previousNextDueDate: upcomingPayment.nextDueDate,
+        transactionInput,
+        recurringItemInput: recurringUpdateInput(upcomingPayment, '2026-06-10'),
+      }, preparedRecords);
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.map((transaction) => transaction.title)).toEqual(['Rates']);
+      expect(snapshot.transactions[0].id).toBe(preparedRecords.transaction.id);
+      expect(snapshot.transactionLines.map((line) => line.id)).toEqual(preparedRecords.lines.map((line) => line.id));
+      expect(snapshot.transactionLines.map(({ amountMinor, note }) => ({ amountMinor, note }))).toEqual([
+        { amountMinor: -7000, note: 'Council' },
+        { amountMinor: -5000, note: 'Water' },
+      ]);
+      expect(snapshot.recurringItems[0]).toEqual(expect.objectContaining({
+        nextDueDate: '2026-06-10',
+        completedAt: null,
+      }));
+      expect(snapshot.recurringItems[0].splitLines).toHaveLength(2);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-12000);
+    });
+  });
+
+  it('creates a normal transaction from a one-time upcoming payment and completes only the plan', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      await repository.addRecurringItem({
+        name: 'Vet bill',
+        kind: 'expense',
+        amountMinor: 10000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'one_time',
+        nextDueDate: '2026-05-10',
+      });
+      let snapshot = await repository.getSnapshot();
+      const upcomingPayment = snapshot.recurringItems[0];
+      expect(upcomingPayment.completedAt).toBeNull();
+      expect(snapshot.transactions).toEqual([]);
+
+      await repository.createUpcomingPaymentTransaction({
+        recurringItemId: upcomingPayment.id,
+        previousNextDueDate: upcomingPayment.nextDueDate,
+        transactionInput: recurringExpenseInput(everyday.id, 'Vet bill', '2026-05-10'),
+        recurringItemInput: {
+          ...recurringUpdateInput(upcomingPayment, upcomingPayment.nextDueDate),
+          completedAt: '2026-05-10T09:00:00.000Z',
+        },
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.map((transaction) => transaction.title)).toEqual(['Vet bill']);
+      expect(snapshot.recurringItems[0]).toEqual(
+        expect.objectContaining({
+          frequency: 'one_time',
+          nextDueDate: '2026-05-10',
+          completedAt: '2026-05-10T09:00:00.000Z',
+        }),
+      );
+      expect(snapshot.recurringTransactionHistory).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-10000);
+    });
+  });
+
+  it('creates a normal transaction from a recurring upcoming payment and advances only the plan', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      await repository.addRecurringItem({
+        name: 'Rent',
+        kind: 'expense',
+        amountMinor: 10000,
+        currencyCode: 'AUD',
+        accountId: everyday.id,
+        categoryId: 'housing',
+        subcategoryId: 'rent',
+        frequency: 'monthly',
+        nextDueDate: '2026-05-01',
+      });
+      let snapshot = await repository.getSnapshot();
+      const upcomingPayment = snapshot.recurringItems[0];
+
+      await repository.createUpcomingPaymentTransaction({
+        recurringItemId: upcomingPayment.id,
+        previousNextDueDate: upcomingPayment.nextDueDate,
+        transactionInput: recurringExpenseInput(everyday.id, 'Rent May', '2026-05-01'),
+        recurringItemInput: recurringUpdateInput(upcomingPayment, '2026-06-01'),
+      });
+
+      snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.map((transaction) => transaction.title)).toEqual(['Rent May']);
+      expect(snapshot.recurringItems[0]).toEqual(
+        expect.objectContaining({
+          frequency: 'monthly',
+          nextDueDate: '2026-06-01',
+          completedAt: null,
+        }),
+      );
+      expect(snapshot.recurringTransactionHistory).toEqual([]);
+      expect(getBalanceByAccountId(snapshot)[everyday.id]).toBe(-10000);
     });
   });
 

@@ -9,72 +9,161 @@ jest.mock('@expo/vector-icons', () => {
   return { Ionicons: 'Ionicons' };
 });
 
-describe('RecurringItemsScreen undo actions', () => {
-  it('shows the newest undo action for generated recurring transactions', async () => {
-    const onUndoRecurringTransaction = jest.fn(async () => undefined);
-    const screen = render(React.createElement(RecurringItemsScreen, {
-      snapshot: snapshot(true),
-      onAddRecurringItem: jest.fn(),
-      onCreateTransaction: jest.fn(),
-      onEditRecurringItem: jest.fn(),
-      onUndoRecurringTransaction,
-    }));
+describe('RecurringItemsScreen upcoming payment actions', () => {
+  it('opens Add Transaction from an upcoming payment', () => {
+    const onCreateTransaction = jest.fn();
+    const screen = renderScreen({ onCreateTransaction });
 
-    fireEvent.press(screen.getByTestId('undo-recurring-transaction-rent'));
+    expect(screen.getByText('Mark paid')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('create-recurring-transaction-rent'));
 
-    await waitFor(() => {
-      expect(onUndoRecurringTransaction).toHaveBeenCalledWith('rent');
-    });
-    expect(screen.getByText('Undo last paid')).toBeTruthy();
-  });
-
-  it('hides undo when the recurring item has no generated transaction history', () => {
-    const screen = render(React.createElement(RecurringItemsScreen, {
-      snapshot: snapshot(false),
-      onAddRecurringItem: jest.fn(),
-      onCreateTransaction: jest.fn(),
-      onEditRecurringItem: jest.fn(),
-      onUndoRecurringTransaction: jest.fn(async () => undefined),
-    }));
-
+    expect(onCreateTransaction).toHaveBeenCalledWith('rent');
     expect(screen.queryByTestId('undo-recurring-transaction-rent')).toBeNull();
   });
 
-  it('shows multiple generated payments as a newest-first undo stack', () => {
-    const screen = render(React.createElement(RecurringItemsScreen, {
-      snapshot: snapshot(true, 2),
-      onAddRecurringItem: jest.fn(),
-      onCreateTransaction: jest.fn(),
-      onEditRecurringItem: jest.fn(),
-      onUndoRecurringTransaction: jest.fn(async () => undefined),
-    }));
+  it('drafts recurring due dates inline and saves only when confirmed', async () => {
+    const onUpdateRecurringItem = jest.fn(async () => undefined);
+    const screen = renderScreen({ onUpdateRecurringItem });
 
-    expect(screen.getByText('2 generated transactions can be undone, newest first.')).toBeTruthy();
-    expect(screen.getByTestId('undo-recurring-transaction-rent')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('edit-recurring-item-rent'));
+    expect(screen.getByText('Previous')).toBeTruthy();
+    expect(screen.getByText('Next')).toBeTruthy();
+    expect(screen.queryByText('Mark paid')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('next-recurring-due-date-rent'));
+    expect(screen.getByText('March 1, 2099')).toBeTruthy();
+    expect(onUpdateRecurringItem).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId('confirm-recurring-due-date-rent'));
+
+    expect(screen.queryByText('Previous')).toBeNull();
+    expect(screen.getByText('Mark paid')).toBeTruthy();
+    expect(screen.getByText('March 1, 2099')).toBeTruthy();
+
+    await waitFor(() => {
+      expect(onUpdateRecurringItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'rent',
+          nextDueDate: '2099-03-01',
+          completedAt: null,
+        }),
+      );
+    });
   });
 
-  it('shows an undo conflict from storage without hiding the undo action', async () => {
-    const message =
-      "Undo unavailable because this recurring item's due date was changed after the transaction was created.";
-    const screen = render(React.createElement(RecurringItemsScreen, {
-      snapshot: snapshot(true),
-      onAddRecurringItem: jest.fn(),
-      onCreateTransaction: jest.fn(),
-      onEditRecurringItem: jest.fn(),
-      onUndoRecurringTransaction: jest.fn(async () => {
-        throw new Error(message);
+  it('rolls back the optimistic due date if the save fails', async () => {
+    const onUpdateRecurringItem = jest.fn(async () => {
+      throw new Error('Could not save due date.');
+    });
+    const screen = renderScreen({ onUpdateRecurringItem });
+
+    fireEvent.press(screen.getByTestId('edit-recurring-item-rent'));
+    fireEvent.press(screen.getByTestId('next-recurring-due-date-rent'));
+    fireEvent.press(screen.getByTestId('confirm-recurring-due-date-rent'));
+
+    expect(screen.getByText('March 1, 2099')).toBeTruthy();
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not save due date.')).toBeTruthy();
+      expect(screen.getByText('February 1, 2099')).toBeTruthy();
+    });
+  });
+
+  it('can preview several recurring due-date changes before confirming one save', async () => {
+    const onUpdateRecurringItem = jest.fn(async () => undefined);
+    const screen = renderScreen({ onUpdateRecurringItem });
+
+    fireEvent.press(screen.getByTestId('edit-recurring-item-rent'));
+    fireEvent.press(screen.getByTestId('next-recurring-due-date-rent'));
+    fireEvent.press(screen.getByTestId('next-recurring-due-date-rent'));
+    fireEvent.press(screen.getByTestId('previous-recurring-due-date-rent'));
+
+    expect(screen.getByText('March 1, 2099')).toBeTruthy();
+    expect(onUpdateRecurringItem).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId('confirm-recurring-due-date-rent'));
+
+    await waitFor(() => {
+      expect(onUpdateRecurringItem).toHaveBeenCalledTimes(1);
+      expect(onUpdateRecurringItem).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'rent',
+          nextDueDate: '2099-03-01',
+          completedAt: null,
+        }),
+      );
+    });
+  });
+
+  it('does not show period movement controls for one-time plans', () => {
+    const screen = renderScreen({
+      snapshot: snapshot({
+        frequency: 'one_time',
       }),
-    }));
+    });
 
-    fireEvent.press(screen.getByTestId('undo-recurring-transaction-rent'));
+    expect(screen.getByText('One-time')).toBeTruthy();
+    expect(screen.queryByTestId('previous-recurring-due-date-rent')).toBeNull();
+    expect(screen.queryByTestId('next-recurring-due-date-rent')).toBeNull();
+  });
 
-    expect(await screen.findByText(message)).toBeTruthy();
-    expect(screen.getByTestId('undo-recurring-transaction-rent')).toBeTruthy();
+  it('opens the normal edit flow from the one-time row edit icon', () => {
+    const onEditRecurringItem = jest.fn();
+    const screen = renderScreen({
+      onEditRecurringItem,
+      snapshot: snapshot({
+        frequency: 'one_time',
+      }),
+    });
+
+    fireEvent.press(screen.getByTestId('edit-recurring-item-rent'));
+
+    expect(onEditRecurringItem).toHaveBeenCalledWith('rent');
+    expect(screen.queryByTestId('previous-recurring-due-date-rent')).toBeNull();
+    expect(screen.queryByTestId('next-recurring-due-date-rent')).toBeNull();
+  });
+
+  it('renders the row edit action with a pencil icon', () => {
+    const screen = renderScreen();
+
+    expect(screen.UNSAFE_getByProps({ name: 'pencil-outline' })).toBeTruthy();
+  });
+
+  it('hides completed one-time plans from the active list', () => {
+    const screen = renderScreen({
+      snapshot: snapshot({
+        frequency: 'one_time',
+        completedAt: '2026-06-07T00:00:00.000Z',
+      }),
+    });
+
+    expect(screen.queryByTestId('recurring-row-rent')).toBeNull();
+    expect(screen.getByText('No active upcoming payments')).toBeTruthy();
   });
 });
 
-function snapshot(withHistory: boolean, historyCount = 1): AppSnapshot {
-  const item = recurringItem();
+function renderScreen({
+  onCreateTransaction = jest.fn(),
+  onEditRecurringItem = jest.fn(),
+  onUpdateRecurringItem = jest.fn(async () => undefined),
+  snapshot: nextSnapshot = snapshot(),
+}: {
+  onCreateTransaction?: jest.Mock;
+  onEditRecurringItem?: jest.Mock;
+  onUpdateRecurringItem?: jest.Mock;
+  snapshot?: AppSnapshot;
+} = {}) {
+  return render(React.createElement(RecurringItemsScreen, {
+    snapshot: nextSnapshot,
+    onAddRecurringItem: jest.fn(),
+    onCreateTransaction,
+    onEditRecurringItem,
+    onUpdateRecurringItem,
+  }));
+}
+
+function snapshot(itemOverrides: Partial<RecurringItem> = {}): AppSnapshot {
+  const item = recurringItem(itemOverrides);
 
   return {
     defaultCurrencyCode: 'AUD',
@@ -111,17 +200,7 @@ function snapshot(withHistory: boolean, historyCount = 1): AppSnapshot {
     budgets: [],
     recurringItems: [item],
     recurringBills: [item],
-    recurringTransactionHistory: withHistory
-      ? Array.from({ length: historyCount }, (_, index) => ({
-        id: `history-${index + 1}`,
-        recurringItemId: item.id,
-        transactionId: `transaction-${index + 1}`,
-        previousNextDueDate: index ? '2099-02-01' : '2099-01-01',
-        advancedNextDueDate: index ? '2099-03-01' : '2099-02-01',
-        sequence: index + 1,
-        createdAt: `2026-06-0${index + 7}T00:00:00.000Z`,
-      }))
-      : [],
+    recurringTransactionHistory: [],
     transactionTemplates: [],
     rainyDayFund: {
       id: 'fund',
@@ -135,7 +214,7 @@ function snapshot(withHistory: boolean, historyCount = 1): AppSnapshot {
   };
 }
 
-function recurringItem(): RecurringItem {
+function recurringItem(overrides: Partial<RecurringItem> = {}): RecurringItem {
   return {
     id: 'rent',
     name: 'Rent',
@@ -148,8 +227,11 @@ function recurringItem(): RecurringItem {
     note: '',
     frequency: 'monthly',
     nextDueDate: '2099-02-01',
+    completedAt: null,
+    splitLines: [],
     isActive: true,
     createdAt: '',
     updatedAt: '',
+    ...overrides,
   };
 }

@@ -19,7 +19,7 @@ import type {
   AppSnapshot,
   BudgetUsage,
   CashFlowSummary,
-  CreateRecurringTransactionInput,
+  CreateUpcomingPaymentTransactionInput,
   CurrencyTotal,
   NewAccountInput,
   NewBudgetInput,
@@ -54,6 +54,7 @@ import {
   canPatchSnapshotAfterEditTransaction,
   canPatchSnapshotAfterTransactionLinkBatch,
   canPatchSnapshotAfterUpdateTransactionLink,
+  getRollbackForRecurringItemStateChange,
   getRollbackForDeleteTransaction,
   getRollbackForDeleteTransactionLink,
   getRollbackForEditTransaction,
@@ -64,6 +65,7 @@ import {
   patchSnapshotAfterDeleteTransactionWithRollback,
   patchSnapshotAfterEditTransactionWithRollback,
   patchSnapshotAfterDeleteTransactionLinkWithRollback,
+  patchSnapshotAfterRecurringItemStateChangeWithRollback,
   patchSnapshotAfterTransactionLinkBatchWithRollback,
   patchSnapshotAfterUpdateTransactionLinkWithRollback,
   patchSnapshotAfterAddTransaction,
@@ -71,11 +73,13 @@ import {
   rollbackSnapshotAfterOptimisticDeleteTransaction,
   rollbackSnapshotAfterOptimisticDeleteTransactionLink,
   rollbackSnapshotAfterOptimisticEditTransaction,
+  rollbackSnapshotAfterOptimisticRecurringItemStateChange,
   rollbackSnapshotAfterOptimisticTransactionLinkBatch,
   rollbackSnapshotAfterOptimisticUpdateTransactionLink,
   rollbackSnapshotAfterOptimisticAddTransaction,
   type OptimisticDeleteTransactionRollback,
   type OptimisticEditTransactionRollback,
+  type OptimisticRecurringItemStateRollback,
   type OptimisticTransactionLinkBatchRollback,
   type OptimisticTransactionLinkRollback,
 } from './rainproofSnapshotPatches';
@@ -106,8 +110,8 @@ type RainproofActions = {
   archiveBudget(budgetId: string): Promise<void>;
   addRecurringItem(input: NewRecurringItemInput): Promise<void>;
   updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
-  createRecurringTransaction(input: CreateRecurringTransactionInput): Promise<void>;
-  undoLatestRecurringTransaction(recurringItemId: string): Promise<void>;
+  updateUpcomingPaymentDueDate(input: UpdateRecurringItemInput): Promise<void>;
+  createUpcomingPaymentTransaction(input: CreateUpcomingPaymentTransactionInput): Promise<void>;
   archiveRecurringItem(recurringItemId: string): Promise<void>;
   deleteRecurringItem(recurringItemId: string): Promise<void>;
   addTransactionTemplate(input: NewTransactionTemplateInput): Promise<void>;
@@ -152,12 +156,14 @@ type TransactionLinkMutationOptions = {
 };
 type OptimisticTransactionActionLabel =
   | 'addTransaction'
+  | 'createUpcomingPaymentTransaction'
   | 'updateTransaction'
   | 'deleteTransaction'
   | 'addTransactionLink'
   | 'updateTransactionLink'
   | 'deleteTransactionLink'
-  | 'saveTransactionLinkBatch';
+  | 'saveTransactionLinkBatch'
+  | 'updateUpcomingPaymentDueDate';
 
 export type RainproofDataState = {
   snapshot: AppSnapshot | null;
@@ -803,6 +809,129 @@ export function useRainproofData(): RainproofDataState {
     [applySnapshotPatch, refresh],
   );
 
+  const updateUpcomingPaymentDueDateOptimistically = useCallback(
+    (input: UpdateRecurringItemInput): Promise<void> => {
+      const repository = repositoryRef.current;
+      const previousSnapshot = snapshotRef.current;
+      const startedAt = Date.now();
+
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      if (!previousSnapshot) {
+        return withFullRefreshActionTiming(
+          'updateUpcomingPaymentDueDate',
+          startedAt,
+          persistRecurringItemUpdateWithSaving({ input, refresh, repository, setSaving }),
+        );
+      }
+
+      const rollback = getRollbackForRecurringItemStateChange(previousSnapshot, input.id);
+      if (!rollback) {
+        return withFullRefreshActionTiming(
+          'updateUpcomingPaymentDueDate',
+          startedAt,
+          persistRecurringItemUpdateWithSaving({ input, refresh, repository, setSaving }),
+        );
+      }
+
+      scheduleOptimisticMutationTask(() => {
+        applyAcceptedOptimisticUpcomingPaymentDueDate({
+          applySnapshotPatch,
+          input,
+          refresh,
+          repository,
+          rollback,
+          setError,
+          transactionWriteQueueRef,
+        });
+      });
+
+      logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.accepted', startedAt, { refresh: 'optimistic' });
+      logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.perceived', startedAt, { refresh: 'accepted' });
+      logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.total', startedAt);
+      return Promise.resolve();
+    },
+    [applySnapshotPatch, refresh],
+  );
+
+  const createUpcomingPaymentTransactionOptimistically = useCallback(
+    (input: CreateUpcomingPaymentTransactionInput): Promise<void> => {
+      const repository = repositoryRef.current;
+      const previousSnapshot = snapshotRef.current;
+      const startedAt = Date.now();
+
+      if (!repository) {
+        return Promise.resolve();
+      }
+
+      if (!previousSnapshot) {
+        return withFullRefreshActionTiming(
+          'createUpcomingPaymentTransaction',
+          startedAt,
+          persistUpcomingPaymentTransactionWithSaving({ input, refresh, repository, setSaving }),
+        );
+      }
+
+      try {
+        const optimisticRecords = timeDevPerf(
+          'rainproofData.createUpcomingPaymentTransaction.optimisticBuild',
+          () => repository.prepareAddTransaction(input.transactionInput),
+          getNewTransactionInputPerfMetadata(input.transactionInput),
+        );
+        const rollback = getRollbackForRecurringItemStateChange(previousSnapshot, input.recurringItemId);
+        const canPatchOptimistically = rollback &&
+          canPatchSnapshotAfterAddTransaction(previousSnapshot, {
+            addTransactionDefaults: input.addTransactionDefaults,
+            input: input.transactionInput,
+            lines: optimisticRecords.lines,
+            transaction: optimisticRecords.transaction,
+          }) &&
+          patchSnapshotAfterRecurringItemStateChangeWithRollback(
+            previousSnapshot,
+            input.recurringItemInput,
+            rollback,
+          ) !== null;
+
+        if (!rollback || !canPatchOptimistically) {
+          return withFullRefreshActionTiming(
+            'createUpcomingPaymentTransaction',
+            startedAt,
+            persistUpcomingPaymentTransactionWithSaving({ input, refresh, repository, setSaving }),
+          );
+        }
+
+        scheduleOptimisticMutationTask(() => {
+          applyAcceptedOptimisticUpcomingPaymentTransaction({
+            applySnapshotPatch,
+            input,
+            optimisticRecords,
+            previousAddTransactionDefaults: previousSnapshot.settings.addTransactionDefaults,
+            refresh,
+            repository,
+            rollback,
+            setError,
+            transactionWriteQueueRef,
+          });
+        });
+
+        logDevPerfDuration('rainproofData.createUpcomingPaymentTransaction.accepted', startedAt, {
+          ...getNewTransactionInputPerfMetadata(input.transactionInput),
+          refresh: 'optimistic',
+        });
+        logDevPerfDuration('rainproofData.createUpcomingPaymentTransaction.perceived', startedAt, { refresh: 'accepted' });
+        logDevPerfDuration('rainproofData.createUpcomingPaymentTransaction.total', startedAt);
+        return Promise.resolve();
+      } catch (caught) {
+        const message = caught instanceof Error ? caught.message : 'Could not create upcoming payment transaction.';
+        setError(message);
+        return Promise.reject(new Error(message));
+      }
+    },
+    [applySnapshotPatch, refresh],
+  );
+
   const derived = useMemo<RainproofDerivedData>(() => {
     if (!snapshot) {
       return emptyDerived;
@@ -968,12 +1097,8 @@ export function useRainproofData(): RainproofDataState {
       addRecurringItem: (input) => runMutation((repository) => repository.addRecurringItem(input)),
       updateRecurringItem: (input) =>
         runMutation((repository) => repository.updateRecurringItem(input), { rethrow: true }),
-      createRecurringTransaction: (input) =>
-        runMutation((repository) => repository.createRecurringTransaction(input), { rethrow: true }),
-      undoLatestRecurringTransaction: (recurringItemId) =>
-        runMutation(async (repository) => {
-          await repository.undoLatestRecurringTransaction(recurringItemId);
-        }, { rethrow: true }),
+      updateUpcomingPaymentDueDate: updateUpcomingPaymentDueDateOptimistically,
+      createUpcomingPaymentTransaction: createUpcomingPaymentTransactionOptimistically,
       archiveRecurringItem: (recurringItemId) =>
         runMutation((repository) => repository.archiveRecurringItem(recurringItemId)),
       deleteRecurringItem: (recurringItemId) =>
@@ -1055,6 +1180,7 @@ export function useRainproofData(): RainproofDataState {
     [
       addTransactionLinkOptimistically,
       addTransactionOptimistically,
+      createUpcomingPaymentTransactionOptimistically,
       deleteTransactionLinkOptimistically,
       deleteTransactionOptimistically,
       refresh,
@@ -1062,6 +1188,7 @@ export function useRainproofData(): RainproofDataState {
       saveTransactionLinkBatchOptimistically,
       updateAccountOrderOptimistically,
       updateBudgetOrderOptimistically,
+      updateUpcomingPaymentDueDateOptimistically,
       updateTransactionLinkOptimistically,
       updateTransactionOptimistically,
     ],
@@ -1339,6 +1466,153 @@ function applyAcceptedOptimisticAddTransaction({
           transactionId: records.transaction.id,
         }),
       ),
+      setError,
+    });
+  });
+}
+
+function applyAcceptedOptimisticUpcomingPaymentDueDate({
+  applySnapshotPatch,
+  input,
+  refresh,
+  repository,
+  rollback,
+  setError,
+  transactionWriteQueueRef,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  input: UpdateRecurringItemInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticRecurringItemStateRollback;
+  setError: (message: string) => void;
+  transactionWriteQueueRef: BackgroundWriteQueueRef;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
+    patchSnapshotAfterRecurringItemStateChangeWithRollback(currentSnapshot, input, rollback),
+  );
+
+  if (!optimisticSnapshot) {
+    void persistRecurringItemUpdateWithFullRefresh({ input, refresh, repository }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not move the upcoming payment due date.');
+    });
+    return;
+  }
+
+  const optimisticItem = optimisticSnapshot.recurringItems.find((item) => item.id === input.id);
+  if (!optimisticItem) {
+    void refresh().catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not refresh upcoming payments.');
+    });
+    return;
+  }
+
+  logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.optimisticPatch', optimisticPatchStartedAt, {
+    recurring: optimisticSnapshot.recurringItems.length,
+    refresh: 'patched',
+  });
+  setError('');
+
+  enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
+    await persistOptimisticUpcomingPaymentDueDate({
+      input,
+      optimisticItem,
+      refresh,
+      repository,
+      rollback,
+      rollbackPatch: (itemRollback, item) => applySnapshotPatch((currentSnapshot) =>
+        rollbackSnapshotAfterOptimisticRecurringItemStateChange(currentSnapshot, itemRollback, item),
+      ),
+      setError,
+    });
+  });
+}
+
+function applyAcceptedOptimisticUpcomingPaymentTransaction({
+  applySnapshotPatch,
+  input,
+  optimisticRecords,
+  previousAddTransactionDefaults,
+  refresh,
+  repository,
+  rollback,
+  setError,
+  transactionWriteQueueRef,
+}: {
+  applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
+  input: CreateUpcomingPaymentTransactionInput;
+  optimisticRecords: AddTransactionPersistenceRecords;
+  previousAddTransactionDefaults?: AddTransactionDefaults;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticRecurringItemStateRollback;
+  setError: (message: string) => void;
+  transactionWriteQueueRef: BackgroundWriteQueueRef;
+}): void {
+  const optimisticPatchStartedAt = Date.now();
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) => {
+    const withTransaction = patchSnapshotAfterAddTransaction(currentSnapshot, {
+      addTransactionDefaults: input.addTransactionDefaults,
+      input: input.transactionInput,
+      lines: optimisticRecords.lines,
+      transaction: optimisticRecords.transaction,
+    });
+    if (!withTransaction) {
+      return null;
+    }
+
+    return patchSnapshotAfterRecurringItemStateChangeWithRollback(withTransaction, input.recurringItemInput, rollback);
+  });
+
+  if (!optimisticSnapshot) {
+    void persistUpcomingPaymentTransactionWithFullRefresh({
+      input,
+      optimisticRecords,
+      refresh,
+      repository,
+    }).catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not create upcoming payment transaction.');
+    });
+    return;
+  }
+
+  const optimisticItem = optimisticSnapshot.recurringItems.find((item) => item.id === input.recurringItemId);
+  if (!optimisticItem) {
+    void refresh().catch((caught) => {
+      setError(caught instanceof Error ? caught.message : 'Could not refresh upcoming payments.');
+    });
+    return;
+  }
+
+  logDevPerfDuration(
+    'rainproofData.createUpcomingPaymentTransaction.optimisticPatch',
+    optimisticPatchStartedAt,
+    () => getSnapshotPerfCounts(optimisticSnapshot),
+  );
+  setError('');
+
+  enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
+    await persistOptimisticUpcomingPaymentTransaction({
+      input,
+      optimisticItem,
+      optimisticRecords,
+      refresh,
+      repository,
+      rollback,
+      rollbackPatch: (itemRollback, item, records) => applySnapshotPatch((currentSnapshot) => {
+        const withoutTransaction = rollbackSnapshotAfterOptimisticAddTransaction(currentSnapshot, {
+          lineIds: records.lines.map((line) => line.id),
+          optimisticAddTransactionDefaults: input.addTransactionDefaults,
+          previousAddTransactionDefaults,
+          transactionId: records.transaction.id,
+        });
+        if (!withoutTransaction) {
+          return null;
+        }
+
+        return rollbackSnapshotAfterOptimisticRecurringItemStateChange(withoutTransaction, itemRollback, item);
+      }),
       setError,
     });
   });
@@ -2396,6 +2670,170 @@ async function persistOptimisticAddTransaction({
     }
     setError(message);
   }
+}
+
+async function persistOptimisticUpcomingPaymentDueDate({
+  input,
+  optimisticItem,
+  refresh,
+  repository,
+  rollback,
+  rollbackPatch,
+  setError,
+}: {
+  input: UpdateRecurringItemInput;
+  optimisticItem: OptimisticRecurringItemStateRollback['item'];
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticRecurringItemStateRollback;
+  rollbackPatch: (
+    rollback: OptimisticRecurringItemStateRollback,
+    optimisticItem: OptimisticRecurringItemStateRollback['item'],
+  ) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    await timeDevPerfAsync(
+      'rainproofData.updateUpcomingPaymentDueDate.backgroundWrite',
+      () => repository.updateRecurringItem(input),
+      { recurringItemId: input.id },
+    );
+    logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.reconcile', Date.now(), { refresh: 'none' });
+    setError('');
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not move the upcoming payment due date.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(rollback, optimisticItem);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.rollback', rollbackStartedAt, { refresh: 'patched' });
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.updateUpcomingPaymentDueDate.rollback', rollbackStartedAt, { refresh: 'full' });
+    }
+    setError(message);
+  }
+}
+
+async function persistOptimisticUpcomingPaymentTransaction({
+  input,
+  optimisticItem,
+  optimisticRecords,
+  refresh,
+  repository,
+  rollback,
+  rollbackPatch,
+  setError,
+}: {
+  input: CreateUpcomingPaymentTransactionInput;
+  optimisticItem: OptimisticRecurringItemStateRollback['item'];
+  optimisticRecords: AddTransactionPersistenceRecords;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  rollback: OptimisticRecurringItemStateRollback;
+  rollbackPatch: (
+    rollback: OptimisticRecurringItemStateRollback,
+    optimisticItem: OptimisticRecurringItemStateRollback['item'],
+    records: AddTransactionPersistenceRecords,
+  ) => AppSnapshot | null;
+  setError: (message: string) => void;
+}): Promise<void> {
+  try {
+    await timeDevPerfAsync(
+      'rainproofData.createUpcomingPaymentTransaction.backgroundWrite',
+      () => repository.createUpcomingPaymentTransaction(input, optimisticRecords),
+      getNewTransactionInputPerfMetadata(input.transactionInput),
+    );
+    logDevPerfDuration('rainproofData.createUpcomingPaymentTransaction.reconcile', Date.now(), { refresh: 'none' });
+    setError('');
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : 'Could not create upcoming payment transaction.';
+    const rollbackStartedAt = Date.now();
+    const rolledBackSnapshot = rollbackPatch(rollback, optimisticItem, optimisticRecords);
+    if (rolledBackSnapshot) {
+      logDevPerfDuration('rainproofData.createUpcomingPaymentTransaction.rollback', rollbackStartedAt, {
+        refresh: 'patched',
+      });
+    } else {
+      await refresh();
+      logDevPerfDuration('rainproofData.createUpcomingPaymentTransaction.rollback', rollbackStartedAt, {
+        refresh: 'full',
+      });
+    }
+    setError(message);
+  }
+}
+
+async function persistRecurringItemUpdateWithSaving({
+  input,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  input: UpdateRecurringItemInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistRecurringItemUpdateWithFullRefresh({ input, refresh, repository });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistRecurringItemUpdateWithFullRefresh({
+  input,
+  refresh,
+  repository,
+}: {
+  input: UpdateRecurringItemInput;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await repository.updateRecurringItem(input);
+  await refresh();
+}
+
+async function persistUpcomingPaymentTransactionWithSaving({
+  input,
+  optimisticRecords,
+  refresh,
+  repository,
+  setSaving,
+}: {
+  input: CreateUpcomingPaymentTransactionInput;
+  optimisticRecords?: AddTransactionPersistenceRecords;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+  setSaving: (saving: boolean) => void;
+}): Promise<void> {
+  try {
+    setSaving(true);
+    await persistUpcomingPaymentTransactionWithFullRefresh({
+      input,
+      optimisticRecords,
+      refresh,
+      repository,
+    });
+  } finally {
+    setSaving(false);
+  }
+}
+
+async function persistUpcomingPaymentTransactionWithFullRefresh({
+  input,
+  optimisticRecords,
+  refresh,
+  repository,
+}: {
+  input: CreateUpcomingPaymentTransactionInput;
+  optimisticRecords?: AddTransactionPersistenceRecords;
+  refresh: () => Promise<void>;
+  repository: FinanceRepository;
+}): Promise<void> {
+  await repository.createUpcomingPaymentTransaction(input, optimisticRecords);
+  await refresh();
 }
 
 async function persistAddTransactionRecords({

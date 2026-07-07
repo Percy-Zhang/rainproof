@@ -70,11 +70,14 @@ export function getTransactionItemNameSuggestionValues({
   }
 
   for (const item of recurringItems) {
-    if (!item.isActive || item.id === excludeRecurringItemId) {
+    if (!item.isActive || item.completedAt || item.id === excludeRecurringItemId) {
       continue;
     }
 
     addSuggestion(scores, item.name, getSortableTime(item.updatedAt || item.createdAt));
+    for (const line of item.splitLines) {
+      addSuggestion(scores, line.note, getSortableTime(item.updatedAt || item.createdAt));
+    }
   }
 
   return Array.from(scores.values())

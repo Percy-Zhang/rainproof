@@ -133,7 +133,7 @@ export type Budget = {
 
 export type RecurringItemKind = Extract<TransactionKind, 'expense' | 'income'>;
 
-export type RecurringFrequency = 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
+export type RecurringFrequency = 'one_time' | 'weekly' | 'fortnightly' | 'monthly' | 'yearly';
 
 export type RecurringItem = {
   id: string;
@@ -147,12 +147,25 @@ export type RecurringItem = {
   note: string;
   frequency: RecurringFrequency;
   nextDueDate: string;
+  completedAt: string | null;
+  splitLines: RecurringItemSplitLine[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
 };
 
 export type RecurringBill = RecurringItem;
+
+export type RecurringItemSplitLine = {
+  id: string;
+  recurringItemId: string;
+  amountMinor: number;
+  categoryId: string;
+  subcategoryId: string;
+  note: string;
+  sortOrder: number;
+  createdAt: string;
+};
 
 export type RecurringTransactionHistory = {
   id: string;
@@ -406,6 +419,8 @@ export type NewRecurringItemInput = {
   note?: string;
   frequency: RecurringFrequency;
   nextDueDate: string;
+  completedAt?: string | null;
+  splitLines?: NewRecurringItemSplitLineInput[];
   isActive?: boolean;
 };
 
@@ -413,11 +428,26 @@ export type UpdateRecurringItemInput = NewRecurringItemInput & {
   id: string;
 };
 
+export type NewRecurringItemSplitLineInput = {
+  amountMinor: number;
+  categoryId: string;
+  subcategoryId: string;
+  note?: string;
+};
+
 export type CreateRecurringTransactionInput = {
   recurringItemId: string;
   previousNextDueDate: string;
   transactionInput: NewTransactionInput;
   recurringItemInput: UpdateRecurringItemInput;
+};
+
+export type CreateUpcomingPaymentTransactionInput = {
+  recurringItemId: string;
+  previousNextDueDate: string;
+  transactionInput: NewTransactionInput;
+  recurringItemInput: UpdateRecurringItemInput;
+  addTransactionDefaults?: AddTransactionDefaults;
 };
 
 export type NewRecurringBillInput = NewRecurringItemInput;

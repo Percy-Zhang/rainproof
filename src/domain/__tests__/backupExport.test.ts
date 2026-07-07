@@ -150,6 +150,8 @@ function createSnapshot(): AppSnapshot {
         note: '',
         frequency: 'monthly',
         nextDueDate: '2026-07-01',
+        completedAt: null,
+        splitLines: [],
         isActive: true,
         createdAt,
         updatedAt: createdAt,

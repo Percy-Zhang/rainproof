@@ -1,6 +1,6 @@
 # Rainproof
 
-Rainproof is a local-first personal finance app built with Expo and React Native. It helps track accounts, transactions, budgets, recurring payments, templates, statistics, and encrypted local backups.
+Rainproof is a local-first personal finance app built with Expo and React Native. It helps track accounts, transactions, budgets, upcoming payments, templates, statistics, and encrypted local backups.
 
 ## Features
 
@@ -10,7 +10,7 @@ Rainproof is a local-first personal finance app built with Expo and React Native
 - **Budgets:** create category-scoped budgets, navigate budget periods, view Current and Compare history charts, and reorder budgets.
 - **Statistics:** review spending, income, cash-flow, category breakdowns, trends, and account-filtered reports.
 - **Dashboard:** customize visible cards, reorder Dashboard cards, filter by selected accounts, and use quick actions.
-- **Templates and recurring payments:** save reusable transaction templates, prefill Add Transaction from a template, manage recurring items, generate real transactions, and undo generated recurring history.
+- **Templates and upcoming payments:** save reusable transaction templates, prefill Add Transaction from templates or planned payments, and manage one-time or recurring Upcoming Payments.
 - **Linked transactions:** link reimbursements, refunds, and shared expense contributions, including parent and split-line endpoints where supported.
 - **Backup and restore:** export and restore encrypted local Rainproof backups.
 - **Multi-currency handling:** keep currencies separated in balances, statistics, budgets, splits, transfers, and displays.
@@ -64,7 +64,7 @@ npm run perf:large-data -- --sizes=1000
 - `src/application`: app-level data loading, mutation actions, optimistic updates, and backup key storage.
 - `src/components`: shared UI components and primitives.
 - `src/domain`: financial rules, derived data, validation, display models, and pure helpers.
-- `src/features`: screen-level features for accounts, transactions, budgets, dashboard, statistics, templates, recurring items, settings, imports, and rainy day funds.
+- `src/features`: screen-level features for accounts, transactions, budgets, dashboard, statistics, templates, upcoming payments, settings, imports, and rainy day funds.
 - `src/navigation`: route and drawer wiring.
 - `src/performance`: opt-in performance helpers and large-data harness tests.
 - `src/storage`: SQLite repository, migrations, snapshot loading, backup restore, and storage tests.

@@ -1,5 +1,6 @@
 import type { RainproofBackupData } from '../domain/backupExport';
 import type { RepositoryDatabase } from './database';
+import { ensureRecurringItemsUpcomingPaymentCompatibility } from './migrations';
 import { ADD_TRANSACTION_DEFAULTS_SETTING_KEY, DEFAULT_CURRENCY_MODE_SETTING_KEY } from './settingsStorage';
 
 const RESTORED_SETTING_KEYS = [
@@ -21,6 +22,7 @@ const RESTORED_TABLES_IN_DELETE_ORDER = [
   'transaction_lines',
   'transactions',
   'budgets',
+  'recurring_item_split_lines',
   'recurring_items',
   'transaction_templates',
   'rainy_day_funds',
@@ -31,6 +33,7 @@ export async function restoreRainproofBackupStorage(
   db: RepositoryDatabase,
   data: RainproofBackupData,
 ): Promise<void> {
+  await ensureRecurringItemsUpcomingPaymentCompatibility(db);
   await db.withTransactionAsync(async () => {
     await clearRestoredData(db);
     await restoreSettings(db, data);
@@ -195,8 +198,8 @@ async function restoreRecurringItems(db: RepositoryDatabase, data: RainproofBack
     await db.runAsync(
       `INSERT INTO recurring_items (
         id, name, kind, amount_minor, currency_code, account_id, category_id,
-        subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        subcategory_id, note, frequency, next_due_date, completed_at, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       item.id,
       item.name,
       item.kind,
@@ -208,10 +211,28 @@ async function restoreRecurringItems(db: RepositoryDatabase, data: RainproofBack
       item.note,
       item.frequency,
       item.nextDueDate,
+      item.completedAt ?? null,
       item.isActive ? 1 : 0,
       item.createdAt,
       item.updatedAt,
     );
+
+    for (const line of item.splitLines ?? []) {
+      await db.runAsync(
+        `INSERT INTO recurring_item_split_lines (
+          id, recurring_item_id, amount_minor, category_id, subcategory_id,
+          note, sort_order, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        line.id,
+        item.id,
+        line.amountMinor,
+        line.categoryId,
+        line.subcategoryId,
+        line.note,
+        line.sortOrder,
+        line.createdAt,
+      );
+    }
   }
 
   for (const history of data.recurringTransactionHistory) {

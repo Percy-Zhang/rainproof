@@ -102,12 +102,13 @@ CREATE TABLE IF NOT EXISTS recurring_items (
   note TEXT NOT NULL DEFAULT '',
   frequency TEXT NOT NULL DEFAULT 'monthly',
   next_due_date TEXT NOT NULL,
+  completed_at TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   CHECK (kind IN ('expense', 'income')),
   CHECK (amount_minor > 0),
-  CHECK (frequency IN ('weekly', 'fortnightly', 'monthly', 'yearly')),
+  CHECK (frequency IN ('one_time', 'weekly', 'fortnightly', 'monthly', 'yearly')),
   CHECK (next_due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 );
 
@@ -312,6 +313,18 @@ const migrations: Migration[] = [
       await rebuildBudgetsForSupportedPeriods(db);
     },
   },
+  {
+    version: 18,
+    migrate: async (db) => {
+      await ensureRecurringItemsUpcomingPaymentCompatibility(db);
+    },
+  },
+  {
+    version: 19,
+    migrate: async (db) => {
+      await ensureRecurringItemSplitLinesSchema(db);
+    },
+  },
 ];
 
 export async function runMigrations(db: MigrationDatabase): Promise<void> {
@@ -371,6 +384,24 @@ type LegacyRecurringBillRow = {
   account_id: string;
   category_id: string;
   due_day: number;
+  is_active: number;
+  created_at: string;
+  updated_at: string;
+};
+
+type RecurringItemMigrationRow = {
+  id: string;
+  name: string;
+  kind: string;
+  amount_minor: number;
+  currency_code: string;
+  account_id: string;
+  category_id: string;
+  subcategory_id: string | null;
+  note: string;
+  frequency: string;
+  next_due_date: string;
+  completed_at: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -776,6 +807,7 @@ function formatBudgetMigrationLabel(value: string): string {
 
 async function ensureRecurringItemsSchema(db: MigrationDatabase): Promise<void> {
   await db.execAsync(RECURRING_ITEMS_SCHEMA_SQL);
+  await ensureRecurringItemsUpcomingPaymentCompatibility(db);
 
   const hasLegacyRecurringBills = await tableExists(db, 'recurring_bills');
   if (!hasLegacyRecurringBills) {
@@ -797,8 +829,8 @@ async function ensureRecurringItemsSchema(db: MigrationDatabase): Promise<void> 
     await db.runAsync(
       `INSERT OR IGNORE INTO recurring_items (
         id, name, kind, amount_minor, currency_code, account_id, category_id,
-        subcategory_id, note, frequency, next_due_date, is_active, created_at, updated_at
-      ) VALUES (?, ?, 'expense', ?, ?, ?, ?, NULL, '', 'monthly', ?, ?, ?, ?)`,
+        subcategory_id, note, frequency, next_due_date, completed_at, is_active, created_at, updated_at
+      ) VALUES (?, ?, 'expense', ?, ?, ?, ?, NULL, '', 'monthly', ?, NULL, ?, ?, ?)`,
       row.id,
       row.name?.trim() || 'Recurring item',
       amountMinor,
@@ -811,6 +843,156 @@ async function ensureRecurringItemsSchema(db: MigrationDatabase): Promise<void> 
       row.updated_at,
     );
   }
+}
+
+export async function ensureRecurringItemsUpcomingPaymentCompatibility(
+  db: MigrationDatabase,
+): Promise<void> {
+  const hasRecurringItems = await tableExists(db, 'recurring_items');
+  if (!hasRecurringItems) {
+    return;
+  }
+
+  await ensureRecurringItemsCompletedAtColumn(db);
+  await ensureRecurringItemsFrequencySupportsOneTime(db);
+  await ensureRecurringItemSplitLinesSchema(db);
+}
+
+async function ensureRecurringItemSplitLinesSchema(db: MigrationDatabase): Promise<void> {
+  await db.execAsync(`
+CREATE TABLE IF NOT EXISTS recurring_item_split_lines (
+  id TEXT PRIMARY KEY NOT NULL,
+  recurring_item_id TEXT NOT NULL REFERENCES recurring_items(id) ON DELETE CASCADE,
+  amount_minor INTEGER NOT NULL,
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  CHECK (amount_minor > 0),
+  CHECK (category_id <> ''),
+  CHECK (subcategory_id <> '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_recurring_item_split_lines_item_sort
+ON recurring_item_split_lines(recurring_item_id, sort_order, created_at, id);
+`);
+}
+
+async function ensureRecurringItemsCompletedAtColumn(db: MigrationDatabase): Promise<void> {
+  const columns = await db.getAllAsync<TableColumnRow>('PRAGMA table_info(recurring_items)');
+  const columnNames = new Set(columns.map((column) => column.name));
+  if (columnNames.has('completed_at')) {
+    return;
+  }
+
+  await db.runAsync('ALTER TABLE recurring_items ADD COLUMN completed_at TEXT');
+}
+
+async function ensureRecurringItemsFrequencySupportsOneTime(db: MigrationDatabase): Promise<void> {
+  const row = await db.getFirstAsync<{ sql: string | null }>(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+    'recurring_items',
+  );
+  const createTableSql = row?.sql ?? '';
+  if (!createTableSql || createTableSql.includes("'one_time'")) {
+    return;
+  }
+
+  await rebuildRecurringItemsForUpcomingPayments(db);
+}
+
+async function rebuildRecurringItemsForUpcomingPayments(db: MigrationDatabase): Promise<void> {
+  const columns = await db.getAllAsync<TableColumnRow>('PRAGMA table_info(recurring_items)');
+  const columnNames = new Set(columns.map((column) => column.name));
+  const completedAtSelect = columnNames.has('completed_at') ? 'completed_at' : 'NULL AS completed_at';
+  const rows = await db.getAllAsync<RecurringItemMigrationRow>(
+    `SELECT id, name, kind, amount_minor, currency_code, account_id, category_id,
+            subcategory_id, note, frequency, next_due_date, ${completedAtSelect},
+            is_active, created_at, updated_at
+     FROM recurring_items
+     ORDER BY next_due_date ASC, name ASC, id ASC`,
+  );
+
+  await db.execAsync(`
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS recurring_items_upcoming_next;
+${getRecurringItemsRebuildTableSql('recurring_items_upcoming_next')}
+`);
+
+  for (const row of rows) {
+    const amountMinor = Number(row.amount_minor);
+    if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+      continue;
+    }
+
+    await db.runAsync(
+      `INSERT INTO recurring_items_upcoming_next (
+        id, name, kind, amount_minor, currency_code, account_id, category_id,
+        subcategory_id, note, frequency, next_due_date, completed_at, is_active, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      row.id,
+      row.name?.trim() || 'Upcoming payment',
+      row.kind === 'income' ? 'income' : 'expense',
+      amountMinor,
+      row.currency_code,
+      row.account_id ?? '',
+      row.category_id ?? '',
+      row.subcategory_id ?? null,
+      row.note ?? '',
+      isSupportedUpcomingPaymentFrequency(row.frequency) ? row.frequency : 'monthly',
+      row.next_due_date,
+      row.completed_at || null,
+      row.is_active === 1 ? 1 : 0,
+      row.created_at,
+      row.updated_at,
+    );
+  }
+
+  await db.execAsync(`
+DROP TABLE recurring_items;
+ALTER TABLE recurring_items_upcoming_next RENAME TO recurring_items;
+PRAGMA foreign_keys = ON;
+${getRecurringItemsIndexesSql()}
+`);
+}
+
+function getRecurringItemsRebuildTableSql(tableName: string): string {
+  return `
+CREATE TABLE IF NOT EXISTS ${tableName} (
+  id TEXT PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  amount_minor INTEGER NOT NULL,
+  currency_code TEXT NOT NULL,
+  account_id TEXT NOT NULL DEFAULT '',
+  category_id TEXT NOT NULL DEFAULT '',
+  subcategory_id TEXT,
+  note TEXT NOT NULL DEFAULT '',
+  frequency TEXT NOT NULL DEFAULT 'monthly',
+  next_due_date TEXT NOT NULL,
+  completed_at TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  CHECK (kind IN ('expense', 'income')),
+  CHECK (amount_minor > 0),
+  CHECK (frequency IN ('one_time', 'weekly', 'fortnightly', 'monthly', 'yearly')),
+  CHECK (next_due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
+);
+`;
+}
+
+function getRecurringItemsIndexesSql(): string {
+  return `
+CREATE INDEX IF NOT EXISTS idx_recurring_items_active_due
+ON recurring_items(is_active, next_due_date);
+`;
+}
+
+function isSupportedUpcomingPaymentFrequency(value: string): value is RecurringItemMigrationRow['frequency'] {
+  return ['one_time', 'weekly', 'fortnightly', 'monthly', 'yearly'].includes(value);
 }
 
 async function ensureTransactionTemplatesSchema(db: MigrationDatabase): Promise<void> {

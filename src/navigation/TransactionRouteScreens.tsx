@@ -1,5 +1,10 @@
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
+import {
+  buildAddTransactionPrefillFromRecurringItem,
+  buildUpcomingPaymentPostSaveInput,
+} from '../domain/recurringItems';
 import { buildAddTransactionPrefillFromTemplate } from '../domain/transactionTemplates';
+import type { AddTransactionDefaults, NewTransactionInput } from '../domain/types';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
 import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
@@ -22,22 +27,59 @@ export function AddTransactionRouteScreen() {
     return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
   }
 
+  const currentSnapshot = snapshot;
   const templateId = route.params?.templateId;
-  const template = templateId ? findRouteItemById(snapshot.transactionTemplates, templateId) : undefined;
+  const upcomingPaymentId = route.params?.upcomingPaymentId;
+  if (templateId && upcomingPaymentId) {
+    return <RouteMessageShell message="Choose either a template or an upcoming payment." />;
+  }
+
+  const template = templateId ? findRouteItemById(currentSnapshot.transactionTemplates, templateId) : undefined;
   if (templateId && !template) {
     return <RouteMessageShell message="Transaction template not found." />;
+  }
+  const upcomingPayment = upcomingPaymentId ? findRouteItemById(currentSnapshot.recurringItems, upcomingPaymentId) : undefined;
+  if (upcomingPaymentId && !upcomingPayment) {
+    return <RouteMessageShell message="Upcoming payment not found." />;
+  }
+  if (upcomingPayment && !upcomingPayment.isActive) {
+    return <RouteMessageShell message="Upcoming payment is archived." />;
+  }
+  if (upcomingPayment?.completedAt) {
+    return <RouteMessageShell message="Upcoming payment is already completed." />;
   }
 
   let initialTemplate;
   try {
     initialTemplate = template
       ? buildAddTransactionPrefillFromTemplate({
-          accounts: snapshot.accounts,
+          accounts: currentSnapshot.accounts,
           template,
         })
+      : upcomingPayment
+        ? buildAddTransactionPrefillFromRecurringItem({
+            accounts: currentSnapshot.accounts,
+            categories: currentSnapshot.categories,
+            item: upcomingPayment,
+          })
       : undefined;
   } catch (caught) {
-    return <RouteMessageShell message={caught instanceof Error ? caught.message : 'Transaction template needs attention.'} />;
+    return <RouteMessageShell message={caught instanceof Error ? caught.message : 'Transaction prefill needs attention.'} />;
+  }
+
+  async function handleAddTransaction(input: NewTransactionInput, defaults: AddTransactionDefaults) {
+    if (!upcomingPayment) {
+      await actions.addTransaction(input, defaults);
+      return;
+    }
+
+    await actions.createUpcomingPaymentTransaction({
+      recurringItemId: upcomingPayment.id,
+      previousNextDueDate: upcomingPayment.nextDueDate,
+      transactionInput: input,
+      recurringItemInput: buildUpcomingPaymentPostSaveInput(upcomingPayment, currentSnapshot.accounts),
+      addTransactionDefaults: defaults,
+    });
   }
 
   return (
@@ -45,8 +87,8 @@ export function AddTransactionRouteScreen() {
       <AddTransactionScreen
         dashboardAccountIds={route.params?.dashboardAccountIds}
         initialTemplate={initialTemplate}
-        snapshot={snapshot}
-        onAddTransaction={actions.addTransaction}
+        snapshot={currentSnapshot}
+        onAddTransaction={handleAddTransaction}
         onOpenCategorySelect={openCategorySelect}
         onDone={() => navigation.goBack()}
       />

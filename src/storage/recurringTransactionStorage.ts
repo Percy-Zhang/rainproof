@@ -1,9 +1,14 @@
-import type { CreateRecurringTransactionInput } from '../domain/types';
+import type {
+  CreateRecurringTransactionInput,
+  CreateUpcomingPaymentTransactionInput,
+} from '../domain/types';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
 import type { RecurringItemRow, RecurringTransactionHistoryRow } from './mappers';
 import { updateRecurringItemStorage } from './planningStorage';
+import { updateAddTransactionDefaultsStorage } from './settingsStorage';
 import {
+  type AddTransactionStorageResult,
   deleteTransactionRecordsStorage,
   insertTransactionRecordsStorage,
 } from './transactionStorage';
@@ -45,7 +50,7 @@ export async function createRecurringTransactionStorage(
       transactionId,
       createdAt: now,
     });
-    await updateRecurringItemStorage(db, input.recurringItemInput);
+    await updateRecurringItemStorage(db, input.recurringItemInput, { withinTransaction: true });
     await db.runAsync(
       `INSERT INTO recurring_transaction_history (
         id, recurring_item_id, transaction_id, previous_next_due_date,
@@ -106,4 +111,41 @@ export async function undoLatestRecurringTransactionStorage(
   });
 
   return undone;
+}
+
+export async function createUpcomingPaymentTransactionStorage(
+  db: RepositoryDatabase,
+  input: CreateUpcomingPaymentTransactionInput,
+  records?: AddTransactionStorageResult,
+): Promise<void> {
+  if (input.recurringItemInput.id !== input.recurringItemId) {
+    throw new Error('Upcoming payment item does not match the upcoming payment update.');
+  }
+
+  await db.withTransactionAsync(async () => {
+    const recurringItem = await db.getFirstAsync<RecurringItemRow>(
+      'SELECT * FROM recurring_items WHERE id = ?',
+      input.recurringItemId,
+    );
+    if (!recurringItem) {
+      throw new Error('Upcoming payment not found.');
+    }
+    if (!recurringItem.is_active) {
+      throw new Error('Upcoming payment is archived.');
+    }
+    if (recurringItem.completed_at) {
+      throw new Error('Upcoming payment is already completed.');
+    }
+    if (recurringItem.next_due_date !== input.previousNextDueDate) {
+      throw new Error('Upcoming payment due date changed. Review it before creating a transaction.');
+    }
+
+    await insertTransactionRecordsStorage(db, input.transactionInput, { records });
+    await updateRecurringItemStorage(db, input.recurringItemInput, { withinTransaction: true });
+    if (input.addTransactionDefaults) {
+      await updateAddTransactionDefaultsStorage(db, {
+        addTransactionDefaults: input.addTransactionDefaults,
+      });
+    }
+  });
 }

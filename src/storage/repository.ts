@@ -5,6 +5,7 @@ import type {
   NewBudgetInput,
   Budget,
   CreateRecurringTransactionInput,
+  CreateUpcomingPaymentTransactionInput,
   NewRecurringItemInput,
   NewTransactionTemplateInput,
   RecurringItem,
@@ -40,7 +41,7 @@ import {
 } from './accountStorage';
 import type { RepositoryDatabase } from './database';
 import type { CountRow } from './mappers';
-import { runMigrations } from './migrations';
+import { ensureRecurringItemsUpcomingPaymentCompatibility, runMigrations } from './migrations';
 import {
   addBudgetStorage,
   addRecurringItemStorage,
@@ -55,6 +56,7 @@ import {
 } from './planningStorage';
 import { ensureRainyDayFund, updateRainyDayFundStorage } from './rainyDayStorage';
 import {
+  createUpcomingPaymentTransactionStorage,
   createRecurringTransactionStorage,
   undoLatestRecurringTransactionStorage,
 } from './recurringTransactionStorage';
@@ -155,6 +157,10 @@ export type FinanceRepository = {
   listRecurringItems(): Promise<RecurringItem[]>;
   addRecurringItem(input: NewRecurringItemInput): Promise<void>;
   updateRecurringItem(input: UpdateRecurringItemInput): Promise<void>;
+  createUpcomingPaymentTransaction(
+    input: CreateUpcomingPaymentTransactionInput,
+    records?: AddTransactionStorageResult,
+  ): Promise<void>;
   createRecurringTransaction(input: CreateRecurringTransactionInput): Promise<void>;
   undoLatestRecurringTransaction(recurringItemId: string): Promise<boolean>;
   archiveRecurringItem(recurringItemId: string): Promise<void>;
@@ -188,12 +194,15 @@ export function createSQLiteFinanceRepositoryForDatabase(db: RepositoryDatabase)
 }
 
 class SQLiteFinanceRepository implements FinanceRepository {
+  private recurringItemsSchemaReady = false;
+
   constructor(private readonly db: RepositoryDatabase) {}
 
   async initialize(defaultCurrencyCode: string): Promise<void> {
     const currencyCode = normalizeCurrencyCode(defaultCurrencyCode);
 
     await runMigrations(this.db);
+    await this.ensureRecurringItemsSchemaReady();
     await initializeRequiredSettings(this.db, currencyCode);
 
     const seedDemoData = shouldSeedDemoData();
@@ -210,10 +219,12 @@ class SQLiteFinanceRepository implements FinanceRepository {
   }
 
   async getSnapshot(): Promise<AppSnapshot> {
+    await this.ensureRecurringItemsSchemaReady();
     return getSnapshotStorage(this.db);
   }
 
   async restoreBackup(backup: RainproofBackup): Promise<void> {
+    await this.ensureRecurringItemsSchemaReady();
     return restoreRainproofBackupStorage(this.db, backup.data);
   }
 
@@ -349,15 +360,26 @@ class SQLiteFinanceRepository implements FinanceRepository {
   }
 
   async listRecurringItems(): Promise<RecurringItem[]> {
+    await this.ensureRecurringItemsSchemaReady();
     return listRecurringItemsStorage(this.db);
   }
 
   async addRecurringItem(input: NewRecurringItemInput): Promise<void> {
+    await this.ensureRecurringItemsSchemaReady();
     return addRecurringItemStorage(this.db, input);
   }
 
   async updateRecurringItem(input: UpdateRecurringItemInput): Promise<void> {
+    await this.ensureRecurringItemsSchemaReady();
     return updateRecurringItemStorage(this.db, input);
+  }
+
+  async createUpcomingPaymentTransaction(
+    input: CreateUpcomingPaymentTransactionInput,
+    records?: AddTransactionStorageResult,
+  ): Promise<void> {
+    await this.ensureRecurringItemsSchemaReady();
+    return createUpcomingPaymentTransactionStorage(this.db, input, records);
   }
 
   async createRecurringTransaction(input: CreateRecurringTransactionInput): Promise<void> {
@@ -438,5 +460,14 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async deleteAccount(accountId: string): Promise<void> {
     return deleteAccountStorage(this.db, accountId);
+  }
+
+  private async ensureRecurringItemsSchemaReady(): Promise<void> {
+    if (this.recurringItemsSchemaReady) {
+      return;
+    }
+
+    await ensureRecurringItemsUpcomingPaymentCompatibility(this.db);
+    this.recurringItemsSchemaReady = true;
   }
 }

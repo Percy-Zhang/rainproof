@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
@@ -9,15 +9,17 @@ import { defaultCategories, getCategory, getSubcategoryColor, getSubcategoryIcon
 import { formatLongDateLabel } from '../../domain/dates';
 import { formatMoney } from '../../domain/money';
 import {
+  buildRecurringDueDateShiftInput,
+  calculateNextRecurringDueDate,
+  calculatePreviousRecurringDueDate,
   classifyRecurringItemsByDueDate,
-  getLatestRecurringTransactionHistoryByItem,
 } from '../../domain/recurringItems';
 import type {
   Account,
   AppSnapshot,
   CategoryDefinition,
   RecurringFrequency,
-  RecurringTransactionHistory,
+  UpdateRecurringItemInput,
   UpcomingRecurringItem,
 } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
@@ -27,7 +29,7 @@ type RecurringItemsScreenProps = {
   onAddRecurringItem: () => void;
   onEditRecurringItem: (recurringItemId: string) => void;
   onCreateTransaction: (recurringItemId: string) => void;
-  onUndoRecurringTransaction: (recurringItemId: string) => Promise<void>;
+  onUpdateRecurringItem: (input: UpdateRecurringItemInput) => Promise<void>;
 };
 
 type Section = {
@@ -41,10 +43,12 @@ export function RecurringItemsScreen({
   onAddRecurringItem,
   onCreateTransaction,
   onEditRecurringItem,
-  onUndoRecurringTransaction,
+  onUpdateRecurringItem,
 }: RecurringItemsScreenProps) {
-  const [undoingRecurringItemId, setUndoingRecurringItemId] = useState('');
-  const [undoError, setUndoError] = useState('');
+  const [adjustingItemId, setAdjustingItemId] = useState('');
+  const [draftDueDate, setDraftDueDate] = useState('');
+  const [optimisticDueDates, setOptimisticDueDates] = useState<Record<string, string>>({});
+  const [scheduleError, setScheduleError] = useState('');
   const categories = snapshot.categories ?? defaultCategories;
   const accountById = useMemo(
     () => new Map(snapshot.accounts.map((account) => [account.id, account])),
@@ -54,19 +58,6 @@ export function RecurringItemsScreen({
     () => classifyRecurringItemsByDueDate(snapshot.recurringItems),
     [snapshot.recurringItems],
   );
-  const latestHistoryByItem = useMemo(
-    () => getLatestRecurringTransactionHistoryByItem(snapshot.recurringTransactionHistory ?? []),
-    [snapshot.recurringTransactionHistory],
-  );
-  const historyCountByItem = useMemo(() => {
-    const counts = new Map<string, number>();
-
-    for (const entry of snapshot.recurringTransactionHistory ?? []) {
-      counts.set(entry.recurringItemId, (counts.get(entry.recurringItemId) ?? 0) + 1);
-    }
-
-    return counts;
-  }, [snapshot.recurringTransactionHistory]);
   const sections: Section[] = [
     {
       title: 'Overdue',
@@ -86,20 +77,78 @@ export function RecurringItemsScreen({
   ];
   const activeCount = sections.reduce((sum, section) => sum + section.rows.length, 0);
 
-  async function undoLatestTransaction(recurringItemId: string) {
-    if (undoingRecurringItemId) {
+  useEffect(() => {
+    setOptimisticDueDates((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const [itemId, dueDate] of Object.entries(current)) {
+        const item = snapshot.recurringItems.find((candidate) => candidate.id === itemId);
+        if (!item || item.nextDueDate === dueDate) {
+          delete next[itemId];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [snapshot.recurringItems]);
+
+  function startDueDateAdjustment(item: UpcomingRecurringItem) {
+    if (item.frequency === 'one_time') {
+      onEditRecurringItem(item.id);
       return;
     }
 
-    try {
-      setUndoingRecurringItemId(recurringItemId);
-      await onUndoRecurringTransaction(recurringItemId);
-      setUndoError('');
-    } catch (caught) {
-      setUndoError(caught instanceof Error ? caught.message : 'Could not undo the recurring transaction.');
-    } finally {
-      setUndoingRecurringItemId('');
+    setAdjustingItemId(item.id);
+    setDraftDueDate(optimisticDueDates[item.id] ?? item.nextDueDate);
+    setScheduleError('');
+  }
+
+  function moveDraftDueDate(item: UpcomingRecurringItem, direction: 'previous' | 'next') {
+    if (item.frequency === 'one_time') {
+      return;
     }
+
+    setDraftDueDate((current) => {
+      const baseDueDate = adjustingItemId === item.id && current
+        ? current
+        : optimisticDueDates[item.id] ?? item.nextDueDate;
+      return direction === 'previous'
+        ? calculatePreviousRecurringDueDate(baseDueDate, item.frequency)
+        : calculateNextRecurringDueDate(baseDueDate, item.frequency);
+    });
+    setAdjustingItemId(item.id);
+  }
+
+  function confirmDueDateAdjustment(item: UpcomingRecurringItem) {
+    const nextDueDate = adjustingItemId === item.id && draftDueDate ? draftDueDate : item.nextDueDate;
+    const input = {
+      ...buildRecurringDueDateShiftInput(item, 'next', snapshot.accounts),
+      nextDueDate,
+    };
+
+    setScheduleError('');
+    setOptimisticDueDates((current) => ({ ...current, [item.id]: nextDueDate }));
+    setAdjustingItemId('');
+    setDraftDueDate('');
+
+    void onUpdateRecurringItem(input).catch((caught) => {
+      setOptimisticDueDates((current) => {
+        const next = { ...current };
+        delete next[item.id];
+        return next;
+      });
+      setScheduleError(caught instanceof Error ? caught.message : 'Could not move the upcoming payment due date.');
+    });
+  }
+
+  function getDisplayDueDate(item: UpcomingRecurringItem): string {
+    if (adjustingItemId === item.id && draftDueDate) {
+      return draftDueDate;
+    }
+
+    return optimisticDueDates[item.id] ?? item.nextDueDate;
   }
 
   return (
@@ -111,7 +160,7 @@ export function RecurringItemsScreen({
       >
         <View style={styles.summaryRow}>
           <View style={styles.summaryText}>
-            <Text style={styles.heading}>Recurring</Text>
+            <Text style={styles.heading}>Upcoming Payments</Text>
             <Text style={styles.subtle}>Planned income and expenses. These do not affect balances until you create a transaction.</Text>
           </View>
           <ActionButton onPress={onAddRecurringItem} testID="add-recurring-item">
@@ -119,7 +168,7 @@ export function RecurringItemsScreen({
           </ActionButton>
         </View>
 
-        <FormError message={undoError} />
+        <FormError message={scheduleError} />
 
         {activeCount ? (
           <View style={styles.sectionList}>
@@ -136,14 +185,15 @@ export function RecurringItemsScreen({
                         key={item.id}
                         account={accountById.get(item.accountId)}
                         categories={categories}
-                        latestHistory={latestHistoryByItem.get(item.id)}
-                        undoHistoryCount={historyCountByItem.get(item.id) ?? 0}
                         item={item}
+                        isAdjustingDueDate={adjustingItemId === item.id}
+                        draftDueDate={getDisplayDueDate(item)}
                         showCurrencyCodes={snapshot.settings.multiCurrencyEnabled}
                         onCreateTransaction={() => onCreateTransaction(item.id)}
+                        onConfirmDueDate={() => confirmDueDateAdjustment(item)}
+                        onMoveDraftDueDate={(direction) => moveDraftDueDate(item, direction)}
                         onPress={() => onEditRecurringItem(item.id)}
-                        onUndoTransaction={() => undoLatestTransaction(item.id)}
-                        undoing={undoingRecurringItemId === item.id}
+                        onStartDueDateAdjustment={() => startDueDateAdjustment(item)}
                       />
                     ))}
                   </View>
@@ -156,12 +206,12 @@ export function RecurringItemsScreen({
             <View style={styles.emptyIcon}>
               <Ionicons name="repeat-outline" size={24} color={colors.primaryDark} />
             </View>
-            <Text style={styles.emptyTitle}>No active recurring items</Text>
+            <Text style={styles.emptyTitle}>No active upcoming payments</Text>
             <Text style={styles.emptyText}>
-              Add rent, subscriptions, salary, or other repeating items as templates. They will stay planned until you create real transactions.
+              Add rent, subscriptions, salary, or one-time planned items. They stay planned until you create real transactions.
             </Text>
             <ActionButton variant="secondary" onPress={onAddRecurringItem}>
-              Add first recurring item
+              Add first upcoming payment
             </ActionButton>
           </Card>
         )}
@@ -174,31 +224,33 @@ function RecurringItemCard({
   account,
   categories,
   item,
-  latestHistory,
+  isAdjustingDueDate,
+  draftDueDate,
   onCreateTransaction,
+  onConfirmDueDate,
+  onMoveDraftDueDate,
   onPress,
-  onUndoTransaction,
+  onStartDueDateAdjustment,
   showCurrencyCodes,
-  undoHistoryCount,
-  undoing,
 }: {
   account?: Account;
   categories: CategoryDefinition[];
   item: UpcomingRecurringItem;
-  latestHistory?: RecurringTransactionHistory;
+  isAdjustingDueDate: boolean;
+  draftDueDate: string;
   onCreateTransaction: () => void;
+  onConfirmDueDate: () => void;
+  onMoveDraftDueDate: (direction: 'previous' | 'next') => void;
   onPress: () => void;
-  onUndoTransaction: () => void;
+  onStartDueDateAdjustment: () => void;
   showCurrencyCodes: boolean;
-  undoHistoryCount: number;
-  undoing: boolean;
 }) {
   const icon = getSubcategoryIcon(item.categoryId, item.subcategoryId ?? '', categories);
   const color = getSubcategoryColor(item.categoryId, item.subcategoryId ?? '', categories);
   const categoryLabel = getRecurringCategoryLabel(item, categories);
   const status = getStatusCopy(item);
   const amountTone = item.kind === 'income' ? colors.success : colors.danger;
-  const actionLabel = item.kind === 'income' ? 'Mark received' : 'Mark paid';
+  const isRecurring = item.frequency !== 'one_time';
 
   return (
     <SurfaceCard>
@@ -228,7 +280,7 @@ function RecurringItemCard({
           items={[
             { label: 'Account', value: account?.name ?? 'Account needs attention' },
             { label: 'Frequency', value: getFrequencyLabel(item.frequency) },
-            { label: 'Next due', value: formatLongDateLabel(item.nextDueDate) },
+            { label: 'Next due', value: formatLongDateLabel(draftDueDate) },
           ]}
         />
 
@@ -236,37 +288,55 @@ function RecurringItemCard({
       </Pressable>
 
       <View style={styles.cardActions}>
-        <ActionButton variant="secondary" onPress={onCreateTransaction} testID={`create-recurring-transaction-${item.id}`}>
-          {actionLabel}
-        </ActionButton>
+        {isAdjustingDueDate && isRecurring ? (
+          <>
+            <View style={styles.dueDateAdjustmentActions}>
+              <ActionButton
+                variant="secondary"
+                onPress={() => onMoveDraftDueDate('previous')}
+                testID={`previous-recurring-due-date-${item.id}`}
+              >
+                Previous
+              </ActionButton>
+              <ActionButton
+                variant="secondary"
+                onPress={() => onMoveDraftDueDate('next')}
+                testID={`next-recurring-due-date-${item.id}`}
+              >
+                Next
+              </ActionButton>
+            </View>
+            <Pressable
+              accessibilityLabel="Save due date"
+              accessibilityRole="button"
+              onPress={onConfirmDueDate}
+              style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
+              testID={`confirm-recurring-due-date-${item.id}`}
+            >
+              <Ionicons name="checkmark" size={20} color={colors.primaryDark} />
+            </Pressable>
+          </>
+        ) : (
+          <>
+            <Pressable
+              accessibilityLabel={isRecurring ? 'Adjust due date' : 'Edit upcoming payment'}
+              accessibilityRole="button"
+              onPress={onStartDueDateAdjustment}
+              style={({ pressed }) => [styles.iconAction, pressed && styles.pressed]}
+              testID={`edit-recurring-item-${item.id}`}
+            >
+              <Ionicons name="calendar" size={20} color={colors.primaryDark} />
+            </Pressable>
+            <ActionButton
+              variant="secondary"
+              onPress={onCreateTransaction}
+              testID={`create-recurring-transaction-${item.id}`}
+            >
+              Mark paid
+            </ActionButton>
+          </>
+        )}
       </View>
-
-      {latestHistory ? (
-        <Pressable
-          accessibilityLabel={`Undo last ${item.kind === 'income' ? 'received' : 'paid'} transaction`}
-          accessibilityRole="button"
-          disabled={undoing}
-          onPress={onUndoTransaction}
-          style={({ pressed }) => [
-            styles.undoAction,
-            undoing && styles.undoActionDisabled,
-            pressed && !undoing && styles.pressed,
-          ]}
-          testID={`undo-recurring-transaction-${item.id}`}
-        >
-          <Ionicons name="arrow-undo-outline" size={20} color={colors.primaryDark} />
-          <View style={styles.undoActionText}>
-            <Text style={styles.undoActionTitle}>
-              {undoing ? 'Undoing...' : `Undo last ${item.kind === 'income' ? 'received' : 'paid'}`}
-            </Text>
-            <Text style={styles.undoActionDetail}>
-              {undoHistoryCount > 1
-                ? `${undoHistoryCount} generated transactions can be undone, newest first.`
-                : 'Removes the generated transaction and restores the previous due date.'}
-            </Text>
-          </View>
-        </Pressable>
-      ) : null}
     </SurfaceCard>
   );
 }
@@ -292,6 +362,8 @@ function getStatusCopy(item: UpcomingRecurringItem): { label: string; color: str
 
 function getFrequencyLabel(frequency: RecurringFrequency): string {
   switch (frequency) {
+    case 'one_time':
+      return 'One-time';
     case 'weekly':
       return 'Weekly';
     case 'fortnightly':
@@ -399,37 +471,26 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   cardActions: {
-    alignItems: 'flex-start',
-  },
-  undoAction: {
     alignItems: 'center',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
     flexDirection: 'row',
     gap: spacing.sm,
-    minHeight: 52,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    justifyContent: 'space-between',
   },
-  undoActionDisabled: {
-    opacity: 0.5,
+  dueDateAdjustmentActions: {
+    flexDirection: 'row',
+    flexShrink: 1,
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
-  undoActionText: {
-    flex: 1,
-    gap: 2,
-    minWidth: 0,
-  },
-  undoActionTitle: {
-    color: colors.primaryDark,
-    fontSize: typography.body,
-    fontWeight: '900',
-  },
-  undoActionDetail: {
-    color: colors.muted,
-    fontSize: typography.small,
-    lineHeight: 18,
+  iconAction: {
+    alignItems: 'center',
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
   },
   emptyIcon: {
     alignItems: 'center',

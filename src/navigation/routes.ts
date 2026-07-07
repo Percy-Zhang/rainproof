@@ -51,7 +51,7 @@ export type RootStackParamList = {
   MainDrawer: NavigatorScreenParams<MainDrawerParamList> | undefined;
   AddAccount: undefined;
   EditAccount: { accountId: string };
-  AddTransaction: { templateId?: string; dashboardAccountIds?: string[] } | undefined;
+  AddTransaction: { templateId?: string; upcomingPaymentId?: string; dashboardAccountIds?: string[] } | undefined;
   EditTransaction: { transactionId: string };
   LinkTransaction: { transactionId: string };
   StatsDrilldown: {
@@ -69,7 +69,6 @@ export type RootStackParamList = {
   EditBudget: { budgetId: string };
   AddRecurringItem: undefined;
   EditRecurringItem: { recurringItemId: string };
-  CreateRecurringTransaction: { recurringItemId: string };
   AddTransactionTemplate: undefined;
   EditTransactionTemplate: { templateId: string };
   BudgetPeriodSelect: BudgetPeriodSelectRouteParams;

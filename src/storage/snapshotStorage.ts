@@ -16,6 +16,7 @@ import {
   mapBudget,
   mapRainyDayFund,
   mapRecurringItem,
+  mapRecurringItemSplitLine,
   mapRecurringTransactionHistory,
   mapTransactionTemplate,
   mapTransactionTemplateLine,
@@ -24,6 +25,7 @@ import {
   mapTransactionLink,
   type RainyDayFundRow,
   type RecurringItemRow,
+  type RecurringItemSplitLineRow,
   type RecurringTransactionHistoryRow,
   safeParseCurrencyCodes,
   safeParseJson,
@@ -63,6 +65,9 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
   );
   const recurringItemRows = await db.getAllAsync<RecurringItemRow>(
     'SELECT * FROM recurring_items ORDER BY is_active DESC, next_due_date ASC, name ASC, id ASC',
+  );
+  const recurringItemSplitLineRows = await db.getAllAsync<RecurringItemSplitLineRow>(
+    'SELECT * FROM recurring_item_split_lines ORDER BY recurring_item_id ASC, sort_order ASC, created_at ASC, id ASC',
   );
   const recurringTransactionHistoryRows = await db.getAllAsync<RecurringTransactionHistoryRow>(
     `SELECT * FROM recurring_transaction_history
@@ -145,7 +150,9 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
     ...accountRows.map((account) => account.currency_code),
   ]);
 
-  const recurringItems = recurringItemRows.map(mapRecurringItem);
+  const recurringItemSplitLinesByItemId = groupRecurringItemSplitLinesByItemId(recurringItemSplitLineRows);
+  const recurringItems = recurringItemRows.map((row) =>
+    mapRecurringItem(row, recurringItemSplitLinesByItemId.get(row.id) ?? []));
   const transactionTemplateLinesByTemplateId = groupTransactionTemplateLinesByTemplateId(transactionTemplateLineRows);
 
   const snapshot: AppSnapshot = {
@@ -175,6 +182,21 @@ export async function getSnapshotStorage(db: RepositoryDatabase): Promise<AppSna
 
   logDevPerfDuration('snapshotStorage.getSnapshot.total', startedAt, () => getSnapshotStoragePerfCounts(snapshot));
   return snapshot;
+}
+
+function groupRecurringItemSplitLinesByItemId(
+  rows: RecurringItemSplitLineRow[],
+): Map<string, ReturnType<typeof mapRecurringItemSplitLine>[]> {
+  const result = new Map<string, ReturnType<typeof mapRecurringItemSplitLine>[]>();
+
+  for (const row of rows) {
+    const line = mapRecurringItemSplitLine(row);
+    const existing = result.get(line.recurringItemId) ?? [];
+    existing.push(line);
+    result.set(line.recurringItemId, existing);
+  }
+
+  return result;
 }
 
 function groupTransactionTemplateLinesByTemplateId(

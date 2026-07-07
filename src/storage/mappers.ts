@@ -14,6 +14,7 @@ import type {
   RecurringFrequency,
   RecurringItem,
   RecurringItemKind,
+  RecurringItemSplitLine,
   RecurringTransactionHistory,
   Transaction,
   TransactionTemplate,
@@ -115,6 +116,7 @@ export type RecurringItemRow = {
   note: string;
   frequency: RecurringFrequency;
   next_due_date: string;
+  completed_at?: string | null;
   is_active: number;
   created_at: string;
   updated_at: string;
@@ -127,6 +129,17 @@ export type RecurringTransactionHistoryRow = {
   previous_next_due_date: string;
   advanced_next_due_date: string;
   sequence: number;
+  created_at: string;
+};
+
+export type RecurringItemSplitLineRow = {
+  id: string;
+  recurring_item_id: string;
+  amount_minor: number;
+  category_id: string;
+  subcategory_id: string;
+  note: string;
+  sort_order: number;
   created_at: string;
 };
 
@@ -260,7 +273,10 @@ export function mapBudget(row: BudgetRow): Budget {
   };
 }
 
-export function mapRecurringItem(row: RecurringItemRow): RecurringItem {
+export function mapRecurringItem(
+  row: RecurringItemRow,
+  splitLines: RecurringItemSplitLine[] = [],
+): RecurringItem {
   return {
     id: row.id,
     name: row.name,
@@ -273,9 +289,24 @@ export function mapRecurringItem(row: RecurringItemRow): RecurringItem {
     note: row.note,
     frequency: row.frequency,
     nextDueDate: row.next_due_date,
+    completedAt: row.completed_at || null,
+    splitLines,
     isActive: row.is_active === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export function mapRecurringItemSplitLine(row: RecurringItemSplitLineRow): RecurringItemSplitLine {
+  return {
+    id: row.id,
+    recurringItemId: row.recurring_item_id,
+    amountMinor: row.amount_minor,
+    categoryId: row.category_id,
+    subcategoryId: row.subcategory_id,
+    note: row.note,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
   };
 }
 

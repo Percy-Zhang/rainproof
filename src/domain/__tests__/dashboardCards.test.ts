@@ -177,7 +177,7 @@ describe('dashboard card helpers', () => {
     expect(options.find((option) => option.id === 'upcomingPayments')).toEqual(expect.objectContaining({
       available: false,
       title: 'Upcoming Payments',
-      unavailableReason: 'Add an active recurring item to use this card.',
+      unavailableReason: 'Add an active upcoming payment to use this card.',
     }));
     expect(options.find((option) => option.id === 'creditCards')).toEqual(expect.objectContaining({
       available: false,

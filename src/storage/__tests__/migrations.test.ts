@@ -77,9 +77,21 @@ const currentRecurringItemColumns = [
   'note',
   'frequency',
   'next_due_date',
+  'completed_at',
   'is_active',
   'created_at',
   'updated_at',
+];
+
+const currentRecurringItemSplitLineColumns = [
+  'id',
+  'recurring_item_id',
+  'amount_minor',
+  'category_id',
+  'subcategory_id',
+  'note',
+  'sort_order',
+  'created_at',
 ];
 
 const currentTransactionTemplateColumns = [
@@ -116,6 +128,7 @@ class FakeMigrationDatabase {
   readonly versionWrites: number[] = [];
 
   private readonly columnsByTable = new Map<string, Set<string>>();
+  private readonly createSqlByTable = new Map<string, string>();
 
   constructor(
     public userVersion: number,
@@ -124,6 +137,7 @@ class FakeMigrationDatabase {
   ) {
     Object.entries(tableColumns).forEach(([tableName, columnNames]) => {
       this.columnsByTable.set(tableName, new Set(columnNames));
+      this.createSqlByTable.set(tableName, getFakeCreateTableSql(tableName, columnNames));
     });
   }
 
@@ -174,13 +188,35 @@ class FakeMigrationDatabase {
     return [];
   }
 
-  async getFirstAsync<T>(source: string): Promise<T | null> {
+  async getFirstAsync<T>(source: string, ...params: unknown[]): Promise<T | null> {
     if (/PRAGMA\s+user_version/i.test(source)) {
       return { user_version: this.userVersion } as T;
     }
 
+    if (/SELECT\s+name\s+FROM\s+sqlite_master/i.test(source)) {
+      const tableName = String(params[0] ?? '');
+      return this.columnsByTable.has(tableName) ? { name: tableName } as T : null;
+    }
+
+    if (/SELECT\s+sql\s+FROM\s+sqlite_master/i.test(source)) {
+      const tableName = String(params[0] ?? '');
+      const sql = this.createSqlByTable.get(tableName);
+      return sql ? { sql } as T : null;
+    }
+
     return null;
   }
+}
+
+function getFakeCreateTableSql(tableName: string, columnNames: string[]): string {
+  if (tableName !== 'recurring_items') {
+    return `CREATE TABLE ${tableName} (${columnNames.join(', ')})`;
+  }
+
+  const supportedFrequencies = columnNames.includes('completed_at')
+    ? "'one_time', 'weekly', 'fortnightly', 'monthly', 'yearly'"
+    : "'weekly', 'fortnightly', 'monthly', 'yearly'";
+  return `CREATE TABLE recurring_items (${columnNames.join(', ')}, CHECK (frequency IN (${supportedFrequencies})))`;
 }
 
 describe('SQLite migrations', () => {
@@ -190,7 +226,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]);
+    expect(db.versionWrites).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
     expect(db.execStatements.some((statement) => statement.includes('CREATE TABLE IF NOT EXISTS accounts'))).toBe(
       true,
     );
@@ -215,7 +251,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([11, 12, 13, 14, 15, 16, 17]);
+    expect(db.versionWrites).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19]);
     expect(db.getColumnNames('budgets')).toEqual(expect.arrayContaining(['sort_order']));
   });
 
@@ -233,7 +269,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([12, 13, 14, 15, 16, 17]);
+    expect(db.versionWrites).toEqual([12, 13, 14, 15, 16, 17, 18, 19]);
     expect(
       db.execStatements.some((statement) => statement.includes('CREATE TABLE budgets_scope_next')),
     ).toBe(true);
@@ -246,6 +282,7 @@ describe('SQLite migrations', () => {
       transaction_lines: currentTransactionLineColumns,
       budgets: currentBudgetColumns,
       recurring_items: currentRecurringItemColumns,
+      recurring_item_split_lines: currentRecurringItemSplitLineColumns,
       transaction_templates: currentTransactionTemplateColumns,
       transaction_template_lines: currentTransactionTemplateLineColumns,
     });
@@ -253,7 +290,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([13, 14, 15, 16, 17]);
+    expect(db.versionWrites).toEqual([13, 14, 15, 16, 17, 18, 19]);
     expect(
       db.execStatements.some((statement) =>
         statement.includes('CREATE TABLE IF NOT EXISTS recurring_transaction_history')),
@@ -276,7 +313,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([14, 15, 16, 17]);
+    expect(db.versionWrites).toEqual([14, 15, 16, 17, 18, 19]);
     expect(db.getColumnNames('transaction_template_lines')).toEqual(
       expect.arrayContaining(['kind']),
     );
@@ -289,6 +326,7 @@ describe('SQLite migrations', () => {
       transaction_lines: currentTransactionLineColumns,
       budgets: currentBudgetColumns,
       recurring_items: currentRecurringItemColumns,
+      recurring_item_split_lines: currentRecurringItemSplitLineColumns,
       transaction_templates: currentTransactionTemplateColumns,
       transaction_template_lines: currentTransactionTemplateLineColumns,
     });
@@ -296,7 +334,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([15, 16, 17]);
+    expect(db.versionWrites).toEqual([15, 16, 17, 18, 19]);
     expect(
       db.execStatements.some((statement) => statement.includes('CREATE TABLE budgets_calendar_next')),
     ).toBe(true);
@@ -316,7 +354,7 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([16, 17]);
+    expect(db.versionWrites).toEqual([16, 17, 18, 19]);
     expect(
       db.execStatements.some((statement) => statement.includes('CREATE TABLE budgets_rolling_next')),
     ).toBe(true);
@@ -336,9 +374,32 @@ describe('SQLite migrations', () => {
     await runMigrations(db.asMigrationDatabase());
 
     expect(db.userVersion).toBe(SCHEMA_VERSION);
-    expect(db.versionWrites).toEqual([17]);
+    expect(db.versionWrites).toEqual([17, 18, 19]);
     expect(
       db.execStatements.some((statement) => statement.includes('CREATE TABLE budgets_supported_next')),
+    ).toBe(true);
+  });
+
+  it('rebuilds recurring items for upcoming payment completion when migrating from the previous schema', async () => {
+    const db = new FakeMigrationDatabase(17, {
+      accounts: currentAccountColumns,
+      transactions: currentTransactionColumns,
+      transaction_lines: currentTransactionLineColumns,
+      budgets: currentBudgetColumns,
+      recurring_items: currentRecurringItemColumns.filter((columnName) => columnName !== 'completed_at'),
+      transaction_templates: currentTransactionTemplateColumns,
+      transaction_template_lines: currentTransactionTemplateLineColumns,
+    });
+
+    await runMigrations(db.asMigrationDatabase());
+
+    expect(db.userVersion).toBe(SCHEMA_VERSION);
+    expect(db.versionWrites).toEqual([18, 19]);
+    expect(
+      db.execStatements.some((statement) =>
+        statement.includes('CREATE TABLE IF NOT EXISTS recurring_items_upcoming_next') &&
+        statement.includes('completed_at TEXT') &&
+        statement.includes("'one_time'")),
     ).toBe(true);
   });
 

@@ -2,8 +2,10 @@ import {
   getRollbackForDeleteTransaction,
   getRollbackForDeleteTransactionLink,
   getRollbackForEditTransaction,
+  getRollbackForRecurringItemStateChange,
   getRollbackForTransactionLinkBatch,
   getRollbackForUpdateTransactionLink,
+  patchSnapshotAfterRecurringItemStateChangeWithRollback,
   patchSnapshotAfterTransactionLinkBatchWithRollback,
   patchSnapshotAfterAddTransaction,
   patchSnapshotAfterAddTransactionLink,
@@ -15,6 +17,7 @@ import {
   rollbackSnapshotAfterOptimisticDeleteTransactionLink,
   rollbackSnapshotAfterOptimisticDeleteTransaction,
   rollbackSnapshotAfterOptimisticEditTransaction,
+  rollbackSnapshotAfterOptimisticRecurringItemStateChange,
   rollbackSnapshotAfterOptimisticTransactionLinkBatch,
   rollbackSnapshotAfterOptimisticUpdateTransactionLink,
   rollbackSnapshotAfterOptimisticAddTransaction,
@@ -23,9 +26,11 @@ import type {
   Account,
   AppSnapshot,
   NewTransactionInput,
+  RecurringItem,
   Transaction,
   TransactionLink,
   TransactionLine,
+  UpdateRecurringItemInput,
   UpdateTransactionInput,
 } from '../../domain/types';
 
@@ -356,6 +361,52 @@ describe('patchSnapshotAfterDeleteTransaction', () => {
         ...patched!,
         transactions: patched!.transactions.filter((transaction) => transaction.id !== 'txn-source'),
       }, rollback!),
+    ).toBeNull();
+  });
+});
+
+describe('recurring item state snapshot patches', () => {
+  it('patches and rolls back upcoming payment due state without touching ledger data', () => {
+    const item = recurringItem();
+    const snapshot = {
+      ...createSnapshot(),
+      recurringBills: [item],
+      recurringItems: [item],
+    };
+    const rollback = getRollbackForRecurringItemStateChange(snapshot, item.id);
+    const input = recurringUpdateInput(item, {
+      nextDueDate: '2099-03-01',
+    });
+
+    const patched = patchSnapshotAfterRecurringItemStateChangeWithRollback(snapshot, input, rollback!);
+
+    expect(patched?.recurringItems[0].nextDueDate).toBe('2099-03-01');
+    expect(patched?.recurringBills[0].nextDueDate).toBe('2099-03-01');
+    expect(patched?.transactions).toEqual(snapshot.transactions);
+    expect(patched?.transactionLines).toEqual(snapshot.transactionLines);
+
+    const optimisticItem = patched!.recurringItems[0];
+    const rolledBack = rollbackSnapshotAfterOptimisticRecurringItemStateChange(patched!, rollback!, optimisticItem);
+
+    expect(rolledBack?.recurringItems).toEqual(snapshot.recurringItems);
+    expect(rolledBack?.recurringBills).toEqual(snapshot.recurringBills);
+  });
+
+  it('falls back when the recurring update changes non-state plan fields', () => {
+    const item = recurringItem();
+    const snapshot = {
+      ...createSnapshot(),
+      recurringBills: [item],
+      recurringItems: [item],
+    };
+    const rollback = getRollbackForRecurringItemStateChange(snapshot, item.id);
+
+    expect(
+      patchSnapshotAfterRecurringItemStateChangeWithRollback(
+        snapshot,
+        recurringUpdateInput(item, { amountMinor: 2000, nextDueDate: '2099-03-01' }),
+        rollback!,
+      ),
     ).toBeNull();
   });
 });
@@ -1041,6 +1092,51 @@ function transactionLine(
     transferPeerAccountId: line.transferPeerAccountId ?? '',
     note: line.note ?? '',
     createdAt: '2026-06-01T12:00:00.000Z',
+  };
+}
+
+function recurringItem(overrides: Partial<RecurringItem> = {}): RecurringItem {
+  return {
+    id: 'upcoming-rent',
+    name: 'Rent',
+    kind: 'expense',
+    amountMinor: 1000,
+    currencyCode: 'AUD',
+    accountId: 'aud-checking',
+    categoryId: 'housing',
+    subcategoryId: 'rent',
+    note: '',
+    frequency: 'monthly',
+    nextDueDate: '2099-02-01',
+    completedAt: null,
+    splitLines: [],
+    isActive: true,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function recurringUpdateInput(
+  item: RecurringItem,
+  overrides: Partial<UpdateRecurringItemInput> = {},
+): UpdateRecurringItemInput {
+  return {
+    id: item.id,
+    name: item.name,
+    kind: item.kind,
+    amountMinor: item.amountMinor,
+    currencyCode: item.currencyCode,
+    accountId: item.accountId,
+    categoryId: item.categoryId,
+    subcategoryId: item.subcategoryId,
+    note: item.note,
+    frequency: item.frequency,
+    nextDueDate: item.nextDueDate,
+    completedAt: item.completedAt,
+    splitLines: [],
+    isActive: item.isActive,
+    ...overrides,
   };
 }
 

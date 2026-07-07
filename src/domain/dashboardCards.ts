@@ -74,12 +74,12 @@ export const dashboardCardRegistry: DashboardCardDefinition[] = [
   {
     id: 'upcomingPayments',
     title: 'Upcoming Payments',
-    description: 'Overdue, due-soon, and upcoming recurring items.',
-    previewText: 'Next rent, subscriptions, bills, and income templates.',
+    description: 'Overdue, due-soon, and upcoming planned payments.',
+    previewText: 'Next rent, subscriptions, bills, one-time payments, and income plans.',
     defaultVisible: true,
     defaultOrder: 3,
     hidesWhenUnavailable: true,
-    unavailableReason: 'Add an active recurring item to use this card.',
+    unavailableReason: 'Add an active upcoming payment to use this card.',
   },
   {
     id: 'topSpending',
