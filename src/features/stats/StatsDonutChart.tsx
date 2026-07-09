@@ -12,6 +12,8 @@ type StatsDonutChartProps = {
   selectedRollupId?: string;
   onSelectRollup: (rollupId: string) => void;
   emptyLabel: string;
+  accessibilityLabel?: string;
+  totalLabel?: string;
 };
 
 const chartSize = 220;
@@ -28,11 +30,13 @@ type DonutSlice = {
 };
 
 export function StatsDonutChart({
+  accessibilityLabel = 'Select spending slice',
   rollups,
   currencyCode,
   selectedRollupId,
   onSelectRollup,
   emptyLabel,
+  totalLabel = 'Total spending',
 }: StatsDonutChartProps) {
   const positiveRollups = rollups.filter((rollup) => rollup.netAmountMinor > 0);
   const selectedRollup = selectedRollupId
@@ -64,7 +68,7 @@ export function StatsDonutChart({
   return (
     <View style={styles.chartWrap}>
       <Pressable
-        accessibilityLabel="Select spending slice"
+        accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         onPress={handlePress}
         style={({ pressed }) => [styles.chartPressable, pressed && styles.pressed]}
@@ -93,7 +97,7 @@ export function StatsDonutChart({
       </Pressable>
       <View pointerEvents="none" style={styles.centerLabel}>
         <Text numberOfLines={1} style={styles.centerKicker}>
-          {selectedRollup?.label ?? 'Total spending'}
+          {selectedRollup?.label ?? totalLabel}
         </Text>
         <Text numberOfLines={1} adjustsFontSizeToFit style={styles.centerAmount}>
           {formatMoney(selectedRollup?.netAmountMinor ?? totalNetAmountMinor, currencyCode)}

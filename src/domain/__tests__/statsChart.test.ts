@@ -138,6 +138,18 @@ function report(): StatsReport {
   };
 }
 
+function incomeReport(): StatsReport {
+  return {
+    ...report(),
+    reportKind: 'income',
+    rows: [],
+    categoryRollups: [],
+    subcategoryRollups: [],
+    totalGrossAmountMinor: 0,
+    totalNetAmountMinor: 0,
+  };
+}
+
 describe('stats chart helpers', () => {
   it('selects the largest category by default and returns matching recent rows', () => {
     const view = getStatsDonutViewModel({ report: report(), mode: 'category' });
@@ -279,6 +291,16 @@ describe('stats chart helpers', () => {
     expect(view.selectedRollup).toBeUndefined();
     expect(view.recentRows).toEqual([]);
     expect(view.emptyLabel).toBe('No subcategory spending for Food & Dining.');
+  });
+
+  it('uses income copy for income donut empty states', () => {
+    const view = getStatsDonutViewModel({
+      report: incomeReport(),
+      mode: 'category',
+      selectedCategoryRollupId: null,
+    });
+
+    expect(view.emptyLabel).toBe('No income in this period.');
   });
 
   it('omits redundant expense labeling from spending match row details', () => {

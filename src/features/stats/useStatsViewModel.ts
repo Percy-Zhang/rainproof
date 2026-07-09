@@ -18,7 +18,7 @@ import {
   getStatsDonutViewModel,
   type StatsDonutMode,
 } from '../../domain/statsChart';
-import { getStatsReport } from '../../domain/statsReports';
+import { getStatsReport, type StatsReportKind } from '../../domain/statsReports';
 import {
   getStatsMonthlyTrendSummary,
   getStatsRollupMonthlyTrend,
@@ -65,6 +65,7 @@ export function useStatsViewModel({
   const [selectedAccountIds, setSelectedAccountIds] = useState(initialSelectedAccountIds);
   const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
   const [requestedCurrencyCode, setRequestedCurrencyCode] = useState(effectiveDisplayCurrency);
+  const [statsReportKind, setStatsReportKind] = useState<StatsReportKind>('expense');
   const [spendingDonutMode, setSpendingDonutMode] = useState<StatsDonutMode>('category');
   const [selectedSpendingCategoryRollupId, setSelectedSpendingCategoryRollupId] = useState<string | null>('');
   const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState<string | null>('');
@@ -162,17 +163,18 @@ export function useStatsViewModel({
     expenseReport: spendingReport,
     range,
   }), [incomeReport, range, spendingReport]);
+  const activeStatsReport = statsReportKind === 'income' ? incomeReport : spendingReport;
   const spendingDonut = useMemo(() => getStatsDonutViewModel({
-    report: spendingReport,
+    report: activeStatsReport,
     mode: spendingDonutMode,
     selectedCategoryRollupId: selectedSpendingCategoryRollupId,
     selectedSubcategoryRollupId: selectedSpendingSubcategoryRollupId,
     recentLimit: 5,
   }), [
+    activeStatsReport,
     selectedSpendingCategoryRollupId,
     selectedSpendingSubcategoryRollupId,
     spendingDonutMode,
-    spendingReport,
   ]);
   const selectedSpendingRollup = spendingDonut.selectedRollup;
   const selectedSpendingTrend = useMemo(() => {
@@ -186,12 +188,12 @@ export function useStatsViewModel({
     }
 
     return getStatsRollupMonthlyTrend({
-      report: spendingReport,
+      report: activeStatsReport,
       rollupKind: spendingDonutMode,
       rollupId: selectedSpendingRollup.id,
       range,
     });
-  }, [range, selectedSpendingRollup, spendingDonutMode, spendingReport]);
+  }, [activeStatsReport, range, selectedSpendingRollup, spendingDonutMode]);
   const cashFlow = useMemo(() => {
     if (!accountIds.length) {
       return {
@@ -229,6 +231,17 @@ export function useStatsViewModel({
     }
   }
 
+  function selectStatsReportKind(nextReportKind: StatsReportKind) {
+    if (nextReportKind === statsReportKind) {
+      return;
+    }
+
+    setStatsReportKind(nextReportKind);
+    setSpendingDonutMode('category');
+    setSelectedSpendingCategoryRollupId(null);
+    setSelectedSpendingSubcategoryRollupId('');
+  }
+
   function selectSpendingRollup(rollupId: string) {
     if (spendingDonutMode === 'subcategory') {
       setSelectedSpendingSubcategoryRollupId(
@@ -263,7 +276,7 @@ export function useStatsViewModel({
     }
 
     onOpenStatsDrilldown({
-      reportKind: 'expense',
+      reportKind: statsReportKind,
       categoryId: selectedSpendingRollup.categoryId,
       subcategoryId: spendingDonutMode === 'subcategory' ? selectedSpendingRollup.subcategoryId : undefined,
       startIso: range.startIso,
@@ -332,6 +345,7 @@ export function useStatsViewModel({
     openSpendingDrilldown,
     rangeMode,
     returnToSpendingCategories,
+    selectStatsReportKind,
     selectedPeriodOption,
     selectedAccountIds,
     selectedSpendingRollup,
@@ -344,6 +358,7 @@ export function useStatsViewModel({
     setDatePickerTarget,
     spendingDonut,
     spendingDonutMode,
+    statsReportKind,
     toggleAccount,
   };
 }

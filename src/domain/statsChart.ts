@@ -33,6 +33,7 @@ export function getStatsDonutViewModel({
   selectedSubcategoryRollupId?: string | null;
   recentLimit?: number;
 }): StatsDonutViewModel {
+  const reportCopy = getStatsReportKindCopy(report.reportKind);
   const categoryRollups = report.categoryRollups.filter(isStatsReportRollupVisible);
   const selectedCategoryRollup = getSelectedCategoryRollup(categoryRollups, selectedCategoryRollupId);
 
@@ -67,8 +68,8 @@ export function getStatsDonutViewModel({
       totalNetAmountMinor: getRollupTotalNetAmountMinor(subcategoryRollups),
       canShowDetailedView: false,
       emptyLabel: selectedCategoryRollup
-        ? `No subcategory spending for ${selectedCategoryRollup.label}.`
-        : 'No spending in this period.',
+        ? `No subcategory ${reportCopy.lower} for ${selectedCategoryRollup.label}.`
+        : `No ${reportCopy.lower} in this period.`,
     };
   }
 
@@ -92,7 +93,7 @@ export function getStatsDonutViewModel({
     canShowDetailedView: selectedCategoryRollup
       ? getSubcategoryRollupsForCategory(report, selectedCategoryRollup).length > 0
       : false,
-    emptyLabel: 'No spending in this period.',
+    emptyLabel: `No ${reportCopy.lower} in this period.`,
   };
 }
 
@@ -152,6 +153,10 @@ function getRecentStatsReportRows({
 
 function isStatsReportRollupVisible(rollup: StatsReportRollup): boolean {
   return rollup.reportKind !== 'expense' || rollup.netAmountMinor > 0;
+}
+
+function getStatsReportKindCopy(reportKind: StatsReport['reportKind']): { lower: string } {
+  return reportKind === 'expense' ? { lower: 'spending' } : { lower: 'income' };
 }
 
 function getRollupTotalNetAmountMinor(rollups: StatsReportRollup[]): number {

@@ -203,11 +203,14 @@ export function StatsScreen({
           onOpenTransaction={onOpenTransaction}
           onReturnToCategories={viewModel.returnToSpendingCategories}
           onSelectRollup={viewModel.selectSpendingRollup}
+          onSelectStatsReportKind={viewModel.selectStatsReportKind}
           spendingDonut={viewModel.spendingDonut}
           spendingDonutMode={viewModel.spendingDonutMode}
+          statsReportKind={viewModel.statsReportKind}
         />
         <SelectedSpendingTrendCard
           currencyCode={viewModel.currencyCode}
+          reportKind={viewModel.statsReportKind}
           selectedSpendingTrend={viewModel.selectedSpendingTrend}
         />
       </ScrollView>

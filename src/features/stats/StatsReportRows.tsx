@@ -34,7 +34,7 @@ export function StatsRecentMatchRow({
           <Text numberOfLines={1} style={statsStyles.matchRowTitle}>
             {row.lineItemName}
           </Text>
-          <Text style={statsStyles.matchAmount}>
+          <Text style={[statsStyles.matchAmount, row.reportKind === 'income' && statsStyles.matchAmountIncome]}>
             {amountPrefix}{formatMoney(row.netAmountMinor, row.currencyCode)}
           </Text>
         </View>
