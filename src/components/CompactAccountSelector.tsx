@@ -24,6 +24,11 @@ import {
 } from '../theme/responsiveLayout';
 import { colors, spacing, typography } from '../theme/tokens';
 import { Card } from './ui';
+import {
+  type AccountSelectionMap,
+  useImmediateAccountSelection,
+  useTapIntentPressHandlers,
+} from './useImmediateAccountSelection';
 
 type CompactAccountSelectorProps = {
   accounts: Account[];
@@ -31,10 +36,12 @@ type CompactAccountSelectorProps = {
   selectedAccountIds: string[];
   title: string;
   emptyMessage?: string;
+  immediateSelectionFeedback?: boolean;
   onClearSelection: () => void;
   onPressExpandToggle?: () => void;
   onPressSummarySearch?: () => void;
   onSelectAll: () => void;
+  onSelectedAccountIdsChange?: (accountIds: string[]) => void;
   onToggleAccount: (accountId: string) => void;
   mode?: CompactAccountSelectorMode;
   testID?: string;
@@ -49,6 +56,8 @@ const ACCOUNT_SELECTOR_REVEAL_DURATION_MS = 145;
 const ACCOUNT_SELECTOR_REVEAL_OPACITY_IN_DURATION_MS = 110;
 const ACCOUNT_SELECTOR_REVEAL_OPACITY_OUT_DURATION_MS = 90;
 const ACCOUNT_SELECTOR_EXPANDED_MAX_HEIGHT_RATIO = 0.5;
+const noopSelectedAccountIdsChange = () => undefined;
+const noopPressHandler = () => undefined;
 type AccountTileBasis = ReturnType<typeof getResponsiveAccountTileBasisForColumns>;
 export type CompactAccountSelectorMode = 'peek' | 'summary' | 'expanded';
 
@@ -58,10 +67,12 @@ export function CompactAccountSelector({
   selectedAccountIds,
   title,
   emptyMessage = 'No accounts available.',
+  immediateSelectionFeedback = false,
   onClearSelection,
   onPressExpandToggle,
   onPressSummarySearch,
   onSelectAll,
+  onSelectedAccountIdsChange,
   onToggleAccount,
   mode = 'peek',
   testID,
@@ -69,10 +80,18 @@ export function CompactAccountSelector({
   const { height, width } = useWindowDimensions();
   const accountColumns = getResponsiveAccountColumnsForItemCount(width, accounts.length);
   const tileBasis = getResponsiveAccountTileBasisForColumns(accountColumns);
-  const selectedAccountIdSet = new Set(selectedAccountIds);
+  const accountIds = accounts.map((account) => account.id);
+  const immediateSelectionEnabled = immediateSelectionFeedback && Boolean(onSelectedAccountIdsChange);
+  const immediateSelection = useImmediateAccountSelection({
+    enabled: immediateSelectionEnabled,
+    onApplySelectedAccountIds: onSelectedAccountIdsChange ?? noopSelectedAccountIdsChange,
+    selectedAccountIds,
+  });
+  const visualSelectedAccountIds = immediateSelectionEnabled ? immediateSelection.selectedAccountIds : selectedAccountIds;
+  const selectedAccountIdSet = new Set(visualSelectedAccountIds);
   const allSelected = accounts.length > 0 && accounts.every((account) => selectedAccountIdSet.has(account.id));
-  const summary = getAccountSelectionSummary(accounts, selectedAccountIds);
-  const compactSummary = getCompactAccountSelectionSummary(accounts, selectedAccountIds);
+  const summary = getAccountSelectionSummary(accounts, visualSelectedAccountIds);
+  const compactSummary = getCompactAccountSelectionSummary(accounts, visualSelectedAccountIds);
   const summaryDetail = mode === 'summary' ? compactSummary : summary.detail;
   const accountRowCount = Math.ceil(accounts.length / accountColumns);
   const fullAccountListHeight = getAccountListHeightForRows(accountRowCount);
@@ -154,6 +173,23 @@ export function CompactAccountSelector({
     onPressExpandToggle();
   }, [animateAccountListToMode, onPressExpandToggle]);
   const summaryExpandPressHandlers = useImmediatePressHandlers(handlePressExpandToggle, Boolean(onPressExpandToggle));
+  const handleCancelSelectionPreview = useCallback(() => {
+    immediateSelection.cancelSelectionPreview();
+  }, [immediateSelection]);
+  const handleClearSelection = useCallback(() => {
+    onClearSelection();
+  }, [onClearSelection]);
+  const handleSelectAll = useCallback(() => {
+    onSelectAll();
+  }, [onSelectAll]);
+  const handleToggleAccount = useCallback((accountId: string) => {
+    if (immediateSelectionEnabled) {
+      immediateSelection.toggleAccount(accountId);
+      return;
+    }
+
+    onToggleAccount(accountId);
+  }, [immediateSelection, immediateSelectionEnabled, onToggleAccount]);
 
   return (
     <Card testID={testID} style={mode === 'summary' ? styles.summaryCard : styles.card}>
@@ -209,8 +245,30 @@ export function CompactAccountSelector({
             <Text numberOfLines={1} style={styles.detail}>{summaryDetail}</Text>
           </View>
           <View style={styles.actions}>
-            <AccountSelectorAction disabled={allSelected} label="All" onPress={onSelectAll} />
-            <AccountSelectorAction disabled={!selectedAccountIds.length} label="None" onPress={onClearSelection} />
+            <AccountSelectorAction
+              disabled={allSelected}
+              immediate={immediateSelectionEnabled}
+              label="All"
+              onCancelPreview={immediateSelectionEnabled ? handleCancelSelectionPreview : undefined}
+              onPress={immediateSelectionEnabled
+                ? () => immediateSelection.commitPreviewedSelection(() => accountIds)
+                : handleSelectAll}
+              onPreviewPress={immediateSelectionEnabled
+                ? () => immediateSelection.previewSelectedAccountIds(accountIds)
+                : undefined}
+            />
+            <AccountSelectorAction
+              disabled={!visualSelectedAccountIds.length}
+              immediate={immediateSelectionEnabled}
+              label="None"
+              onCancelPreview={immediateSelectionEnabled ? handleCancelSelectionPreview : undefined}
+              onPress={immediateSelectionEnabled
+                ? () => immediateSelection.commitPreviewedSelection(() => [])
+                : handleClearSelection}
+              onPreviewPress={immediateSelectionEnabled
+                ? () => immediateSelection.previewSelectedAccountIds([])
+                : undefined}
+            />
             {onPressExpandToggle ? (
               <AccountSelectorIconButton
                 accessibilityLabel={expandButtonLabel}
@@ -242,9 +300,15 @@ export function CompactAccountSelector({
                 key={account.id}
                 account={account}
                 balanceMinor={balanceMinorByAccountId.get(account.id)}
+                immediate={immediateSelectionEnabled}
                 selected={selectedAccountIdSet.has(account.id)}
                 tileBasis={tileBasis}
-                onPress={() => onToggleAccount(account.id)}
+                visualSelectedAccountIdMap={immediateSelection.visualSelectedAccountIdMap}
+                onCancelPreview={handleCancelSelectionPreview}
+                onPress={() => handleToggleAccount(account.id)}
+                onPreviewPress={() => immediateSelection.previewToggleAccount(account.id)}
+                onPressCommit={() =>
+                  immediateSelection.commitPreviewedSelection(() => immediateSelection.getToggledAccountIds(account.id))}
               />
             ))}
           </ScrollView>
@@ -438,18 +502,31 @@ function useImmediatePressHandlers(onPress: () => void, immediate: boolean) {
 
 export function AccountSelectorAction({
   disabled,
+  immediate = false,
   label,
+  onCancelPreview,
   onPress,
+  onPreviewPress,
 }: {
   disabled: boolean;
+  immediate?: boolean;
   label: string;
+  onCancelPreview?: () => void;
   onPress: () => void;
+  onPreviewPress?: () => void;
 }) {
+  const pressHandlers = useTapIntentPressHandlers({
+    enabled: Boolean(immediate && !disabled && onPreviewPress && onCancelPreview),
+    onCancel: onCancelPreview ?? noopPressHandler,
+    onCommit: onPress,
+    onPreview: onPreviewPress ?? noopPressHandler,
+  });
+
   return (
     <Pressable
       accessibilityRole="button"
       disabled={disabled}
-      onPress={onPress}
+      {...pressHandlers}
       style={({ pressed }) => [
         styles.actionButton,
         disabled && styles.disabled,
@@ -464,42 +541,68 @@ export function AccountSelectorAction({
 function AccountSelectorTile({
   account,
   balanceMinor,
+  immediate,
+  onCancelPreview,
   selected,
   tileBasis,
+  visualSelectedAccountIdMap,
   onPress,
+  onPressCommit,
+  onPreviewPress,
 }: {
   account: Account;
   balanceMinor?: number;
+  immediate: boolean;
+  onCancelPreview: () => void;
   selected: boolean;
   tileBasis: AccountTileBasis;
+  visualSelectedAccountIdMap: SharedValue<AccountSelectionMap>;
   onPress: () => void;
+  onPressCommit: () => void;
+  onPreviewPress: () => void;
 }) {
   const accountName = getAccountDisplayName(account);
   const balanceLabel = getAccountSelectionBalanceLabel(account, balanceMinor);
+  const selectedBackgroundColor = getTransparentColor(account.themeColor, '38');
+  const unselectedBorderColor = getTransparentColor(account.themeColor, '99');
+  const animatedSelectionStyle = useAnimatedStyle(() => {
+    const visuallySelected = Boolean(visualSelectedAccountIdMap.value[account.id]);
+    return {
+      backgroundColor: visuallySelected ? selectedBackgroundColor : colors.surface,
+      borderColor: visuallySelected ? account.themeColor : unselectedBorderColor,
+    };
+  }, [account.id, account.themeColor, selectedBackgroundColor, unselectedBorderColor, visualSelectedAccountIdMap]);
+  const pressHandlers = useTapIntentPressHandlers({
+    enabled: immediate,
+    onCancel: onCancelPreview,
+    onCommit: immediate ? onPressCommit : onPress,
+    onPreview: onPreviewPress,
+  });
 
   return (
     <Pressable
       accessibilityLabel={`${accountName}, ${account.currencyCode}, ${selected ? 'selected' : 'not selected'}`}
       accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.tile,
-        {
-          backgroundColor: selected ? getTransparentColor(account.themeColor, '38') : colors.surface,
-          borderColor: selected ? account.themeColor : getTransparentColor(account.themeColor, '99'),
-          borderLeftColor: account.themeColor,
-          width: tileBasis,
-        },
-        pressed && styles.pressed,
-      ]}
+      {...pressHandlers}
+      style={({ pressed }) => [styles.tileFrame, { width: tileBasis }, pressed && styles.pressed]}
       testID={`account-selector-${account.id}`}
     >
-      <Text numberOfLines={1} style={styles.accountName}>
-        {accountName}
-      </Text>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.accountBalance}>
-        {balanceLabel}
-      </Text>
+      <Animated.View
+        style={[
+          styles.tileContent,
+        {
+          borderLeftColor: account.themeColor,
+        },
+          animatedSelectionStyle,
+        ]}
+      >
+        <Text numberOfLines={1} style={styles.accountName}>
+          {accountName}
+        </Text>
+        <Text numberOfLines={1} adjustsFontSizeToFit style={styles.accountBalance}>
+          {balanceLabel}
+        </Text>
+      </Animated.View>
     </Pressable>
   );
 }
@@ -633,16 +736,23 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     minWidth: 0,
   },
-  tile: {
+  tileContent: {
     alignItems: 'flex-end',
     backgroundColor: colors.surface,
     borderLeftWidth: 5,
     borderRadius: 8,
     borderWidth: 1,
+    flex: 1,
     gap: spacing.xs,
+    justifyContent: 'center',
     minHeight: ACCOUNT_TILE_MIN_HEIGHT,
     minWidth: RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
     padding: spacing.sm,
+    width: '100%',
+  },
+  tileFrame: {
+    minHeight: ACCOUNT_TILE_MIN_HEIGHT,
+    minWidth: RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
   },
   title: {
     color: colors.ink,

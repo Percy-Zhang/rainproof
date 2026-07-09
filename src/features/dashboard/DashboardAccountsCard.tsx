@@ -1,9 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
-import { memo } from 'react';
+import { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import Animated, { type SharedValue, useAnimatedStyle } from 'react-native-reanimated';
 
 import { AccountSelectorAction } from '../../components/CompactAccountSelector';
 import { Card } from '../../components/ui';
+import {
+  type AccountSelectionMap,
+  useImmediateAccountSelection,
+  useTapIntentPressHandlers,
+} from '../../components/useImmediateAccountSelection';
 import { getAccountDisplayName, getTransparentColor } from '../../domain/accountThemes';
 import {
   formatCreditCardBalanceLabel,
@@ -28,27 +34,33 @@ export const AccountsDashboardCard = memo(function AccountsDashboardCard({
   selectedAccountIds,
   showCurrencyCodes,
   onAddAccount,
-  onClearSelection,
   onOpenAccount,
-  onSelectAll,
-  onToggleAccount,
+  onSelectedAccountIdsChange,
 }: {
   accountPreview: AccountBalance[];
   hasAnyAccounts: boolean;
   selectedAccountIds: string[];
   showCurrencyCodes: boolean;
   onAddAccount: () => void;
-  onClearSelection: () => void;
   onOpenAccount: () => void;
-  onSelectAll: () => void;
-  onToggleAccount: (accountId: string) => void;
+  onSelectedAccountIdsChange: (accountIds: string[]) => void;
 }) {
   const { width } = useWindowDimensions();
   const accountColumns = getResponsiveAccountColumnsForItemCount(width, accountPreview.length);
   const tileBasis = getResponsiveAccountTileBasisForColumns(accountColumns);
-  const selectedAccountIdSet = new Set(selectedAccountIds);
+  const accountIds = accountPreview.map(({ account }) => account.id);
+  const immediateSelection = useImmediateAccountSelection({
+    onApplySelectedAccountIds: onSelectedAccountIdsChange,
+    selectedAccountIds,
+  });
+  const visualSelectedAccountIds = immediateSelection.selectedAccountIds;
+  const selectedAccountIdSet = new Set(visualSelectedAccountIds);
   const allSelected = accountPreview.length > 0 &&
     accountPreview.every(({ account }) => selectedAccountIdSet.has(account.id));
+  const handleCancelSelectionPreview = useCallback(() => {
+    immediateSelection.cancelSelectionPreview();
+  }, [immediateSelection]);
+
   return (
     <Card testID="dashboard-accounts-card" style={dashboardCardStyles.compactCard}>
       <View style={dashboardCardStyles.sectionCardHeader}>
@@ -56,8 +68,22 @@ export const AccountsDashboardCard = memo(function AccountsDashboardCard({
         <View style={styles.headerActions}>
           {accountPreview.length ? (
             <>
-              <AccountSelectorAction disabled={allSelected} label="All" onPress={onSelectAll} />
-              <AccountSelectorAction disabled={!selectedAccountIds.length} label="None" onPress={onClearSelection} />
+              <AccountSelectorAction
+                disabled={allSelected}
+                immediate
+                label="All"
+                onCancelPreview={handleCancelSelectionPreview}
+                onPress={() => immediateSelection.commitPreviewedSelection(() => accountIds)}
+                onPreviewPress={() => immediateSelection.previewSelectedAccountIds(accountIds)}
+              />
+              <AccountSelectorAction
+                disabled={!visualSelectedAccountIds.length}
+                immediate
+                label="None"
+                onCancelPreview={handleCancelSelectionPreview}
+                onPress={() => immediateSelection.commitPreviewedSelection(() => [])}
+                onPreviewPress={() => immediateSelection.previewSelectedAccountIds([])}
+              />
             </>
           ) : null}
           <DashboardHeaderIconAction
@@ -76,10 +102,14 @@ export const AccountsDashboardCard = memo(function AccountsDashboardCard({
               key={account.id}
               account={account}
               balanceMinor={balanceMinor}
+              onCancelPreview={handleCancelSelectionPreview}
+              onPressCommit={() =>
+                immediateSelection.commitPreviewedSelection(() => immediateSelection.getToggledAccountIds(account.id))}
+              onPreviewPress={() => immediateSelection.previewToggleAccount(account.id)}
               selected={selectedAccountIdSet.has(account.id)}
               showCurrencyCodes={showCurrencyCodes}
               tileBasis={tileBasis}
-              onToggleAccount={onToggleAccount}
+              visualSelectedAccountIdMap={immediateSelection.visualSelectedAccountIdMap}
             />
           ))}
         </View>
@@ -136,40 +166,62 @@ const AccountTile = memo(function AccountTile({
   selected,
   showCurrencyCodes,
   tileBasis,
-  onToggleAccount,
+  visualSelectedAccountIdMap,
+  onCancelPreview,
+  onPressCommit,
+  onPreviewPress,
 }: {
   account: Account;
   balanceMinor: number;
+  onCancelPreview: () => void;
+  onPressCommit: () => void;
+  onPreviewPress: () => void;
   selected: boolean;
   showCurrencyCodes: boolean;
   tileBasis: AccountTileBasis;
-  onToggleAccount: (accountId: string) => void;
+  visualSelectedAccountIdMap: SharedValue<AccountSelectionMap>;
 }) {
   const creditCardSummary = getCreditCardBalanceSummary({ account, balanceMinor });
   const balanceLabel = creditCardSummary
     ? formatCreditCardBalanceLabel({ account, balanceMinor }, { showCurrencyCode: showCurrencyCodes })
     : formatMoney(balanceMinor, account.currencyCode, { showCurrencyCode: showCurrencyCodes });
+  const accountName = getAccountDisplayName(account);
+  const selectedBackgroundColor = getTransparentColor(account.themeColor, '38');
+  const unselectedBorderColor = getTransparentColor(account.themeColor, '99');
+  const animatedSelectionStyle = useAnimatedStyle(() => {
+    const visuallySelected = Boolean(visualSelectedAccountIdMap.value[account.id]);
+    return {
+      backgroundColor: visuallySelected ? selectedBackgroundColor : colors.surface,
+      borderColor: visuallySelected ? account.themeColor : unselectedBorderColor,
+    };
+  }, [account.id, account.themeColor, selectedBackgroundColor, unselectedBorderColor, visualSelectedAccountIdMap]);
+  const pressHandlers = useTapIntentPressHandlers({
+    enabled: true,
+    onCancel: onCancelPreview,
+    onCommit: onPressCommit,
+    onPreview: onPreviewPress,
+  });
 
   return (
     <Pressable
+      accessibilityLabel={`${accountName}, ${account.currencyCode}, ${selected ? 'selected' : 'not selected'}`}
       accessibilityRole="button"
-      onPress={() => onToggleAccount(account.id)}
+      {...pressHandlers}
       testID={`dashboard-account-${account.id}`}
-      style={({ pressed }) => [
-        styles.accountTile,
-        {
-          backgroundColor: selected ? getTransparentColor(account.themeColor, '38') : colors.surface,
-          borderColor: selected ? account.themeColor : getTransparentColor(account.themeColor, '99'),
-          borderLeftColor: account.themeColor,
-          width: tileBasis,
-        },
-        pressed && dashboardCardStyles.pressedRow,
-      ]}
+      style={({ pressed }) => [styles.accountTileFrame, { width: tileBasis }, pressed && dashboardCardStyles.pressedRow]}
     >
-      <Text numberOfLines={1} style={styles.accountName}>{getAccountDisplayName(account)}</Text>
-      <Text numberOfLines={1} adjustsFontSizeToFit style={styles.accountBalance}>
-        {balanceLabel}
-      </Text>
+      <Animated.View
+        style={[
+          styles.accountTileContent,
+          { borderLeftColor: account.themeColor },
+          animatedSelectionStyle,
+        ]}
+      >
+        <Text numberOfLines={1} style={styles.accountName}>{accountName}</Text>
+        <Text numberOfLines={1} adjustsFontSizeToFit style={styles.accountBalance}>
+          {balanceLabel}
+        </Text>
+      </Animated.View>
     </Pressable>
   );
 });
@@ -196,17 +248,24 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     width: '100%',
   },
-  accountTile: {
+  accountTileContent: {
     alignItems: 'flex-end',
     backgroundColor: colors.surface,
     borderColor: colors.faint,
     borderLeftWidth: 5,
     borderRadius: 8,
     borderWidth: 1,
+    flex: 1,
     gap: spacing.xs,
+    justifyContent: 'center',
     minHeight: 62,
     minWidth: RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
     padding: spacing.sm,
+    width: '100%',
+  },
+  accountTileFrame: {
+    minHeight: 62,
+    minWidth: RESPONSIVE_ACCOUNT_TILE_MIN_WIDTH,
   },
   emptyAccountCard: {
     alignItems: 'center',

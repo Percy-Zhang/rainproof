@@ -2,6 +2,7 @@ import type { DateTimePickerEvent } from '@react-native-community/datetimepicker
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { InteractionManager, Platform } from 'react-native';
 
+import { useRenderScopedAnimationSuppression } from '../../components/useRenderScopedAnimationSuppression';
 import {
   compareTransactionDisplayEntriesDescending,
   getBalanceAfterDisplayEntriesForEntries,
@@ -35,7 +36,6 @@ type CachedTransactionsListDerivation = {
 
 let cachedTransactionsListDerivation: CachedTransactionsListDerivation | null = null;
 
-const ACCOUNT_FILTER_APPLY_DELAY_MS = 80;
 const SEARCH_FILTER_APPLY_DELAY_MS = 180;
 
 export type TransactionDatePickerTarget = 'start' | 'end';
@@ -78,11 +78,14 @@ export function useTransactionsViewModel({
   );
   const selectableAccounts = useMemo(() => getSelectableAccounts(snapshot.accounts), [snapshot.accounts]);
   const [selectedAccountIds, setSelectedAccountIds] = useState(initialSelectedAccountIds);
-  const [appliedSelectedAccountIds, setAppliedSelectedAccountIds] = useState(initialSelectedAccountIds);
   const [hasLocalAccountOverride, setHasLocalAccountOverride] = useState(false);
+  const {
+    suppressAnimations: suppressRowAnimationsForAccountFilter,
+    suppressNextRenderAnimations: suppressAccountFilterRowAnimations,
+  } = useRenderScopedAnimationSuppression();
   const [searchQuery, setSearchQuery] = useState('');
   const [appliedSearchQuery, setAppliedSearchQuery] = useState('');
-  const filterApplyTokenRef = useRef(0);
+  const searchApplyTokenRef = useRef(0);
   const { customEndDate, customStartDate, preset, rangeMode } = periodState;
   const showCurrencyCodes = snapshot.settings.multiCurrencyEnabled;
   const categories = snapshot.categories ?? defaultCategories;
@@ -96,7 +99,7 @@ export function useTransactionsViewModel({
   const cacheKey = getTransactionsListCacheKey({
     endIso: range.endIso,
     searchQuery: appliedSearchQuery,
-    selectedAccountIds: appliedSelectedAccountIds,
+    selectedAccountIds,
     startIso: range.startIso,
   });
   const cachedListDerivation = useMemo(
@@ -130,7 +133,7 @@ export function useTransactionsViewModel({
         }
 
         return deriveTransactionDisplayEntries({
-          accountIds: appliedSelectedAccountIds,
+          accountIds: selectedAccountIds,
           range,
           transactionLines: snapshot.transactionLines,
           transactionLinks: snapshot.transactionLinks,
@@ -138,7 +141,7 @@ export function useTransactionsViewModel({
         });
       },
       (entries) => ({
-        selectedAccounts: appliedSelectedAccountIds.length,
+        selectedAccounts: selectedAccountIds.length,
         transactions: snapshot.transactions.length,
         visibleTransactions: new Set(entries.map((entry) => entry.transaction.id)).size,
         lines: snapshot.transactionLines.length,
@@ -149,7 +152,7 @@ export function useTransactionsViewModel({
   }, [
     deferListDerivation,
     range,
-    appliedSelectedAccountIds,
+    selectedAccountIds,
     snapshot.transactionLines,
     snapshot.transactionLinks,
     snapshot.transactions,
@@ -240,47 +243,38 @@ export function useTransactionsViewModel({
   const renderedGroups = cachedListDerivation?.groups ?? groups;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
   const bottomPadding = (rangeMode === 'custom' ? 220 : 140) + bottomInset;
-  const emptyMessage = appliedSelectedAccountIds.length
+  const emptyMessage = selectedAccountIds.length
     ? appliedSearchQuery.trim()
       ? 'No transactions match this search.'
       : 'No transactions in this period.'
     : 'No accounts selected.';
 
   useEffect(() => {
-    if (
-      areAccountIdListsEqual(appliedSelectedAccountIds, selectedAccountIds) &&
-      appliedSearchQuery === searchQuery
-    ) {
+    if (appliedSearchQuery === searchQuery) {
       return;
     }
 
     let interactionTask: { cancel?: () => void } | null = null;
-    const applyToken = filterApplyTokenRef.current + 1;
-    filterApplyTokenRef.current = applyToken;
-    const delayMs = appliedSearchQuery === searchQuery ? ACCOUNT_FILTER_APPLY_DELAY_MS : SEARCH_FILTER_APPLY_DELAY_MS;
+    const applyToken = searchApplyTokenRef.current + 1;
+    searchApplyTokenRef.current = applyToken;
     const timeoutId = setTimeout(() => {
       interactionTask = InteractionManager.runAfterInteractions(() => {
-        if (filterApplyTokenRef.current !== applyToken) {
+        if (searchApplyTokenRef.current !== applyToken) {
           return;
         }
 
-        setAppliedSelectedAccountIds((currentIds) =>
-          areAccountIdListsEqual(currentIds, selectedAccountIds) ? currentIds : selectedAccountIds,
-        );
         setAppliedSearchQuery((currentQuery) => (currentQuery === searchQuery ? currentQuery : searchQuery));
       });
-    }, delayMs);
+    }, SEARCH_FILTER_APPLY_DELAY_MS);
 
     return () => {
-      filterApplyTokenRef.current += 1;
+      searchApplyTokenRef.current += 1;
       clearTimeout(timeoutId);
       interactionTask?.cancel?.();
     };
   }, [
     appliedSearchQuery,
-    appliedSelectedAccountIds,
     searchQuery,
-    selectedAccountIds,
   ]);
 
   useEffect(() => {
@@ -294,16 +288,25 @@ export function useTransactionsViewModel({
   }, [hasLocalAccountOverride, initialSelectedAccountIds]);
 
   function selectAllAccounts() {
+    suppressAccountFilterRowAnimations();
     setHasLocalAccountOverride(true);
     setSelectedAccountIds(getSelectableAccountIds(snapshot.accounts));
   }
 
   function clearSelectedAccounts() {
+    suppressAccountFilterRowAnimations();
     setHasLocalAccountOverride(true);
     setSelectedAccountIds([]);
   }
 
+  function setSelectedAccounts(accountIds: string[]) {
+    suppressAccountFilterRowAnimations();
+    setHasLocalAccountOverride(true);
+    setSelectedAccountIds(accountIds);
+  }
+
   function toggleAccount(accountId: string) {
+    suppressAccountFilterRowAnimations();
     setHasLocalAccountOverride(true);
     setSelectedAccountIds((currentIds) =>
       currentIds.includes(accountId)
@@ -360,7 +363,7 @@ export function useTransactionsViewModel({
     groups: renderedGroups,
     handleDatePickerChange,
     isListDeferred: deferListDerivation && !cachedListDerivation,
-    listSelectedAccountIds: appliedSelectedAccountIds,
+    listSelectedAccountIds: selectedAccountIds,
     rangeMode,
     searchQuery,
     selectedAccountIds,
@@ -369,6 +372,8 @@ export function useTransactionsViewModel({
     setDatePickerTarget,
     setSearchQuery,
     showCurrencyCodes,
+    suppressRowAnimationsForAccountFilter,
+    setSelectedAccounts,
     toggleAccount,
     selectAllAccounts,
     clearSelectedAccounts,

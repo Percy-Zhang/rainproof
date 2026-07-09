@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useRenderScopedAnimationSuppression } from '../../components/useRenderScopedAnimationSuppression';
 import {
   getBudgetUsageDisplayRows,
   getBudgetUsagesForPeriods,
@@ -26,9 +27,8 @@ import {
 import {
   getDashboardAccountPreview,
   getDashboardInitialSelectedAccountIds,
-  getDashboardRecentTransactionsForContext,
+  getDashboardRecentTransactionsForData,
   getDashboardSelectedAccountIds,
-  toggleDashboardAccountSelection,
 } from '../../domain/dashboard';
 import {
   getCreditCardPortfolioSummary,
@@ -60,8 +60,9 @@ type DashboardSelectedAccountCardData = {
   dashboardBalanceTotals: CurrencyTotal[];
   dashboardCashFlow: CashFlowSummary[];
   dashboardTopSpending: DashboardTopSpendingCurrencyGroup[];
-  recentTransactions: ReturnType<typeof getDashboardRecentTransactionsForContext>;
 };
+
+type DashboardRecentTransactions = ReturnType<typeof getDashboardRecentTransactionsForData>;
 
 type DashboardSelectedAccountCardInputs = {
   accountBalances: AccountBalance[];
@@ -84,20 +85,16 @@ export type DashboardViewModel = {
   dashboardCashFlow: CashFlowSummary[];
   dashboardTopSpending: DashboardTopSpendingCurrencyGroup[];
   hasAnyAccounts: boolean;
-  recentTransactions: ReturnType<typeof getDashboardRecentTransactionsForContext>;
+  recentTransactions: DashboardRecentTransactions;
   recurringSummary: {
     activeCount: number;
     rows: UpcomingRecurringItem[];
   };
   selectedAccountIds: string[];
-  appliedSelectedAccountIds: string[];
-  clearSelectedAccounts: () => void;
-  selectAllAccounts: () => void;
+  setSelectedAccounts: (accountIds: string[]) => void;
   showCurrencyCodes: boolean;
-  toggleAccount: (accountId: string) => void;
+  suppressRecentTransactionAnimations: boolean;
 };
-
-const DASHBOARD_ACCOUNT_FILTER_APPLY_DELAY_MS = 100;
 
 export function useDashboardViewModel({
   accountBalances,
@@ -116,10 +113,12 @@ export function useDashboardViewModel({
     snapshot.settings.dashboardSelectedAccountIds,
   );
   const [selectedAccountIds, setSelectedAccountIds] = useState(() => initialSelectedAccountIds);
-  const [appliedSelectedAccountIds, setAppliedSelectedAccountIds] = useState(() => initialSelectedAccountIds);
+  const {
+    suppressAnimations: suppressRecentTransactionAnimations,
+    suppressNextRenderAnimations: suppressRecentAnimationsForAccountFilter,
+  } = useRenderScopedAnimationSuppression();
   const pendingSelectedAccountIdsRef = useRef(initialSelectedAccountIds);
   const hasLocalPendingSelectionRef = useRef(false);
-  const accountFilterApplyTokenRef = useRef(0);
 
   const accountById = useMemo(
     () => new Map(snapshot.accounts.map((account) => [account.id, account])),
@@ -136,16 +135,16 @@ export function useDashboardViewModel({
       accountBalances,
       dashboardMonthRange,
       previewAccountIds,
-      selectedAccountIds: appliedSelectedAccountIds,
+      selectedAccountIds,
       transactionLines: snapshot.transactionLines,
       transactionLinks: snapshot.transactionLinks,
       transactions: snapshot.transactions,
     }),
     [
       accountBalances,
-      appliedSelectedAccountIds,
       dashboardMonthRange,
       previewAccountIds,
+      selectedAccountIds,
       snapshot.transactionLines,
       snapshot.transactionLinks,
       snapshot.transactions,
@@ -178,6 +177,23 @@ export function useDashboardViewModel({
       getRenderableDashboardCardIds(snapshot.settings.dashboardCardSettings, cardAvailability),
     [cardAvailability, snapshot.settings.dashboardCardSettings],
   );
+  const recentTransactions = useMemo(
+    () =>
+      deriveDashboardRecentTransactionsForData({
+        previewAccountIds,
+        selectedAccountIds,
+        transactionLines: snapshot.transactionLines,
+        transactionLinks: snapshot.transactionLinks,
+        transactions: snapshot.transactions,
+      }),
+    [
+      previewAccountIds,
+      selectedAccountIds,
+      snapshot.transactionLines,
+      snapshot.transactionLinks,
+      snapshot.transactions,
+    ],
+  );
 
   useEffect(() => {
     const nextIds =
@@ -193,29 +209,6 @@ export function useDashboardViewModel({
     pendingSelectedAccountIdsRef.current = nextIds;
     setSelectedAccountIds((currentIds) => (areSameIds(currentIds, nextIds) ? currentIds : nextIds));
   }, [accountBalances, snapshot.settings.dashboardSelectedAccountIds]);
-
-  useEffect(() => {
-    if (areSameIds(appliedSelectedAccountIds, selectedAccountIds)) {
-      return;
-    }
-
-    const applyToken = accountFilterApplyTokenRef.current + 1;
-    accountFilterApplyTokenRef.current = applyToken;
-    const timeoutId = setTimeout(() => {
-      if (accountFilterApplyTokenRef.current !== applyToken) {
-        return;
-      }
-
-      setAppliedSelectedAccountIds((currentIds) =>
-        areSameIds(currentIds, selectedAccountIds) ? currentIds : selectedAccountIds,
-      );
-    }, DASHBOARD_ACCOUNT_FILTER_APPLY_DELAY_MS);
-
-    return () => {
-      accountFilterApplyTokenRef.current += 1;
-      clearTimeout(timeoutId);
-    };
-  }, [appliedSelectedAccountIds, selectedAccountIds]);
 
   useEffect(() => {
     if (areDashboardSelectedAccountCardInputsEqual(selectedAccountCardInputsRef.current, selectedAccountCardInputs)) {
@@ -247,6 +240,7 @@ export function useDashboardViewModel({
   const acceptSelectedAccountIds = useCallback((nextIds: string[]) => {
     const startedAt = Date.now();
     const nextSelectedAccountIds = [...nextIds];
+    suppressRecentAnimationsForAccountFilter();
     pendingSelectedAccountIdsRef.current = nextSelectedAccountIds;
     hasLocalPendingSelectionRef.current = true;
     setSelectedAccountIds((currentIds) =>
@@ -256,24 +250,15 @@ export function useDashboardViewModel({
       selectedAccounts: nextSelectedAccountIds.length,
     });
     void onUpdateSelectedAccountIds(nextSelectedAccountIds);
-  }, [onUpdateSelectedAccountIds]);
+  }, [onUpdateSelectedAccountIds, suppressRecentAnimationsForAccountFilter]);
 
-  const toggleAccount = useCallback((accountId: string) => {
-    acceptSelectedAccountIds(toggleDashboardAccountSelection(pendingSelectedAccountIdsRef.current, accountId));
-  }, [acceptSelectedAccountIds]);
-
-  const selectAllAccounts = useCallback(() => {
-    acceptSelectedAccountIds(previewAccountIds);
-  }, [acceptSelectedAccountIds, previewAccountIds]);
-
-  const clearSelectedAccounts = useCallback(() => {
-    acceptSelectedAccountIds([]);
+  const setSelectedAccounts = useCallback((accountIds: string[]) => {
+    acceptSelectedAccountIds(accountIds);
   }, [acceptSelectedAccountIds]);
 
   return {
     accountById,
     accountPreview,
-    appliedSelectedAccountIds,
     budgetProgress,
     categories,
     creditCardSummaries,
@@ -282,13 +267,12 @@ export function useDashboardViewModel({
     dashboardCashFlow: selectedAccountCardData.dashboardCashFlow,
     dashboardTopSpending: selectedAccountCardData.dashboardTopSpending,
     hasAnyAccounts,
-    recentTransactions: selectedAccountCardData.recentTransactions,
+    recentTransactions,
     recurringSummary,
     selectedAccountIds,
-    clearSelectedAccounts,
-    selectAllAccounts,
+    setSelectedAccounts,
     showCurrencyCodes,
-    toggleAccount,
+    suppressRecentTransactionAnimations,
   };
 }
 
@@ -329,7 +313,6 @@ function deriveDashboardSelectedAccountCards(
     dashboardBalanceTotals: deriveDashboardBalanceTotals(inputs),
     dashboardCashFlow: deriveDashboardCashFlow(selectedAccountContext),
     dashboardTopSpending: deriveDashboardTopSpending(selectedAccountContext),
-    recentTransactions: deriveDashboardRecentTransactions(inputs, selectedAccountContext),
   };
 }
 
@@ -362,18 +345,11 @@ async function deriveDashboardSelectedAccountCardsInStages(
   }
   const dashboardTopSpending = deriveDashboardTopSpending(selectedAccountContext);
 
-  await yieldDashboardDerivationStage();
-  if (isStale()) {
-    return null;
-  }
-  const recentTransactions = deriveDashboardRecentTransactions(inputs, selectedAccountContext);
-
   if (isStale()) {
     return null;
   }
 
   logDevPerfDuration('dashboard.derived.commit', startedAt, {
-    recentEntries: recentTransactions.length,
     selectedAccounts: inputs.selectedAccountIds.length,
   });
 
@@ -381,7 +357,6 @@ async function deriveDashboardSelectedAccountCardsInStages(
     dashboardBalanceTotals,
     dashboardCashFlow,
     dashboardTopSpending,
-    recentTransactions,
   };
 }
 
@@ -445,21 +420,34 @@ function deriveDashboardTopSpending(context: DashboardSelectedAccountContext): D
   );
 }
 
-function deriveDashboardRecentTransactions(
-  inputs: DashboardSelectedAccountCardInputs,
-  context: DashboardSelectedAccountContext,
-): ReturnType<typeof getDashboardRecentTransactionsForContext> {
+function deriveDashboardRecentTransactionsForData({
+  previewAccountIds,
+  selectedAccountIds,
+  transactionLines,
+  transactionLinks,
+  transactions,
+}: {
+  previewAccountIds: string[];
+  selectedAccountIds: string[];
+  transactionLines: TransactionLine[];
+  transactionLinks: TransactionLink[];
+  transactions: Transaction[];
+}): DashboardRecentTransactions {
   return timeDevPerf(
     'dashboard.derived.recentTransactions',
     () =>
-      getDashboardRecentTransactionsForContext({
-        context,
-        previewAccountIds: inputs.previewAccountIds,
+      getDashboardRecentTransactionsForData({
+        lines: transactionLines,
+        previewAccountIds,
+        selectedAccountIds,
+        transactionLinks,
+        transactions,
       }),
     (entries) => ({
-      selectedAccounts: context.selectedAccountIds.length,
-      previewAccounts: inputs.previewAccountIds.length,
-      selectedLines: context.selectedLines.length,
+      selectedAccounts: selectedAccountIds.length,
+      previewAccounts: previewAccountIds.length,
+      transactions: transactions.length,
+      lines: transactionLines.length,
       entries: entries.length,
     }),
   );

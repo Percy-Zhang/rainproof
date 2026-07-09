@@ -31,6 +31,7 @@ export function TransactionsListCard({
   emptyMessage,
   groups,
   isLoading,
+  suppressRowAnimations = false,
   onMomentumScrollBegin,
   onMomentumScrollEnd,
   onOpenTransaction,
@@ -47,6 +48,7 @@ export function TransactionsListCard({
   emptyMessage: string;
   groups: TransactionDisplayGroup[];
   isLoading?: boolean;
+  suppressRowAnimations?: boolean;
   onMomentumScrollBegin?: (offsetY: number) => void;
   onMomentumScrollEnd?: (offsetY: number) => void;
   onOpenTransaction: (transactionId: string) => void;
@@ -65,6 +67,7 @@ export function TransactionsListCard({
     <Card testID="transaction-list-card" style={styles.transactionListCard}>
       <SectionList<TransactionDisplayEntry, TransactionDisplaySection>
         sections={sections}
+        extraData={suppressRowAnimations}
         keyExtractor={(entry) => entry.id}
         style={styles.transactionSectionList}
         keyboardShouldPersistTaps="handled"

@@ -367,6 +367,7 @@ export function TransactionsScreen({
         <CompactAccountSelector
           accounts={viewModel.selectableAccounts}
           accountBalances={accountBalances}
+          immediateSelectionFeedback
           selectedAccountIds={viewModel.selectedAccountIds}
           title="Accounts"
           mode={accountSelectorMode}
@@ -374,6 +375,7 @@ export function TransactionsScreen({
           onPressExpandToggle={handleAccountExpandToggle}
           onPressSummarySearch={handlePressCompactSearch}
           onSelectAll={viewModel.selectAllAccounts}
+          onSelectedAccountIdsChange={viewModel.setSelectedAccounts}
           onToggleAccount={viewModel.toggleAccount}
           testID="transactions-account-selector"
         />
@@ -399,6 +401,7 @@ export function TransactionsScreen({
           emptyMessage={viewModel.emptyMessage}
           groups={viewModel.groups}
           isLoading={viewModel.isListDeferred}
+          suppressRowAnimations={viewModel.suppressRowAnimationsForAccountFilter}
           onMomentumScrollBegin={handleTransactionListMomentumBegin}
           onMomentumScrollEnd={handleTransactionListMomentumEnd}
           onOpenTransaction={onOpenTransaction}

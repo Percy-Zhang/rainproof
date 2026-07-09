@@ -1,8 +1,14 @@
 import React from 'react';
-import { fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render } from '@testing-library/react-native';
 
 import { DashboardScreen } from '../DashboardScreen';
-import type { Account, AppSnapshot, RainyDayProgress } from '../../../domain/types';
+import type {
+  Account,
+  AppSnapshot,
+  RainyDayProgress,
+  Transaction,
+  TransactionLine,
+} from '../../../domain/types';
 
 jest.mock('@expo/vector-icons', () => {
   return { Ionicons: 'Ionicons' };
@@ -53,6 +59,63 @@ describe('Dashboard quick actions', () => {
     expect(onAddTransaction).toHaveBeenCalledWith({ dashboardAccountIds: ['bank', 'wallet'] });
   });
 
+  it('commits dashboard account selection immediately', async () => {
+    const onUpdateSelectedAccountIds = jest.fn(async () => undefined);
+    const accounts = [account('bank'), account('wallet')];
+    const screen = renderDashboard({
+      accountBalances: accounts.map((item) => ({ account: item, balanceMinor: 1000 })),
+      onUpdateSelectedAccountIds,
+      snapshot: snapshot(accounts),
+    });
+
+    fireEvent.press(screen.getByTestId('dashboard-account-wallet'));
+
+    expect(onUpdateSelectedAccountIds).toHaveBeenCalledWith(['bank']);
+    await flushAnimationFrameCleanup();
+  });
+
+  it('uses the latest intended dashboard account selection for rapid taps', async () => {
+    const onUpdateSelectedAccountIds = jest.fn(async () => undefined);
+    const accounts = [account('bank'), account('wallet'), account('savings')];
+    const screen = renderDashboard({
+      accountBalances: accounts.map((item) => ({ account: item, balanceMinor: 1000 })),
+      onUpdateSelectedAccountIds,
+      snapshot: snapshot(accounts),
+    });
+
+    fireEvent.press(screen.getByTestId('dashboard-account-wallet'));
+    fireEvent.press(screen.getByTestId('dashboard-account-savings'));
+
+    expect(onUpdateSelectedAccountIds).toHaveBeenNthCalledWith(1, ['bank', 'savings']);
+    expect(onUpdateSelectedAccountIds).toHaveBeenNthCalledWith(2, ['bank']);
+    await flushAnimationFrameCleanup();
+  });
+
+  it('updates dashboard recent transactions from the committed account filter without waiting for staged cards', async () => {
+    const accounts = [account('bank'), account('wallet')];
+    const transactions = [
+      transaction('wallet-tx', 'Wallet coffee', '2026-05-28T10:00:00.000Z'),
+      transaction('bank-tx', 'Bank rent', '2026-05-28T09:00:00.000Z'),
+    ];
+    const transactionLines = [
+      transactionLine('wallet-line', 'wallet-tx', 'wallet'),
+      transactionLine('bank-line', 'bank-tx', 'bank'),
+    ];
+    const screen = renderDashboard({
+      accountBalances: accounts.map((item) => ({ account: item, balanceMinor: 1000 })),
+      snapshot: snapshot(accounts, { transactionLines, transactions }),
+    });
+
+    expect(screen.getByTestId('dashboard-transaction-wallet-tx')).toBeTruthy();
+    expect(screen.getByTestId('dashboard-transaction-bank-tx')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('dashboard-account-wallet'));
+
+    expect(screen.queryByTestId('dashboard-transaction-wallet-tx')).toBeNull();
+    expect(screen.getByTestId('dashboard-transaction-bank-tx')).toBeTruthy();
+    await flushAnimationFrameCleanup();
+  });
+
   it('opens Templates from the Use Template action and closes the menu', () => {
     const onOpenTemplates = jest.fn();
     const screen = renderDashboard({ onOpenTemplates });
@@ -87,9 +150,17 @@ function renderDashboard(overrides: Partial<DashboardProps> = {}) {
   return render(React.createElement(DashboardScreen, props));
 }
 
+async function flushAnimationFrameCleanup() {
+  await act(async () => {
+    await new Promise((resolve) => {
+      setTimeout(resolve, 0);
+    });
+  });
+}
+
 type DashboardProps = Parameters<typeof DashboardScreen>[0];
 
-function snapshot(accounts: Account[] = []): AppSnapshot {
+function snapshot(accounts: Account[] = [], overrides: Partial<AppSnapshot> = {}): AppSnapshot {
   const now = '2026-05-28T00:00:00.000Z';
   return {
     defaultCurrencyCode: 'AUD',
@@ -118,6 +189,7 @@ function snapshot(accounts: Account[] = []): AppSnapshot {
       createdAt: now,
       updatedAt: now,
     },
+    ...overrides,
   };
 }
 
@@ -148,5 +220,35 @@ function account(id: string): Account {
     isArchived: false,
     createdAt: '',
     updatedAt: '',
+  };
+}
+
+function transaction(id: string, title: string, datetime: string): Transaction {
+  return {
+    id,
+    kind: 'expense',
+    title,
+    datetime,
+    notes: '',
+    labels: [],
+    groupId: '',
+    createdAt: datetime,
+    updatedAt: datetime,
+  };
+}
+
+function transactionLine(id: string, transactionId: string, accountId: string): TransactionLine {
+  return {
+    id,
+    transactionId,
+    accountId,
+    amountMinor: -1000,
+    currencyCode: 'AUD',
+    categoryId: 'general',
+    subcategoryId: 'general',
+    externalParty: '',
+    transferPeerAccountId: '',
+    note: '',
+    createdAt: '2026-05-28T00:00:00.000Z',
   };
 }

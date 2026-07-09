@@ -41,10 +41,8 @@ type DashboardCardSlotProps =
     cardId: 'accounts';
     hasAnyAccounts: boolean;
     onAddAccount: () => void;
-    onClearSelection: () => void;
     onOpenAccount: () => void;
-    onSelectAll: () => void;
-    onToggleAccount: (accountId: string) => void;
+    onSelectedAccountIdsChange: (accountIds: string[]) => void;
     selectedAccountIds: string[];
     showCurrencyCodes: boolean;
   }
@@ -73,12 +71,12 @@ type DashboardCardSlotProps =
     topSpendingByCurrency: DashboardViewModel['dashboardTopSpending'];
   }
   | {
-    appliedSelectedAccountIds: string[];
     cardId: 'recentTransactions';
     categories: DashboardViewModel['categories'];
     onOpenTransaction: (transactionId: string) => void;
     onOpenTransactions: () => void;
     recentTransactions: DashboardViewModel['recentTransactions'];
+    selectedAccountIds: string[];
     showCurrencyCodes: boolean;
     snapshot: AppSnapshot;
   };
@@ -115,10 +113,8 @@ export const DashboardCardSlot = memo(function DashboardCardSlot(props: Dashboar
           selectedAccountIds={props.selectedAccountIds}
           showCurrencyCodes={props.showCurrencyCodes}
           onAddAccount={props.onAddAccount}
-          onClearSelection={props.onClearSelection}
           onOpenAccount={props.onOpenAccount}
-          onSelectAll={props.onSelectAll}
-          onToggleAccount={props.onToggleAccount}
+          onSelectedAccountIdsChange={props.onSelectedAccountIdsChange}
         />
       );
     case 'creditCards':
@@ -158,7 +154,7 @@ export const DashboardCardSlot = memo(function DashboardCardSlot(props: Dashboar
         <RecentTransactionsCard
           categories={props.categories}
           recentTransactions={props.recentTransactions}
-          selectedAccountIds={props.appliedSelectedAccountIds}
+          selectedAccountIds={props.selectedAccountIds}
           showCurrencyCodes={props.showCurrencyCodes}
           snapshot={props.snapshot}
           onOpenTransaction={props.onOpenTransaction}

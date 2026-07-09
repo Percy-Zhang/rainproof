@@ -123,10 +123,10 @@ describe('RecurringItemsScreen upcoming payment actions', () => {
     expect(screen.queryByTestId('next-recurring-due-date-rent')).toBeNull();
   });
 
-  it('renders the row edit action with a pencil icon', () => {
+  it('renders the row due-date action with a calendar icon', () => {
     const screen = renderScreen();
 
-    expect(screen.UNSAFE_getByProps({ name: 'pencil-outline' })).toBeTruthy();
+    expect(screen.UNSAFE_getByProps({ name: 'calendar' })).toBeTruthy();
   });
 
   it('hides completed one-time plans from the active list', () => {

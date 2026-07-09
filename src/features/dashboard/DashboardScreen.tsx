@@ -86,10 +86,8 @@ export function DashboardScreen({
             selectedAccountIds={viewModel.selectedAccountIds}
             showCurrencyCodes={viewModel.showCurrencyCodes}
             onAddAccount={onAddAccount}
-            onClearSelection={viewModel.clearSelectedAccounts}
             onOpenAccount={onOpenAccount}
-            onSelectAll={viewModel.selectAllAccounts}
-            onToggleAccount={viewModel.toggleAccount}
+            onSelectedAccountIdsChange={viewModel.setSelectedAccounts}
           />
         );
       case 'creditCards':
@@ -131,10 +129,10 @@ export function DashboardScreen({
       case 'recentTransactions':
         return (
           <DashboardCardSlot
-            appliedSelectedAccountIds={viewModel.appliedSelectedAccountIds}
             cardId={cardId}
             categories={viewModel.categories}
             recentTransactions={viewModel.recentTransactions}
+            selectedAccountIds={viewModel.selectedAccountIds}
             showCurrencyCodes={viewModel.showCurrencyCodes}
             snapshot={snapshot}
             onOpenTransaction={onOpenTransaction}
@@ -153,6 +151,7 @@ export function DashboardScreen({
         keyExtractor={(cardId) => cardId}
         renderItem={({ item }) => renderDashboardCard(item)}
         contentContainerStyle={styles.cardFeedContent}
+        extraData={viewModel.suppressRecentTransactionAnimations}
         initialNumToRender={DASHBOARD_INITIAL_CARDS_TO_RENDER}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={(
