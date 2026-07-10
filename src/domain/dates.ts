@@ -125,9 +125,28 @@ export function getInclusiveDateRange(startDate: string, endDate: string): DateR
   };
 }
 
+export function getPreviousEquivalentDateRange(range: DateRange): DateRange {
+  const currentStart = new Date(range.startIso);
+  const currentEnd = new Date(range.endIso);
+  const durationDays = getLocalCalendarDayNumber(currentEnd) - getLocalCalendarDayNumber(currentStart);
+
+  if (!Number.isFinite(currentStart.getTime()) || !Number.isFinite(currentEnd.getTime()) || durationDays <= 0) {
+    throw new Error('Date range end must be after its start.');
+  }
+
+  return {
+    startIso: addDays(currentStart, -durationDays).toISOString(),
+    endIso: range.startIso,
+  };
+}
+
 export function isWithinDateRange(isoDate: string, range: DateRange): boolean {
   const timestamp = new Date(isoDate).getTime();
   return timestamp >= new Date(range.startIso).getTime() && timestamp < new Date(range.endIso).getTime();
+}
+
+function getLocalCalendarDayNumber(date: Date): number {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / (24 * 60 * 60 * 1000));
 }
 
 export const datePresetLabels: Record<DatePreset, string> = {

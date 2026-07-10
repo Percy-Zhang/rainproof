@@ -7,7 +7,12 @@ import { getSelectableAccounts, getSelectableAccountIds } from '../../domain/acc
 import { getBalanceHistoryPoints } from '../../domain/balanceHistory';
 import { defaultCategories } from '../../domain/categories';
 import { getEffectiveDisplayCurrency } from '../../domain/currency';
-import { getDateRangeForPreset, getInclusiveDateRange, toDateInputValue } from '../../domain/dates';
+import {
+  getDateRangeForPreset,
+  getInclusiveDateRange,
+  getPreviousEquivalentDateRange,
+  toDateInputValue,
+} from '../../domain/dates';
 import { getForecastBalanceProjection } from '../../domain/forecastBalance';
 import {
   getStatsInitialSelectedAccountIds,
@@ -20,6 +25,7 @@ import {
   getStatsDonutViewModel,
   type StatsDonutMode,
 } from '../../domain/statsChart';
+import { getStatsCategoryChanges } from '../../domain/statsCategoryChanges';
 import { getStatsReport, type StatsReportKind } from '../../domain/statsReports';
 import {
   getStatsMonthlyTrendSummary,
@@ -175,6 +181,32 @@ export function useStatsViewModel({
     range,
   }), [incomeReport, range, spendingReport]);
   const activeStatsReport = statsReportKind === 'income' ? incomeReport : spendingReport;
+  const previousRange = useMemo(() => getPreviousEquivalentDateRange(range), [range]);
+  const previousStatsReport = useMemo(() => getStatsReport({
+    reportKind: statsReportKind,
+    transactions: snapshot.transactions,
+    transactionLines: snapshot.transactionLines,
+    transactionLinks: snapshot.transactionLinks,
+    accounts: snapshot.accounts,
+    categories,
+    range: previousRange,
+    currencyCode,
+    accountIds,
+  }), [
+    accountIds,
+    categories,
+    currencyCode,
+    previousRange,
+    snapshot.accounts,
+    snapshot.transactionLines,
+    snapshot.transactionLinks,
+    snapshot.transactions,
+    statsReportKind,
+  ]);
+  const categoryChanges = useMemo(() => getStatsCategoryChanges({
+    currentReport: activeStatsReport,
+    previousReport: previousStatsReport,
+  }), [activeStatsReport, previousStatsReport]);
   const spendingDonut = useMemo(() => getStatsDonutViewModel({
     report: activeStatsReport,
     mode: spendingDonutMode,
@@ -383,10 +415,21 @@ export function useStatsViewModel({
       return;
     }
 
-    onOpenStatsDrilldown({
+    openStatsCategoryDrilldown(
+      selectedSpendingRollup.categoryId,
+      spendingDonutMode === 'subcategory' ? selectedSpendingRollup.subcategoryId : undefined,
+    );
+  }
+
+  function openCategoryChangeDrilldown(categoryId: string) {
+    openStatsCategoryDrilldown(categoryId);
+  }
+
+  function openStatsCategoryDrilldown(categoryId: string, subcategoryId?: string) {
+    onOpenStatsDrilldown?.({
       reportKind: statsReportKind,
-      categoryId: selectedSpendingRollup.categoryId,
-      subcategoryId: spendingDonutMode === 'subcategory' ? selectedSpendingRollup.subcategoryId : undefined,
+      categoryId,
+      subcategoryId,
       startIso: range.startIso,
       endIso: range.endIso,
       accountIds: accountIds.length ? accountIds : [],
@@ -444,6 +487,7 @@ export function useStatsViewModel({
     balanceHistoryPoints: balanceHistoryDisplay.points,
     bottomPadding,
     cashFlow,
+    categoryChanges,
     categories,
     clearSelectedAccounts,
     currencyCode,
@@ -452,6 +496,7 @@ export function useStatsViewModel({
     datePickerTarget,
     handleDatePickerChange,
     monthlyTrendSummary,
+    openCategoryChangeDrilldown,
     openSpendingDetailedView,
     openSpendingDrilldown,
     rangeMode,

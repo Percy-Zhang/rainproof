@@ -85,6 +85,42 @@ describe('StatsScreen report kind switch', () => {
     }));
   });
 
+  it('shows category changes for the active report mode', () => {
+    const screen = renderStatsScreen();
+
+    expect(screen.getByTestId('stats-category-changes-card')).toBeTruthy();
+    expect(screen.getByTestId('stats-category-change-food')).toBeTruthy();
+    expect(screen.queryByTestId('stats-category-change-income')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('stats-report-mode-income'));
+
+    expect(screen.getByTestId('stats-category-change-income')).toBeTruthy();
+    expect(screen.queryByTestId('stats-category-change-food')).toBeNull();
+  });
+
+  it('opens the existing current-period category drilldown from a comparison row', () => {
+    const onOpenStatsDrilldown = jest.fn();
+    const screen = renderStatsScreen({ onOpenStatsDrilldown });
+
+    fireEvent.press(screen.getByTestId('stats-category-change-food'));
+
+    expect(onOpenStatsDrilldown).toHaveBeenCalledWith(expect.objectContaining({
+      reportKind: 'expense',
+      categoryId: 'food',
+      accountIds: ['acct-a', 'acct-b'],
+      currencyCode: 'AUD',
+      initialSort: 'date_newest',
+    }));
+  });
+
+  it('shows the category changes empty state when neither period has data', () => {
+    const screen = renderStatsScreen({ noTransactions: true });
+
+    expect(screen.getByTestId('stats-category-changes-empty').props.children).toBe(
+      'No category changes for this period.',
+    );
+  });
+
   it('renders Balance History with the latest selected combined balance', () => {
     const screen = renderStatsScreen();
 
@@ -365,12 +401,14 @@ function renderStatsScreen({
   defaultSelectedAccountIds,
   includeOlderBalanceMovement = false,
   includeUsdAccount = false,
+  noTransactions = false,
   onOpenStatsDrilldown = jest.fn(),
   recurringItems = [],
 }: {
   defaultSelectedAccountIds?: string[];
   includeOlderBalanceMovement?: boolean;
   includeUsdAccount?: boolean;
+  noTransactions?: boolean;
   onOpenStatsDrilldown?: jest.Mock;
   recurringItems?: RecurringItem[];
 } = {}) {
@@ -379,11 +417,14 @@ function renderStatsScreen({
     account('acct-b', 'Savings', 'AUD'),
     ...(includeUsdAccount ? [account('acct-usd', 'USD Wallet', 'USD')] : []),
   ];
+  const statsSnapshot = snapshot(accounts, includeUsdAccount, includeOlderBalanceMovement, recurringItems);
 
   return render(React.createElement(StatsScreen, {
     accountBalances: accounts.map((item) => ({ account: item, balanceMinor: 0 } satisfies AccountBalance)),
     defaultSelectedAccountIds,
-    snapshot: snapshot(accounts, includeUsdAccount, includeOlderBalanceMovement, recurringItems),
+    snapshot: noTransactions
+      ? { ...statsSnapshot, transactions: [], transactionLines: [] }
+      : statsSnapshot,
     onOpenStatsDrilldown,
   }));
 }

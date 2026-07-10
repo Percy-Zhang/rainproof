@@ -1,6 +1,7 @@
 import {
   getDateRangeForPreset,
   getInclusiveDateRange,
+  getPreviousEquivalentDateRange,
   isWithinDateRange,
   parseDateInput,
   parseDateTimeInput,
@@ -34,6 +35,28 @@ describe('date ranges', () => {
     expect(isWithinDateRange(new Date(2026, 4, 18, 12).toISOString(), range)).toBe(true);
     expect(isWithinDateRange(new Date(2026, 4, 20, 23, 59).toISOString(), range)).toBe(true);
     expect(isWithinDateRange(new Date(2026, 4, 21).toISOString(), range)).toBe(false);
+  });
+
+  it('builds a previous equivalent range with the same local-day duration', () => {
+    const current = getInclusiveDateRange('2026-05-11', '2026-05-20');
+    const previous = getPreviousEquivalentDateRange(current);
+
+    expect(toDateInputValue(new Date(previous.startIso))).toBe('2026-05-01');
+    expect(toDateInputValue(new Date(previous.endIso))).toBe('2026-05-11');
+    expect(previous.endIso).toBe(current.startIso);
+  });
+
+  it('preserves start-inclusive and end-exclusive semantics at the period boundary', () => {
+    const current = getInclusiveDateRange('2026-05-11', '2026-05-13');
+    const previous = getPreviousEquivalentDateRange(current);
+    const previousStart = new Date(previous.startIso);
+    const currentStart = new Date(current.startIso);
+    const currentEnd = new Date(current.endIso);
+
+    expect(isWithinDateRange(previousStart.toISOString(), previous)).toBe(true);
+    expect(isWithinDateRange(currentStart.toISOString(), previous)).toBe(false);
+    expect(isWithinDateRange(currentStart.toISOString(), current)).toBe(true);
+    expect(isWithinDateRange(currentEnd.toISOString(), current)).toBe(false);
   });
 
   it('parses date input without requiring floats or locale parsing', () => {

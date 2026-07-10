@@ -17,6 +17,7 @@ import type { AccountBalance, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
 import { StatsBalanceHistoryCard } from './StatsBalanceHistoryCard';
 import { StatsBottomControls } from './StatsBottomControls';
+import { StatsCategoryChangesCard } from './StatsCategoryChangesCard';
 import {
   CashFlowCard,
   MonthlyAveragesCard,
@@ -218,6 +219,12 @@ export function StatsScreen({
           points={viewModel.balanceHistoryPoints}
           selectedChangeMinor={viewModel.selectedBalanceHistoryChangeMinor}
           selectedPoint={viewModel.selectedBalanceHistoryPoint}
+        />
+        <StatsCategoryChangesCard
+          currencyCode={viewModel.currencyCode}
+          onOpenCategory={onOpenStatsDrilldown ? viewModel.openCategoryChangeDrilldown : undefined}
+          reportKind={viewModel.statsReportKind}
+          rows={viewModel.categoryChanges}
         />
         <SelectedSpendingTrendCard
           currencyCode={viewModel.currencyCode}
