@@ -133,6 +133,21 @@ describe('StatsScreen report kind switch', () => {
     }));
   });
 
+  it('drives transaction amount distribution from Expenses and Income mode', () => {
+    const screen = renderStatsScreen();
+
+    expect(screen.getByTestId('stats-transaction-amount-distribution-card')).toBeTruthy();
+    expect(screen.getByText('Expense transactions by size')).toBeTruthy();
+    expect(screen.getByTestId('stats-transaction-amount-bucket-count-50-100').props.children).toBe(1);
+    expect(screen.getByTestId('stats-transaction-amount-bucket-count-250-plus').props.children).toBe(0);
+
+    fireEvent.press(screen.getByTestId('stats-report-mode-income'));
+
+    expect(screen.getByText('Income transactions by size')).toBeTruthy();
+    expect(screen.getByTestId('stats-transaction-amount-bucket-count-50-100').props.children).toBe(0);
+    expect(screen.getByTestId('stats-transaction-amount-bucket-count-250-plus').props.children).toBe(1);
+  });
+
   it('opens the existing current-period category drilldown from a comparison row', () => {
     const onOpenStatsDrilldown = jest.fn();
     const screen = renderStatsScreen({ onOpenStatsDrilldown });

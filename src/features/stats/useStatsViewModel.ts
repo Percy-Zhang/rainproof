@@ -31,6 +31,7 @@ import {
   type StatsCashFlowWaterfallStep,
 } from '../../domain/statsCashFlowWaterfall';
 import { getStatsReport, type StatsReportKind } from '../../domain/statsReports';
+import { getStatsTransactionAmountDistribution } from '../../domain/statsTransactionAmountDistribution';
 import {
   getStatsMonthlyTrendSummary,
   getStatsRollupMonthlyTrend,
@@ -204,6 +205,24 @@ export function useStatsViewModel({
     range,
   }), [incomeReport, range, spendingReport]);
   const activeStatsReport = statsReportKind === 'income' ? incomeReport : spendingReport;
+  const transactionAmountDistribution = useMemo(
+    () => getStatsTransactionAmountDistribution({
+      accountIds,
+      currencyCode,
+      range,
+      reportKind: statsReportKind,
+      transactionLines: snapshot.transactionLines,
+      transactions: snapshot.transactions,
+    }),
+    [
+      accountIds,
+      currencyCode,
+      range,
+      snapshot.transactionLines,
+      snapshot.transactions,
+      statsReportKind,
+    ],
+  );
   const previousRange = useMemo(() => getPreviousEquivalentDateRange(range), [range]);
   const previousStatsReport = useMemo(() => getStatsReport({
     reportKind: statsReportKind,
@@ -557,6 +576,7 @@ export function useStatsViewModel({
     spendingDonutMode,
     statsReportKind,
     toggleAccount,
+    transactionAmountDistribution,
   };
 }
 

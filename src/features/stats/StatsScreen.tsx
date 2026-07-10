@@ -25,6 +25,7 @@ import {
 } from './StatsMetricCards';
 import { statsStyles as styles } from './StatsScreenStyles';
 import { StatsSpendingCard } from './StatsSpendingCard';
+import { StatsTransactionAmountDistributionCard } from './StatsTransactionAmountDistributionCard';
 import {
   MonthlyCashFlowTrendCard,
   SelectedSpendingTrendCard,
@@ -230,6 +231,9 @@ export function StatsScreen({
         <StatsCashFlowWaterfallCard
           model={viewModel.cashFlowWaterfall}
           onOpenStep={onOpenStatsDrilldown ? viewModel.openCashFlowWaterfallStep : undefined}
+        />
+        <StatsTransactionAmountDistributionCard
+          distribution={viewModel.transactionAmountDistribution}
         />
         <SelectedSpendingTrendCard
           currencyCode={viewModel.currencyCode}
