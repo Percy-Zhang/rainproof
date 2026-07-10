@@ -43,6 +43,25 @@ describe('StatsScreen report kind switch', () => {
     expect(spendingCard.getByTestId('stats-match-row-food-line')).toBeTruthy();
   });
 
+  it('removes redundant metric cards while preserving monthly cash-flow trend', () => {
+    const screen = renderStatsScreen();
+
+    expect(screen.queryByTestId('cash-flow-card')).toBeNull();
+    expect(screen.queryByTestId('monthly-averages-card')).toBeNull();
+    expect(screen.queryByTestId('gross-net-spending-card')).toBeNull();
+    expect(screen.getByTestId('monthly-trend-card')).toBeTruthy();
+  });
+
+  it('renders the selected trend once immediately after the spending breakdown card', () => {
+    const screen = renderStatsScreen();
+    const cardIds = collectTestIds(screen.toJSON()).filter((testID) => testID.endsWith('-card'));
+    const spendingCardIndex = cardIds.indexOf('spending-chart-card');
+
+    expect(screen.getAllByTestId('selected-spending-trend-card')).toHaveLength(1);
+    expect(spendingCardIndex).toBeGreaterThanOrEqual(0);
+    expect(cardIds[spendingCardIndex + 1]).toBe('selected-spending-trend-card');
+  });
+
   it('switches the donut rows to Income and excludes expenses and transfers', () => {
     const screen = renderStatsScreen();
 
@@ -477,6 +496,20 @@ function renderStatsScreen({
       : statsSnapshot,
     onOpenStatsDrilldown,
   }));
+}
+
+function collectTestIds(node: unknown): string[] {
+  if (Array.isArray(node)) {
+    return node.flatMap(collectTestIds);
+  }
+
+  if (!node || typeof node !== 'object') {
+    return [];
+  }
+
+  const renderedNode = node as { children?: unknown; props?: { testID?: unknown } };
+  const ownTestId = typeof renderedNode.props?.testID === 'string' ? [renderedNode.props.testID] : [];
+  return [...ownTestId, ...collectTestIds(renderedNode.children)];
 }
 
 function snapshot(

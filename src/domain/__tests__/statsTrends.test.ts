@@ -231,7 +231,7 @@ function report(reportKind: 'expense' | 'income', range = fullRange, accountIds?
 }
 
 describe('stats trend helpers', () => {
-  it('builds monthly cash-flow buckets, averages, and gross vs net spending from net-aware line rows', () => {
+  it('builds monthly cash-flow buckets from net-aware line rows', () => {
     const summary = getStatsMonthlyTrendSummary({
       incomeReport: report('income'),
       expenseReport: report('expense'),
@@ -241,29 +241,13 @@ describe('stats trend helpers', () => {
     expect(summary.buckets.map((bucket) => [
       bucket.monthKey,
       bucket.incomeNetMinor,
-      bucket.spendingGrossMinor,
       bucket.spendingNetMinor,
-      bucket.linkedSpendingAdjustmentMinor,
       bucket.netCashFlowMinor,
     ])).toEqual([
-      ['2026-01', 300000, 10000, 8000, 2000, 292000],
-      ['2026-02', 250000, 10000, 5000, 5000, 245000],
-      ['2026-03', 0, 9000, 9000, 0, -9000],
+      ['2026-01', 300000, 8000, 292000],
+      ['2026-02', 250000, 5000, 245000],
+      ['2026-03', 0, 9000, -9000],
     ]);
-    expect(summary.grossNetSpending).toEqual({
-      grossSpendingMinor: 29000,
-      linkedAdjustmentMinor: 7000,
-      netSpendingMinor: 22000,
-    });
-    expect(summary.averages).toEqual(
-      expect.objectContaining({
-        monthCount: 3,
-        averageIncomeMinor: 183333,
-        averageSpendingMinor: 7333,
-        averageNetCashFlowMinor: 176000,
-        basisLabel: '3 selected months',
-      }),
-    );
   });
 
   it('respects period, account, and currency filters through the input reports', () => {

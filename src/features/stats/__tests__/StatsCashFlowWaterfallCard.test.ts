@@ -25,6 +25,7 @@ describe('StatsCashFlowWaterfallCard', () => {
     expect(card.getByTestId('stats-cash-flow-step-amount-income').props.children).toBe('+$50.00');
     expect(card.getByTestId('stats-cash-flow-step-amount-expense:food').props.children).toBe('-$20.00');
     expect(card.getByTestId('stats-cash-flow-step-amount-end').props.children).toBe('$125.00');
+    expect(card.getByTestId('stats-cash-flow-net-change').props.children).toEqual(['+$25.00', ' net']);
     expect(card.getByTestId('stats-cash-flow-step-track-income')).toBeTruthy();
   });
 

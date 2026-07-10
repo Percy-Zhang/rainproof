@@ -6,38 +6,16 @@ import {
   type StatsReportRollupKind,
 } from './statsReports';
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 export type StatsMonthlyTrendBucket = {
   monthKey: string;
   monthLabel: string;
-  incomeGrossMinor: number;
   incomeNetMinor: number;
-  spendingGrossMinor: number;
   spendingNetMinor: number;
-  linkedSpendingAdjustmentMinor: number;
   netCashFlowMinor: number;
-};
-
-export type StatsMonthlyAverages = {
-  monthCount: number;
-  averageIncomeMinor: number;
-  averageSpendingMinor: number;
-  averageNetCashFlowMinor: number;
-  basisLabel: string;
-  note: string;
-};
-
-export type StatsGrossNetSpendingSummary = {
-  grossSpendingMinor: number;
-  linkedAdjustmentMinor: number;
-  netSpendingMinor: number;
 };
 
 export type StatsMonthlyTrendSummary = {
   buckets: StatsMonthlyTrendBucket[];
-  averages: StatsMonthlyAverages;
-  grossNetSpending: StatsGrossNetSpendingSummary;
 };
 
 export type StatsRollupTrendBucket = {
@@ -69,45 +47,22 @@ export function getStatsMonthlyTrendSummary({
 
   for (const row of incomeReport.rows) {
     const bucket = ensureMonthlyBucket(bucketMap, getMonthKey(row.transactionDatetime));
-    bucket.incomeGrossMinor += row.grossAmountMinor;
     bucket.incomeNetMinor += row.netAmountMinor;
   }
 
   for (const row of expenseReport.rows) {
     const bucket = ensureMonthlyBucket(bucketMap, getMonthKey(row.transactionDatetime));
-    bucket.spendingGrossMinor += row.grossAmountMinor;
     bucket.spendingNetMinor += row.netAmountMinor;
   }
 
   const buckets = Array.from(bucketMap.values())
     .map((bucket) => ({
       ...bucket,
-      linkedSpendingAdjustmentMinor: Math.max(0, bucket.spendingGrossMinor - bucket.spendingNetMinor),
       netCashFlowMinor: bucket.incomeNetMinor - bucket.spendingNetMinor,
     }))
     .sort((left, right) => left.monthKey.localeCompare(right.monthKey));
-  const monthCount = buckets.length;
-  const totalIncomeNetMinor = buckets.reduce((sum, bucket) => sum + bucket.incomeNetMinor, 0);
-  const totalSpendingGrossMinor = buckets.reduce((sum, bucket) => sum + bucket.spendingGrossMinor, 0);
-  const totalSpendingNetMinor = buckets.reduce((sum, bucket) => sum + bucket.spendingNetMinor, 0);
-  const totalNetCashFlowMinor = buckets.reduce((sum, bucket) => sum + bucket.netCashFlowMinor, 0);
 
-  return {
-    buckets,
-    averages: {
-      monthCount,
-      averageIncomeMinor: averageMinor(totalIncomeNetMinor, monthCount),
-      averageSpendingMinor: averageMinor(totalSpendingNetMinor, monthCount),
-      averageNetCashFlowMinor: averageMinor(totalNetCashFlowMinor, monthCount),
-      basisLabel: monthCount === 1 ? 'Selected month' : `${monthCount} selected months`,
-      note: getAverageNote(range),
-    },
-    grossNetSpending: {
-      grossSpendingMinor: totalSpendingGrossMinor,
-      linkedAdjustmentMinor: Math.max(0, totalSpendingGrossMinor - totalSpendingNetMinor),
-      netSpendingMinor: totalSpendingNetMinor,
-    },
-  };
+  return { buckets };
 }
 
 export function getStatsRollupMonthlyTrend({
@@ -166,11 +121,8 @@ function createMonthlyBucketMap(range: DateRange): Map<string, StatsMonthlyTrend
       {
         monthKey,
         monthLabel: formatMonthLabel(monthKey),
-        incomeGrossMinor: 0,
         incomeNetMinor: 0,
-        spendingGrossMinor: 0,
         spendingNetMinor: 0,
-        linkedSpendingAdjustmentMinor: 0,
         netCashFlowMinor: 0,
       },
     ]),
@@ -204,11 +156,8 @@ function ensureMonthlyBucket(
   const bucket: StatsMonthlyTrendBucket = {
     monthKey,
     monthLabel: formatMonthLabel(monthKey),
-    incomeGrossMinor: 0,
     incomeNetMinor: 0,
-    spendingGrossMinor: 0,
     spendingNetMinor: 0,
-    linkedSpendingAdjustmentMinor: 0,
     netCashFlowMinor: 0,
   };
   bucketMap.set(monthKey, bucket);
@@ -274,16 +223,4 @@ function formatMonthLabel(monthKey: string): string {
 
 function averageMinor(totalMinor: number, count: number): number {
   return count > 0 ? Math.round(totalMinor / count) : 0;
-}
-
-function getAverageNote(range: DateRange): string {
-  const start = new Date(range.startIso);
-  const end = new Date(range.endIso);
-  const durationDays = Math.max(0, (end.getTime() - start.getTime()) / DAY_MS);
-
-  if (durationDays > 0 && durationDays < 28) {
-    return 'Short selected period; averages may be noisy.';
-  }
-
-  return 'Average across selected calendar months; partial months are included.';
 }

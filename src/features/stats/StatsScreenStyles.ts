@@ -110,48 +110,9 @@ export const statsStyles = StyleSheet.create({
     fontSize: typography.small,
     fontWeight: '800',
   },
-  flowGrid: {
-    gap: spacing.sm,
-  },
-  metric: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.xs,
-    padding: spacing.md,
-  },
-  metricIncome: {
-    backgroundColor: '#E4F3EF',
-    borderColor: colors.success,
-  },
-  metricExpense: {
-    backgroundColor: '#F8E8E8',
-    borderColor: colors.danger,
-  },
-  metricLabel: {
-    color: colors.muted,
-    fontSize: typography.small,
-    fontWeight: '800',
-  },
-  metricValue: {
-    color: colors.ink,
-    fontSize: typography.h3,
-    fontWeight: '900',
-  },
-  metricValueIncome: {
-    color: colors.success,
-  },
-  metricValueExpense: {
-    color: colors.danger,
-  },
   emptyText: {
     color: colors.muted,
     fontSize: typography.body,
-  },
-  reportNote: {
-    color: colors.muted,
-    fontSize: typography.small,
   },
   trendRows: {
     gap: spacing.xs,

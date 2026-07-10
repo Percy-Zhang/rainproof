@@ -17,12 +17,29 @@ export function StatsCashFlowWaterfallCard({
   onOpenStep?: (step: StatsCashFlowWaterfallStep) => void;
 }) {
   const scale = getWaterfallScale(model.steps);
+  const netChangeMinor = model.endingBalanceMinor - model.startingBalanceMinor;
+  const netChangeColor = netChangeMinor > 0
+    ? colors.success
+    : netChangeMinor < 0
+      ? colors.danger
+      : colors.muted;
 
   return (
     <Card testID="stats-cash-flow-waterfall-card">
-      <View style={styles.header}>
-        <Text style={styles.title}>Cash flow</Text>
-        <Text style={styles.subtitle}>Selected balance movement for this period</Text>
+      <View style={styles.headerRow}>
+        <View style={styles.headerText}>
+          <Text style={styles.title}>Cash flow</Text>
+          <Text style={styles.subtitle}>Selected balance movement for this period</Text>
+        </View>
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.68}
+          numberOfLines={1}
+          style={[styles.netChange, { color: netChangeColor }]}
+          testID="stats-cash-flow-net-change"
+        >
+          {formatSignedMoney(netChangeMinor, model.currencyCode)} net
+        </Text>
       </View>
 
       {model.eligibleAccountIds.length ? (
@@ -182,8 +199,16 @@ function getStepTone(step: StatsCashFlowWaterfallStep): string {
 }
 
 const styles = StyleSheet.create({
-  header: {
+  headerRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'space-between',
+  },
+  headerText: {
+    flex: 1,
     gap: spacing.xs,
+    minWidth: 0,
   },
   title: {
     color: colors.ink,
@@ -194,6 +219,13 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: typography.small,
     fontWeight: '700',
+  },
+  netChange: {
+    flexShrink: 0,
+    fontSize: typography.body,
+    fontWeight: '900',
+    maxWidth: '48%',
+    textAlign: 'right',
   },
   rows: {
     marginHorizontal: -spacing.xs,

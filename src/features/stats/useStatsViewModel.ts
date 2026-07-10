@@ -2,7 +2,7 @@ import type { DateTimePickerEvent } from '@react-native-community/datetimepicker
 import { useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { getAccountBalances, getCashFlowSummary } from '../../domain/aggregates';
+import { getAccountBalances } from '../../domain/aggregates';
 import { getSelectableAccounts, getSelectableAccountIds } from '../../domain/accountSelection';
 import { getBalanceHistoryPoints } from '../../domain/balanceHistory';
 import { defaultCategories } from '../../domain/categories';
@@ -279,32 +279,6 @@ export function useStatsViewModel({
       range,
     });
   }, [activeStatsReport, range, selectedSpendingRollup, spendingDonutMode]);
-  const cashFlow = useMemo(() => {
-    if (!accountIds.length) {
-      return {
-        currencyCode,
-        incomeMinor: 0,
-        expenseMinor: 0,
-        netMinor: 0,
-      };
-    }
-
-    return getCashFlowSummary({
-      transactions: snapshot.transactions,
-      lines: snapshot.transactionLines,
-      transactionLinks: snapshot.transactionLinks,
-      range,
-      currencyCode,
-      accountIds,
-    });
-  }, [
-    accountIds,
-    currencyCode,
-    range,
-    snapshot.transactionLines,
-    snapshot.transactionLinks,
-    snapshot.transactions,
-  ]);
   const balanceHistoryPoints = useMemo(() => getBalanceHistoryPoints({
     accounts: snapshot.accounts,
     transactions: snapshot.transactions,
@@ -540,7 +514,6 @@ export function useStatsViewModel({
     balanceHistoryMode,
     balanceHistoryPoints: balanceHistoryDisplay.points,
     bottomPadding,
-    cashFlow,
     cashFlowWaterfall,
     categoryChanges,
     categories,

@@ -19,10 +19,6 @@ import { StatsBalanceHistoryCard } from './StatsBalanceHistoryCard';
 import { StatsBottomControls } from './StatsBottomControls';
 import { StatsCategoryChangesCard } from './StatsCategoryChangesCard';
 import { StatsCashFlowWaterfallCard } from './StatsCashFlowWaterfallCard';
-import {
-  CashFlowCard,
-  MonthlyAveragesCard,
-} from './StatsMetricCards';
 import { statsStyles as styles } from './StatsScreenStyles';
 import { StatsSpendingCard } from './StatsSpendingCard';
 import { StatsTransactionAmountDistributionCard } from './StatsTransactionAmountDistributionCard';
@@ -191,11 +187,6 @@ export function StatsScreen({
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
-        <CashFlowCard cashFlow={viewModel.cashFlow} currencyCode={viewModel.currencyCode} />
-        <MonthlyAveragesCard
-          currencyCode={viewModel.currencyCode}
-          monthlyTrendSummary={viewModel.monthlyTrendSummary}
-        />
         <MonthlyCashFlowTrendCard
           currencyCode={viewModel.currencyCode}
           monthlyTrendSummary={viewModel.monthlyTrendSummary}
@@ -211,6 +202,11 @@ export function StatsScreen({
           spendingDonut={viewModel.spendingDonut}
           spendingDonutMode={viewModel.spendingDonutMode}
           statsReportKind={viewModel.statsReportKind}
+        />
+        <SelectedSpendingTrendCard
+          currencyCode={viewModel.currencyCode}
+          reportKind={viewModel.statsReportKind}
+          selectedSpendingTrend={viewModel.selectedSpendingTrend}
         />
         <StatsBalanceHistoryCard
           currencyCode={viewModel.currencyCode}
@@ -234,11 +230,6 @@ export function StatsScreen({
         />
         <StatsTransactionAmountDistributionCard
           distribution={viewModel.transactionAmountDistribution}
-        />
-        <SelectedSpendingTrendCard
-          currencyCode={viewModel.currencyCode}
-          reportKind={viewModel.statsReportKind}
-          selectedSpendingTrend={viewModel.selectedSpendingTrend}
         />
       </ScrollView>
 
