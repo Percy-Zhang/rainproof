@@ -15,6 +15,7 @@ import {
 import { Chip, SectionHeader } from '../../components/ui';
 import type { AccountBalance, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
+import { StatsBalanceHistoryCard } from './StatsBalanceHistoryCard';
 import { StatsBottomControls } from './StatsBottomControls';
 import {
   CashFlowCard,
@@ -207,6 +208,16 @@ export function StatsScreen({
           spendingDonut={viewModel.spendingDonut}
           spendingDonutMode={viewModel.spendingDonutMode}
           statsReportKind={viewModel.statsReportKind}
+        />
+        <StatsBalanceHistoryCard
+          currencyCode={viewModel.currencyCode}
+          emptyLabel={viewModel.balanceHistoryEmptyLabel}
+          mode={viewModel.balanceHistoryMode}
+          onSelectMode={viewModel.selectBalanceHistoryMode}
+          onSelectPoint={viewModel.selectBalanceHistoryPoint}
+          points={viewModel.balanceHistoryPoints}
+          selectedChangeMinor={viewModel.selectedBalanceHistoryChangeMinor}
+          selectedPoint={viewModel.selectedBalanceHistoryPoint}
         />
         <SelectedSpendingTrendCard
           currencyCode={viewModel.currencyCode}

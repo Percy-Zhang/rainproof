@@ -46,7 +46,11 @@ export function StatsBottomControls({
         </View>
       ) : null}
 
-      <PeriodCarousel selectedOption={selectedPeriodOption} onSelectOption={onSelectPeriodOption} />
+      <PeriodCarousel
+        selectedOption={selectedPeriodOption}
+        onSelectOption={onSelectPeriodOption}
+        testID="stats-period-carousel"
+      />
     </BottomSelectorPanel>
   );
 }

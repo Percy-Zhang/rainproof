@@ -2,11 +2,13 @@ import type { DateTimePickerEvent } from '@react-native-community/datetimepicker
 import { useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { getCashFlowSummary } from '../../domain/aggregates';
+import { getAccountBalances, getCashFlowSummary } from '../../domain/aggregates';
 import { getSelectableAccounts, getSelectableAccountIds } from '../../domain/accountSelection';
+import { getBalanceHistoryPoints } from '../../domain/balanceHistory';
 import { defaultCategories } from '../../domain/categories';
 import { getEffectiveDisplayCurrency } from '../../domain/currency';
 import { getDateRangeForPreset, getInclusiveDateRange, toDateInputValue } from '../../domain/dates';
+import { getForecastBalanceProjection } from '../../domain/forecastBalance';
 import {
   getStatsInitialSelectedAccountIds,
   getStatsSelectedAccountIdsForCurrency,
@@ -23,9 +25,15 @@ import {
   getStatsMonthlyTrendSummary,
   getStatsRollupMonthlyTrend,
 } from '../../domain/statsTrends';
+import { getUpcomingPaymentForecastOccurrences } from '../../domain/upcomingPaymentForecast';
 import type { AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
 import type { PeriodCarouselOption, PeriodOption } from '../transactions/PeriodCarousel';
+import {
+  getStatsBalanceHistoryDisplayPoints,
+  getStatsBalanceHistoryForecastRange,
+  type StatsBalanceHistoryMode,
+} from './statsBalanceHistory';
 
 export type StatsRangeMode = 'preset' | 'custom';
 export type StatsDatePickerTarget = 'start' | 'end';
@@ -69,6 +77,9 @@ export function useStatsViewModel({
   const [spendingDonutMode, setSpendingDonutMode] = useState<StatsDonutMode>('category');
   const [selectedSpendingCategoryRollupId, setSelectedSpendingCategoryRollupId] = useState<string | null>('');
   const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState<string | null>('');
+  const [balanceHistoryMode, setBalanceHistoryMode] = useState<StatsBalanceHistoryMode>('history');
+  const [selectedBalanceHistoryPointId, setSelectedBalanceHistoryPointId] = useState('');
+  const statsNow = useMemo(() => new Date(), []);
   const categories = snapshot.categories ?? defaultCategories;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
 
@@ -220,7 +231,104 @@ export function useStatsViewModel({
     snapshot.transactionLinks,
     snapshot.transactions,
   ]);
+  const balanceHistoryPoints = useMemo(() => getBalanceHistoryPoints({
+    accounts: snapshot.accounts,
+    transactions: snapshot.transactions,
+    transactionLines: snapshot.transactionLines,
+    accountIds,
+    currencyCode,
+    range,
+    now: statsNow,
+  }), [
+    accountIds,
+    currencyCode,
+    range,
+    snapshot.accounts,
+    snapshot.transactionLines,
+    snapshot.transactions,
+    statsNow,
+  ]);
+  const currentSelectedBalanceMinor = useMemo(() => {
+    const selectedAccountIdsForCurrency = new Set(accountIds);
+
+    return getAccountBalances(snapshot.accounts, snapshot.transactionLines)
+      .filter(
+        ({ account }) =>
+          selectedAccountIdsForCurrency.has(account.id) &&
+          account.currencyCode === currencyCode,
+      )
+      .reduce((sum, accountBalance) => sum + accountBalance.balanceMinor, 0);
+  }, [accountIds, currencyCode, snapshot.accounts, snapshot.transactionLines]);
+  const balanceHistoryForecastRange = useMemo(
+    () => getStatsBalanceHistoryForecastRange({ range, now: statsNow }),
+    [range, statsNow],
+  );
+  const balanceHistoryForecastOccurrences = useMemo(() => getUpcomingPaymentForecastOccurrences({
+    accountIds,
+    accounts: snapshot.accounts,
+    currencyCode,
+    range: balanceHistoryForecastRange,
+    recurringItems: snapshot.recurringItems,
+  }), [
+    accountIds,
+    balanceHistoryForecastRange,
+    currencyCode,
+    snapshot.accounts,
+    snapshot.recurringItems,
+  ]);
+  const balanceHistoryForecastProjection = useMemo(() => getForecastBalanceProjection({
+    occurrences: balanceHistoryForecastOccurrences,
+    range: balanceHistoryForecastRange,
+    startingBalanceMinor: currentSelectedBalanceMinor,
+  }), [
+    balanceHistoryForecastOccurrences,
+    balanceHistoryForecastRange,
+    currentSelectedBalanceMinor,
+  ]);
+  const balanceHistoryDisplay = useMemo(() => getStatsBalanceHistoryDisplayPoints({
+    currentBalanceMinor: currentSelectedBalanceMinor,
+    forecastEvents: balanceHistoryForecastProjection.events,
+    forecastPoints: balanceHistoryForecastProjection.points,
+    historyPoints: balanceHistoryPoints,
+    mode: balanceHistoryMode,
+    now: statsNow,
+  }), [
+    balanceHistoryForecastProjection.events,
+    balanceHistoryForecastProjection.points,
+    balanceHistoryMode,
+    balanceHistoryPoints,
+    currentSelectedBalanceMinor,
+    statsNow,
+  ]);
+  const selectedBalanceHistoryPoint = useMemo(
+    () =>
+      balanceHistoryDisplay.points.find((point) => point.id === selectedBalanceHistoryPointId) ??
+      balanceHistoryDisplay.points.find((point) => point.id === balanceHistoryDisplay.defaultSelectedPointId) ??
+      balanceHistoryDisplay.points.at(-1),
+    [balanceHistoryDisplay.defaultSelectedPointId, balanceHistoryDisplay.points, selectedBalanceHistoryPointId],
+  );
+  const selectedBalanceHistoryIndex = selectedBalanceHistoryPoint
+    ? balanceHistoryDisplay.points.findIndex((point) => point.id === selectedBalanceHistoryPoint.id)
+    : -1;
+  const selectedBalanceHistoryChangeMinor =
+    selectedBalanceHistoryPoint?.kind === 'forecast'
+      ? selectedBalanceHistoryPoint.event?.netChangeMinor ?? 0
+      : selectedBalanceHistoryPoint?.kind === 'today'
+        ? 0
+        : selectedBalanceHistoryIndex > 0 && selectedBalanceHistoryPoint
+          ? selectedBalanceHistoryPoint.balanceMinor -
+            balanceHistoryDisplay.points[selectedBalanceHistoryIndex - 1].balanceMinor
+          : 0;
+  const balanceHistoryEmptyLabel = accountIds.length
+    ? balanceHistoryMode === 'forecast'
+      ? 'No forecast available for the selected accounts and currency.'
+      : 'No balance history for the selected accounts and currency.'
+    : `Select a ${currencyCode} account to see balance history.`;
   const bottomPadding = (rangeMode === 'custom' ? 220 : 140) + bottomInset;
+
+  useEffect(() => {
+    setSelectedBalanceHistoryPointId(balanceHistoryDisplay.defaultSelectedPointId);
+  }, [balanceHistoryDisplay]);
 
   function selectPeriodOption(option: PeriodCarouselOption) {
     if (option === 'custom') {
@@ -331,6 +439,9 @@ export function useStatsViewModel({
   return {
     accountIds,
     availableCurrencyCodes,
+    balanceHistoryEmptyLabel,
+    balanceHistoryMode,
+    balanceHistoryPoints: balanceHistoryDisplay.points,
     bottomPadding,
     cashFlow,
     categories,
@@ -345,7 +456,11 @@ export function useStatsViewModel({
     openSpendingDrilldown,
     rangeMode,
     returnToSpendingCategories,
+    selectBalanceHistoryMode: setBalanceHistoryMode,
+    selectBalanceHistoryPoint: setSelectedBalanceHistoryPointId,
     selectStatsReportKind,
+    selectedBalanceHistoryChangeMinor,
+    selectedBalanceHistoryPoint,
     selectedPeriodOption,
     selectedAccountIds,
     selectedSpendingRollup,
