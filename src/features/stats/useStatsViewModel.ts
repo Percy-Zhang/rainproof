@@ -26,6 +26,10 @@ import {
   type StatsDonutMode,
 } from '../../domain/statsChart';
 import { getStatsCategoryChanges } from '../../domain/statsCategoryChanges';
+import {
+  getStatsCashFlowWaterfall,
+  type StatsCashFlowWaterfallStep,
+} from '../../domain/statsCashFlowWaterfall';
 import { getStatsReport, type StatsReportKind } from '../../domain/statsReports';
 import {
   getStatsMonthlyTrendSummary,
@@ -174,6 +178,25 @@ export function useStatsViewModel({
     snapshot.transactionLines,
     snapshot.transactionLinks,
     snapshot.transactions,
+  ]);
+  const cashFlowWaterfall = useMemo(() => getStatsCashFlowWaterfall({
+    accounts: snapshot.accounts,
+    accountIds,
+    currencyCode,
+    expenseReport: spendingReport,
+    incomeReport,
+    range,
+    transactionLines: snapshot.transactionLines,
+    transactions: snapshot.transactions,
+  }), [
+    accountIds,
+    currencyCode,
+    incomeReport,
+    range,
+    snapshot.accounts,
+    snapshot.transactionLines,
+    snapshot.transactions,
+    spendingReport,
   ]);
   const monthlyTrendSummary = useMemo(() => getStatsMonthlyTrendSummary({
     incomeReport,
@@ -425,9 +448,21 @@ export function useStatsViewModel({
     openStatsCategoryDrilldown(categoryId);
   }
 
-  function openStatsCategoryDrilldown(categoryId: string, subcategoryId?: string) {
+  function openCashFlowWaterfallStep(step: StatsCashFlowWaterfallStep) {
+    if (!step.categoryId || !step.drilldownReportKind) {
+      return;
+    }
+
+    openStatsCategoryDrilldown(step.categoryId, undefined, step.drilldownReportKind);
+  }
+
+  function openStatsCategoryDrilldown(
+    categoryId: string,
+    subcategoryId?: string,
+    reportKind: StatsReportKind = statsReportKind,
+  ) {
     onOpenStatsDrilldown?.({
-      reportKind: statsReportKind,
+      reportKind,
       categoryId,
       subcategoryId,
       startIso: range.startIso,
@@ -487,6 +522,7 @@ export function useStatsViewModel({
     balanceHistoryPoints: balanceHistoryDisplay.points,
     bottomPadding,
     cashFlow,
+    cashFlowWaterfall,
     categoryChanges,
     categories,
     clearSelectedAccounts,
@@ -497,6 +533,7 @@ export function useStatsViewModel({
     handleDatePickerChange,
     monthlyTrendSummary,
     openCategoryChangeDrilldown,
+    openCashFlowWaterfallStep,
     openSpendingDetailedView,
     openSpendingDrilldown,
     rangeMode,

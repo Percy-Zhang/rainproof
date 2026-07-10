@@ -98,6 +98,41 @@ describe('StatsScreen report kind switch', () => {
     expect(screen.queryByTestId('stats-category-change-food')).toBeNull();
   });
 
+  it('keeps the complete cash flow waterfall independent of the donut report mode', () => {
+    const screen = renderStatsScreen();
+
+    expect(screen.getByTestId('stats-cash-flow-waterfall-card')).toBeTruthy();
+    expect(screen.getByTestId('stats-cash-flow-step-income')).toBeTruthy();
+    expect(screen.getByTestId('stats-cash-flow-step-expense:food')).toBeTruthy();
+    expect(screen.queryByTestId('stats-cash-flow-step-transfers')).toBeNull();
+
+    fireEvent.press(screen.getByTestId('stats-report-mode-income'));
+
+    expect(screen.getByTestId('stats-cash-flow-step-income')).toBeTruthy();
+    expect(screen.getByTestId('stats-cash-flow-step-expense:food')).toBeTruthy();
+  });
+
+  it('opens existing current-period drilldowns from meaningful waterfall steps', () => {
+    const onOpenStatsDrilldown = jest.fn();
+    const screen = renderStatsScreen({ onOpenStatsDrilldown });
+
+    fireEvent.press(screen.getByTestId('stats-cash-flow-step-income'));
+    fireEvent.press(screen.getByTestId('stats-cash-flow-step-expense:food'));
+
+    expect(onOpenStatsDrilldown).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      reportKind: 'income',
+      categoryId: 'income',
+      accountIds: ['acct-a', 'acct-b'],
+      currencyCode: 'AUD',
+    }));
+    expect(onOpenStatsDrilldown).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      reportKind: 'expense',
+      categoryId: 'food',
+      accountIds: ['acct-a', 'acct-b'],
+      currencyCode: 'AUD',
+    }));
+  });
+
   it('opens the existing current-period category drilldown from a comparison row', () => {
     const onOpenStatsDrilldown = jest.fn();
     const screen = renderStatsScreen({ onOpenStatsDrilldown });

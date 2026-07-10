@@ -18,6 +18,7 @@ import type { RootStackParamList } from '../../navigation/routes';
 import { StatsBalanceHistoryCard } from './StatsBalanceHistoryCard';
 import { StatsBottomControls } from './StatsBottomControls';
 import { StatsCategoryChangesCard } from './StatsCategoryChangesCard';
+import { StatsCashFlowWaterfallCard } from './StatsCashFlowWaterfallCard';
 import {
   CashFlowCard,
   MonthlyAveragesCard,
@@ -225,6 +226,10 @@ export function StatsScreen({
           onOpenCategory={onOpenStatsDrilldown ? viewModel.openCategoryChangeDrilldown : undefined}
           reportKind={viewModel.statsReportKind}
           rows={viewModel.categoryChanges}
+        />
+        <StatsCashFlowWaterfallCard
+          model={viewModel.cashFlowWaterfall}
+          onOpenStep={onOpenStatsDrilldown ? viewModel.openCashFlowWaterfallStep : undefined}
         />
         <SelectedSpendingTrendCard
           currencyCode={viewModel.currencyCode}
