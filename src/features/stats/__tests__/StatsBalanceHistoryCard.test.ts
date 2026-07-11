@@ -29,6 +29,8 @@ describe('StatsBalanceHistoryCard responsive chart', () => {
     expect(screen.getByTestId('stats-balance-history-svg').props.vbWidth).toBe(768);
     expect(screen.getByTestId('stats-balance-history-svg').props.vbHeight).toBe(136);
     expect(screen.getByTestId('stats-balance-selected-chart-point').props.cx).toBe(384);
+    expect(screen.getByText('Combined').props.numberOfLines).toBe(1);
+    expect(screen.getByText('Combined').props.adjustsFontSizeToFit).toBe(true);
   });
 });
 

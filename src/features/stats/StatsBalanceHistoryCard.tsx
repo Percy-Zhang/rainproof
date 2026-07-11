@@ -133,7 +133,12 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
               ]}
               testID={`stats-balance-mode-${option.id}`}
             >
-              <Text style={[styles.modeOptionText, selected && styles.modeOptionTextSelected]}>
+              <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+                numberOfLines={1}
+                style={[styles.modeOptionText, selected && styles.modeOptionTextSelected]}
+              >
                 {option.label}
               </Text>
             </Pressable>
@@ -349,6 +354,8 @@ function ForecastEventDetail({
         <View style={styles.eventMetric}>
           <Text style={styles.eventMetricLabel}>{onlyOccurrence ? 'Payment' : 'Net change'}</Text>
           <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
             numberOfLines={1}
             style={[
               styles.eventMetricValue,
@@ -362,7 +369,13 @@ function ForecastEventDetail({
         </View>
         <View style={styles.eventMetric}>
           <Text style={styles.eventMetricLabel}>Projected balance</Text>
-          <Text numberOfLines={1} style={styles.eventMetricValue} testID="stats-balance-event-projected-balance">
+          <Text
+            adjustsFontSizeToFit
+            minimumFontScale={0.72}
+            numberOfLines={1}
+            style={styles.eventMetricValue}
+            testID="stats-balance-event-projected-balance"
+          >
             {formatMoney(event.projectedBalanceMinor, currencyCode)}
           </Text>
         </View>
@@ -380,6 +393,8 @@ function ForecastEventDetail({
                 {occurrence.title}
               </Text>
               <Text
+                adjustsFontSizeToFit
+                minimumFontScale={0.72}
                 numberOfLines={1}
                 style={[
                   styles.eventOccurrenceAmount,
@@ -533,8 +548,10 @@ const styles = StyleSheet.create({
   },
   eventOccurrenceAmount: {
     color: colors.ink,
+    flexShrink: 1,
     fontSize: typography.small,
     fontWeight: '900',
+    maxWidth: '48%',
     textAlign: 'right',
   },
   eventOccurrenceList: {

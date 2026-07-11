@@ -1,4 +1,8 @@
-import { getDonutSliceIdAtPoint, getDonutSlices } from '../StatsDonutChart';
+import {
+  getDonutSliceIdAtPoint,
+  getDonutSlices,
+  getResponsiveStatsDonutSize,
+} from '../StatsDonutChart';
 import type { StatsReportRollup } from '../../../domain/statsReports';
 
 function rollup(id: string, amountMinor: number): StatsReportRollup {
@@ -39,5 +43,20 @@ describe('StatsDonutChart geometry', () => {
 
     expect(getDonutSliceIdAtPoint({ rollups, x: 110, y: 110 })).toBeUndefined();
     expect(getDonutSliceIdAtPoint({ rollups, x: 220, y: 220 })).toBeUndefined();
+  });
+
+  it('keeps phone sizing stable and uses more available tablet width', () => {
+    expect(getResponsiveStatsDonutSize(300)).toBe(220);
+    expect(getResponsiveStatsDonutSize(500)).toBe(250);
+    expect(getResponsiveStatsDonutSize(768)).toBe(280);
+    expect(getResponsiveStatsDonutSize(180)).toBe(180);
+  });
+
+  it('keeps slice hit testing aligned when the donut grows on tablet', () => {
+    const rollups = [rollup('food', 7000), rollup('housing', 3000)];
+
+    expect(getDonutSliceIdAtPoint({ rollups, size: 280, x: 140, y: 13 })).toBe('food');
+    expect(getDonutSliceIdAtPoint({ rollups, size: 280, x: 13, y: 140 })).toBe('housing');
+    expect(getDonutSliceIdAtPoint({ rollups, size: 280, x: 140, y: 140 })).toBeUndefined();
   });
 });

@@ -76,6 +76,8 @@ function AmountBucketRow({
         ) : null}
       </View>
       <Text
+        adjustsFontSizeToFit
+        minimumFontScale={0.72}
         numberOfLines={1}
         style={styles.count}
         testID={`stats-transaction-amount-bucket-count-${bucket.id}`}
@@ -155,6 +157,6 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     fontWeight: '900',
     textAlign: 'right',
-    width: 30,
+    width: 44,
   },
 });

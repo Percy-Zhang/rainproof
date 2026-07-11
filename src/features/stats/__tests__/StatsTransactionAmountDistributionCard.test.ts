@@ -44,6 +44,22 @@ describe('StatsTransactionAmountDistributionCard', () => {
     expect(screen.getAllByText('0')).toHaveLength(6);
     expect(screen.queryByTestId('stats-transaction-amount-bucket-fill-0-10')).toBeNull();
   });
+
+  it('keeps large counts constrained to a single readable value column', () => {
+    const screen = renderCard({
+      ...distribution,
+      totalCount: 123456,
+      buckets: distribution.buckets.map((bucket, index) => ({
+        ...bucket,
+        count: index === 0 ? 123456 : 0,
+      })),
+    });
+    const count = screen.getByTestId('stats-transaction-amount-bucket-count-0-10');
+
+    expect(count.props.numberOfLines).toBe(1);
+    expect(count.props.adjustsFontSizeToFit).toBe(true);
+    expect(StyleSheet.flatten(count.props.style).width).toBe(44);
+  });
 });
 
 function renderCard(model: StatsTransactionAmountDistribution) {

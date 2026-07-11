@@ -80,7 +80,7 @@ export function StatsSpendingCard({
           <View style={styles.matchHeaderRow}>
             <View style={styles.matchHeaderText}>
               <Text style={styles.matchTitle}>{recentMatchesTitle}</Text>
-              <Text style={styles.matchDetail}>{recentMatchesDetail}</Text>
+              <Text numberOfLines={1} style={styles.matchDetail}>{recentMatchesDetail}</Text>
             </View>
             {selectedSpendingRollup && onOpenDrilldown ? (
               <ActionButton variant="ghost" onPress={onOpenDrilldown}>

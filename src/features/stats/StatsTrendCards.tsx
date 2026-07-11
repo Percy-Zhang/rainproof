@@ -26,7 +26,7 @@ export function SelectedSpendingTrendCard({
     <Card testID="selected-spending-trend-card">
       <View style={styles.cardHeaderText}>
         <Text style={styles.cardTitle}>Selected {reportKind === 'expense' ? 'expense' : 'income'} trend</Text>
-        <Text style={styles.cardSubtitle}>
+        <Text numberOfLines={2} style={styles.cardSubtitle}>
           {selectedSpendingTrend.rollup.label} - monthly net {reportKind === 'expense' ? 'spending' : 'income'}
         </Text>
       </View>
@@ -59,7 +59,7 @@ function RollupTrendRow({
 
   return (
     <View style={styles.trendRow}>
-      <Text style={styles.trendMonth}>{bucket.monthLabel}</Text>
+      <Text numberOfLines={1} style={styles.trendMonth}>{bucket.monthLabel}</Text>
       <View style={styles.trendValues}>
         <TrendValue label="Net" value={formatMoney(bucket.netAmountMinor, currencyCode)} tone={reportKind} />
         <TrendValue label={detail} value="" />
@@ -79,9 +79,14 @@ function TrendValue({
 }) {
   return (
     <View style={styles.trendValue}>
-      <Text style={styles.trendLabel}>{label}</Text>
+      <Text numberOfLines={1} style={styles.trendLabel}>{label}</Text>
       {value ? (
-        <Text style={[styles.trendAmount, tone === 'income' && styles.trendIncome, tone === 'expense' && styles.trendExpense]}>
+        <Text
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+          numberOfLines={1}
+          style={[styles.trendAmount, tone === 'income' && styles.trendIncome, tone === 'expense' && styles.trendExpense]}
+        >
           {value}
         </Text>
       ) : null}

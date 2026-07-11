@@ -1,4 +1,12 @@
-import { Pressable, StyleSheet, Text, View, type GestureResponderEvent } from 'react-native';
+import { useCallback, useState } from 'react';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+} from 'react-native';
 import Svg, { Circle, G, Path } from 'react-native-svg';
 
 import { formatMoney } from '../../domain/money';
@@ -16,7 +24,8 @@ type StatsDonutChartProps = {
   totalLabel?: string;
 };
 
-const chartSize = 220;
+const defaultChartSize = 220;
+const maximumChartSize = 280;
 const outerRadius = 104;
 const selectedOuterRadius = 110;
 const innerRadius = 66;
@@ -44,10 +53,19 @@ export function StatsDonutChart({
     : undefined;
   const totalNetAmountMinor = positiveRollups.reduce((sum, rollup) => sum + rollup.netAmountMinor, 0);
   const slices = getDonutSlices(positiveRollups);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const renderedChartSize = getResponsiveStatsDonutSize(containerWidth);
+  const handleChartLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = event.nativeEvent.layout.width;
+    setContainerWidth((currentWidth) => (
+      Math.abs(currentWidth - nextWidth) < 1 ? currentWidth : nextWidth
+    ));
+  }, []);
 
   function handlePress(event: GestureResponderEvent) {
     const rollupId = getDonutSliceIdAtPoint({
       rollups: positiveRollups,
+      size: renderedChartSize,
       x: event.nativeEvent.locationX,
       y: event.nativeEvent.locationY,
     });
@@ -66,15 +84,24 @@ export function StatsDonutChart({
   }
 
   return (
-    <View style={styles.chartWrap}>
+    <View onLayout={handleChartLayout} style={styles.chartWrap}>
       <Pressable
         accessibilityLabel={accessibilityLabel}
         accessibilityRole="button"
         onPress={handlePress}
-        style={({ pressed }) => [styles.chartPressable, pressed && styles.pressed]}
+        style={({ pressed }) => [
+          styles.chartPressable,
+          { height: renderedChartSize, width: renderedChartSize },
+          pressed && styles.pressed,
+        ]}
         testID="stats-donut-chart"
       >
-        <Svg pointerEvents="none" width={chartSize} height={chartSize} viewBox="-120 -120 240 240">
+        <Svg
+          pointerEvents="none"
+          width={renderedChartSize}
+          height={renderedChartSize}
+          viewBox="-120 -120 240 240"
+        >
           <G>
             {slices.map((slice) => {
               const isSelected = slice.rollup.id === selectedRollup?.id;
@@ -114,9 +141,9 @@ export function getDonutSliceIdAtPoint({
   rollups,
   x,
   y,
-  size = chartSize,
-  minimumRadius = innerRadius - 14,
-  maximumRadius = selectedOuterRadius + 16,
+  size = defaultChartSize,
+  minimumRadius = (innerRadius - 14) * (size / defaultChartSize),
+  maximumRadius = (selectedOuterRadius + 16) * (size / defaultChartSize),
 }: {
   rollups: StatsReportRollup[];
   x: number;
@@ -139,6 +166,18 @@ export function getDonutSliceIdAtPoint({
     const isLast = index === slices.length - 1;
     return angle >= slice.startAngle && (angle < slice.endAngle || (isLast && angle <= slice.endAngle));
   })?.rollup.id;
+}
+
+export function getResponsiveStatsDonutSize(containerWidth: number): number {
+  if (!Number.isFinite(containerWidth) || containerWidth <= 0) {
+    return defaultChartSize;
+  }
+
+  if (containerWidth < 360) {
+    return Math.min(defaultChartSize, containerWidth);
+  }
+
+  return Math.min(maximumChartSize, Math.max(defaultChartSize, Math.round(containerWidth / 2)));
 }
 
 export function getDonutSlices(rollups: StatsReportRollup[]): DonutSlice[] {
@@ -225,12 +264,11 @@ const styles = StyleSheet.create({
   chartWrap: {
     alignItems: 'center',
     justifyContent: 'center',
+    width: '100%',
   },
   chartPressable: {
     alignItems: 'center',
-    height: chartSize,
     justifyContent: 'center',
-    width: chartSize,
   },
   centerLabel: {
     alignItems: 'center',
