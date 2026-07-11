@@ -4,36 +4,10 @@ import { Card } from '../../components/ui';
 import { formatMoney } from '../../domain/money';
 import type { StatsReportKind } from '../../domain/statsReports';
 import type {
-  StatsMonthlyTrendBucket,
-  StatsMonthlyTrendSummary,
   StatsRollupMonthlyTrend,
   StatsRollupTrendBucket,
 } from '../../domain/statsTrends';
 import { statsStyles as styles } from './StatsScreenStyles';
-import { formatSignedMoney, getNetTone } from './StatsScreenUtils';
-
-export function MonthlyCashFlowTrendCard({
-  currencyCode,
-  monthlyTrendSummary,
-}: {
-  currencyCode: string;
-  monthlyTrendSummary: StatsMonthlyTrendSummary;
-}) {
-  return (
-    <Card testID="monthly-trend-card">
-      <Text style={styles.cardTitle}>Monthly cash-flow trend</Text>
-      {monthlyTrendSummary.buckets.length ? (
-        <View style={styles.trendRows}>
-          {monthlyTrendSummary.buckets.map((bucket) => (
-            <MonthlyTrendRow key={bucket.monthKey} bucket={bucket} currencyCode={currencyCode} />
-          ))}
-        </View>
-      ) : (
-        <Text style={styles.emptyText}>No monthly trend data for this filter.</Text>
-      )}
-    </Card>
-  );
-}
 
 export function SelectedSpendingTrendCard({
   currencyCode,
@@ -67,23 +41,6 @@ export function SelectedSpendingTrendCard({
         ))}
       </View>
     </Card>
-  );
-}
-
-function MonthlyTrendRow({ bucket, currencyCode }: { bucket: StatsMonthlyTrendBucket; currencyCode: string }) {
-  return (
-    <View style={styles.trendRow}>
-      <Text style={styles.trendMonth}>{bucket.monthLabel}</Text>
-      <View style={styles.trendValues}>
-        <TrendValue label="Income" value={formatMoney(bucket.incomeNetMinor, currencyCode)} tone="income" />
-        <TrendValue label="Spending" value={formatMoney(bucket.spendingNetMinor, currencyCode)} tone="expense" />
-        <TrendValue
-          label="Net"
-          value={formatSignedMoney(bucket.netCashFlowMinor, currencyCode)}
-          tone={getNetTone(bucket.netCashFlowMinor)}
-        />
-      </View>
-    </View>
   );
 }
 

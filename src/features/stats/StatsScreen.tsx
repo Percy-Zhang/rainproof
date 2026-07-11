@@ -19,13 +19,11 @@ import { StatsBalanceHistoryCard } from './StatsBalanceHistoryCard';
 import { StatsBottomControls } from './StatsBottomControls';
 import { StatsCategoryChangesCard } from './StatsCategoryChangesCard';
 import { StatsCashFlowWaterfallCard } from './StatsCashFlowWaterfallCard';
+import { StatsMonthlyCashFlowChartCard } from './StatsMonthlyCashFlowChartCard';
 import { statsStyles as styles } from './StatsScreenStyles';
 import { StatsSpendingCard } from './StatsSpendingCard';
 import { StatsTransactionAmountDistributionCard } from './StatsTransactionAmountDistributionCard';
-import {
-  MonthlyCashFlowTrendCard,
-  SelectedSpendingTrendCard,
-} from './StatsTrendCards';
+import { SelectedSpendingTrendCard } from './StatsTrendCards';
 import { useStatsViewModel } from './useStatsViewModel';
 
 type StatsScreenProps = {
@@ -187,7 +185,7 @@ export function StatsScreen({
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
-        <MonthlyCashFlowTrendCard
+        <StatsMonthlyCashFlowChartCard
           currencyCode={viewModel.currencyCode}
           monthlyTrendSummary={viewModel.monthlyTrendSummary}
         />

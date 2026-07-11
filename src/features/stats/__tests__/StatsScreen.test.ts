@@ -50,6 +50,9 @@ describe('StatsScreen report kind switch', () => {
     expect(screen.queryByTestId('monthly-averages-card')).toBeNull();
     expect(screen.queryByTestId('gross-net-spending-card')).toBeNull();
     expect(screen.getByTestId('monthly-trend-card')).toBeTruthy();
+    expect(screen.getByTestId('monthly-cash-flow-chart-scroll')).toBeTruthy();
+    expect(screen.getAllByTestId(/^monthly-cash-flow-income-bar-/).length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId(/^monthly-cash-flow-spending-bar-/).length).toBeGreaterThan(0);
   });
 
   it('renders the selected trend once immediately after the spending breakdown card', () => {
