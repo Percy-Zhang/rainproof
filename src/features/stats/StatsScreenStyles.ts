@@ -15,9 +15,18 @@ export const statsStyles = StyleSheet.create({
     zIndex: 5,
   },
   scrollContent: {
-    gap: spacing.md,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
+  },
+  sectionContent: {
+    gap: spacing.md,
+  },
+  sectionTransition: {
+    width: '100%',
+  },
+  reportKindReveal: {
+    overflow: 'hidden',
+    width: '100%',
   },
   controlBlock: {
     gap: spacing.xs,
@@ -237,38 +246,5 @@ export const statsStyles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.78,
-  },
-  reportKindOption: {
-    alignItems: 'center',
-    borderRadius: 8,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingHorizontal: spacing.md,
-  },
-  reportKindOptionSelected: {
-    backgroundColor: colors.primary,
-  },
-  reportKindOptionText: {
-    color: colors.primaryDark,
-    fontSize: typography.small,
-    fontWeight: '900',
-  },
-  reportKindOptionTextSelected: {
-    color: colors.surface,
-  },
-  reportKindSwitch: {
-    alignItems: 'stretch',
-    alignSelf: 'stretch',
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.faint,
-    borderRadius: 10,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 2,
-    padding: 2,
-  },
-  reportKindSwitchRow: {
-    width: '100%',
   },
 });

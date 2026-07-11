@@ -8,7 +8,7 @@ Rainproof is a local-first personal finance app built with Expo and React Native
 - **Transactions:** add, edit, delete, search, and filter income, expenses, and transfers.
 - **Splits and transfers:** record standard and mixed split transactions, same-currency transfers, and cross-currency transfers with separate sent and received amounts.
 - **Budgets:** create category-scoped budgets, navigate budget periods, view Current and Compare history charts, and reorder budgets.
-- **Statistics:** review spending, income, cash-flow, category breakdowns, trends, and account-filtered reports.
+- **Statistics:** review spending, income, category breakdowns, trends, transaction-size distribution, account-filtered reports, and a cash-flow waterfall that reconciles selected balances for the active period.
 - **Dashboard:** customize visible cards, reorder Dashboard cards, filter by selected accounts, and use quick actions.
 - **Templates and upcoming payments:** save reusable transaction templates, prefill Add Transaction from templates or planned payments, and manage one-time or recurring Upcoming Payments.
 - **Linked transactions:** link reimbursements, refunds, and shared expense contributions, including parent and split-line endpoints where supported.

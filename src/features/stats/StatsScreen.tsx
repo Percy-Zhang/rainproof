@@ -7,6 +7,18 @@ import {
   type NativeSyntheticEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  ReduceMotion,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+  type SharedValue,
+} from 'react-native-reanimated';
 
 import {
   CompactAccountSelector,
@@ -15,12 +27,15 @@ import {
 import { Chip, SectionHeader } from '../../components/ui';
 import type { AccountBalance, AppSnapshot } from '../../domain/types';
 import type { RootStackParamList } from '../../navigation/routes';
+import { spacing } from '../../theme/tokens';
 import { StatsBalanceHistoryCard } from './StatsBalanceHistoryCard';
 import { StatsBottomControls } from './StatsBottomControls';
 import { StatsCategoryChangesCard } from './StatsCategoryChangesCard';
 import { StatsCashFlowWaterfallCard } from './StatsCashFlowWaterfallCard';
 import { StatsMonthlyCashFlowChartCard } from './StatsMonthlyCashFlowChartCard';
+import { StatsReportKindSwitch } from './StatsReportKindSwitch';
 import { statsStyles as styles } from './StatsScreenStyles';
+import { StatsSectionSelector, type StatsSection } from './StatsSectionSelector';
 import { StatsSpendingCard } from './StatsSpendingCard';
 import { StatsTransactionAmountDistributionCard } from './StatsTransactionAmountDistributionCard';
 import { SelectedSpendingTrendCard } from './StatsTrendCards';
@@ -40,6 +55,21 @@ const STATS_ACCOUNT_HEADER_SCROLL_THRESHOLD = 48;
 const STATS_ACCOUNT_HEADER_MANUAL_GUARD_MS = 420;
 const STATS_ACCOUNT_HEADER_TRANSITION_GUARD_MS = 320;
 const STATS_ACCOUNT_HEADER_TOP_RESET_OFFSET = 6;
+const STATS_SECTION_TRANSITION_DURATION_MS = 150;
+const STATS_REPORT_KIND_REVEAL_HEIGHT = 42;
+const STATS_REPORT_KIND_REVEAL_DURATION_MS = 150;
+const STATS_SECTION_LAYOUT_TRANSITION = LinearTransition
+  .duration(STATS_SECTION_TRANSITION_DURATION_MS)
+  .easing(Easing.out(Easing.cubic))
+  .reduceMotion(ReduceMotion.System);
+const STATS_LOCAL_ENTERING = FadeIn
+  .duration(150)
+  .easing(Easing.out(Easing.cubic))
+  .reduceMotion(ReduceMotion.System);
+const STATS_LOCAL_EXITING = FadeOut
+  .duration(120)
+  .easing(Easing.in(Easing.cubic))
+  .reduceMotion(ReduceMotion.System);
 
 export function StatsScreen({
   accountBalances,
@@ -50,6 +80,8 @@ export function StatsScreen({
   showHeader = true,
 }: StatsScreenProps) {
   const insets = useSafeAreaInsets();
+  const [activeSection, setActiveSection] = useState<StatsSection>('breakdown');
+  const activeSectionRef = useRef<StatsSection>('breakdown');
   const [accountMode, setAccountMode] = useState<CompactAccountSelectorMode>('peek');
   const accountModeRef = useRef<CompactAccountSelectorMode>('peek');
   const headerTransitionUntilRef = useRef(0);
@@ -57,6 +89,8 @@ export function StatsScreen({
   const lastScrollOffsetYRef = useRef(0);
   const scrollDirectionRef = useRef<'up' | 'down' | null>(null);
   const scrollDeltaRef = useRef(0);
+  const sectionOpacity = useSharedValue(1);
+  const reportKindVisibility = useSharedValue(1);
   const viewModel = useStatsViewModel({
     bottomInset: insets.bottom,
     defaultSelectedAccountIds,
@@ -148,6 +182,43 @@ export function StatsScreen({
     resetScrollIntentTracking,
   ]);
 
+  const handleSelectSection = useCallback((nextSection: StatsSection) => {
+    const currentSection = activeSectionRef.current;
+    if (currentSection === nextSection) {
+      return;
+    }
+
+    const currentUsesReportKind = statsSectionUsesReportKind(currentSection);
+    const nextUsesReportKind = statsSectionUsesReportKind(nextSection);
+    const timing = {
+      duration: STATS_SECTION_TRANSITION_DURATION_MS,
+      easing: Easing.out(Easing.cubic),
+      reduceMotion: ReduceMotion.System,
+    };
+
+    cancelAnimation(sectionOpacity);
+    sectionOpacity.value = 0.86;
+    sectionOpacity.value = withTiming(1, timing);
+
+    if (currentUsesReportKind !== nextUsesReportKind) {
+      cancelAnimation(reportKindVisibility);
+      reportKindVisibility.value = withTiming(nextUsesReportKind ? 1 : 0, {
+        duration: STATS_REPORT_KIND_REVEAL_DURATION_MS,
+        easing: Easing.out(Easing.cubic),
+        reduceMotion: ReduceMotion.System,
+      });
+    }
+
+    activeSectionRef.current = nextSection;
+    setActiveSection(nextSection);
+  }, [reportKindVisibility, sectionOpacity]);
+
+  const sectionTransitionStyle = useAnimatedStyle(() => ({
+    opacity: sectionOpacity.value,
+  }));
+
+  const reportKindVisible = statsSectionUsesReportKind(activeSection);
+
   return (
     <View style={styles.screen}>
       <View style={styles.fixedFilter}>
@@ -157,6 +228,11 @@ export function StatsScreen({
             detail="Review spending and cash flow by period and account."
           />
         ) : null}
+
+        <StatsSectionSelector
+          onSelectSection={handleSelectSection}
+          selectedSection={activeSection}
+        />
 
         <CompactAccountSelector
           accounts={viewModel.selectableAccounts}
@@ -176,6 +252,13 @@ export function StatsScreen({
           currencyCode={viewModel.currencyCode}
           onSelectCurrencyScope={viewModel.selectCurrencyScope}
         />
+
+        <StatsReportKindReveal
+          onSelectReportKind={viewModel.selectStatsReportKind}
+          progress={reportKindVisibility}
+          selectedReportKind={viewModel.statsReportKind}
+          visible={reportKindVisible}
+        />
       </View>
 
       <ScrollView
@@ -185,50 +268,18 @@ export function StatsScreen({
         scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
-        <StatsMonthlyCashFlowChartCard
-          currencyCode={viewModel.currencyCode}
-          monthlyTrendSummary={viewModel.monthlyTrendSummary}
-        />
-        <StatsSpendingCard
-          currencyCode={viewModel.currencyCode}
-          onOpenDetailedView={viewModel.openSpendingDetailedView}
-          onOpenDrilldown={onOpenStatsDrilldown ? viewModel.openSpendingDrilldown : undefined}
-          onOpenTransaction={onOpenTransaction}
-          onReturnToCategories={viewModel.returnToSpendingCategories}
-          onSelectRollup={viewModel.selectSpendingRollup}
-          onSelectStatsReportKind={viewModel.selectStatsReportKind}
-          spendingDonut={viewModel.spendingDonut}
-          spendingDonutMode={viewModel.spendingDonutMode}
-          statsReportKind={viewModel.statsReportKind}
-        />
-        <SelectedSpendingTrendCard
-          currencyCode={viewModel.currencyCode}
-          reportKind={viewModel.statsReportKind}
-          selectedSpendingTrend={viewModel.selectedSpendingTrend}
-        />
-        <StatsBalanceHistoryCard
-          currencyCode={viewModel.currencyCode}
-          emptyLabel={viewModel.balanceHistoryEmptyLabel}
-          mode={viewModel.balanceHistoryMode}
-          onSelectMode={viewModel.selectBalanceHistoryMode}
-          onSelectPoint={viewModel.selectBalanceHistoryPoint}
-          points={viewModel.balanceHistoryPoints}
-          selectedChangeMinor={viewModel.selectedBalanceHistoryChangeMinor}
-          selectedPoint={viewModel.selectedBalanceHistoryPoint}
-        />
-        <StatsCategoryChangesCard
-          currencyCode={viewModel.currencyCode}
-          onOpenCategory={onOpenStatsDrilldown ? viewModel.openCategoryChangeDrilldown : undefined}
-          reportKind={viewModel.statsReportKind}
-          rows={viewModel.categoryChanges}
-        />
-        <StatsCashFlowWaterfallCard
-          model={viewModel.cashFlowWaterfall}
-          onOpenStep={onOpenStatsDrilldown ? viewModel.openCashFlowWaterfallStep : undefined}
-        />
-        <StatsTransactionAmountDistributionCard
-          distribution={viewModel.transactionAmountDistribution}
-        />
+        <Animated.View
+          layout={STATS_SECTION_LAYOUT_TRANSITION}
+          style={[styles.sectionTransition, sectionTransitionStyle]}
+          testID="stats-section-transition"
+        >
+          <StatsSectionContent
+            activeSection={activeSection}
+            onOpenStatsDrilldown={onOpenStatsDrilldown}
+            onOpenTransaction={onOpenTransaction}
+            viewModel={viewModel}
+          />
+        </Animated.View>
       </ScrollView>
 
       <StatsBottomControls
@@ -244,6 +295,153 @@ export function StatsScreen({
       />
     </View>
   );
+}
+
+type StatsViewModel = ReturnType<typeof useStatsViewModel>;
+
+function StatsReportKindReveal({
+  onSelectReportKind,
+  progress,
+  selectedReportKind,
+  visible,
+}: {
+  onSelectReportKind: StatsViewModel['selectStatsReportKind'];
+  progress: SharedValue<number>;
+  selectedReportKind: StatsViewModel['statsReportKind'];
+  visible: boolean;
+}) {
+  const measuredHeight = useSharedValue(STATS_REPORT_KIND_REVEAL_HEIGHT);
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: measuredHeight.value * progress.value,
+    marginTop: -spacing.sm * (1 - progress.value),
+    opacity: progress.value,
+    transform: [{ translateY: -4 * (1 - progress.value) }],
+  }));
+
+  return (
+    <Animated.View
+      accessibilityElementsHidden={!visible}
+      importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}
+      pointerEvents={visible ? 'auto' : 'none'}
+      style={[styles.reportKindReveal, animatedStyle]}
+    >
+      {visible ? (
+        <Animated.View
+          entering={STATS_LOCAL_ENTERING}
+          exiting={STATS_LOCAL_EXITING}
+          onLayout={(event) => {
+            measuredHeight.value = event.nativeEvent.layout.height;
+          }}
+        >
+          <StatsReportKindSwitch
+            onSelectReportKind={onSelectReportKind}
+            selectedReportKind={selectedReportKind}
+          />
+        </Animated.View>
+      ) : null}
+    </Animated.View>
+  );
+}
+
+function StatsSectionContent({
+  activeSection,
+  onOpenStatsDrilldown,
+  onOpenTransaction,
+  viewModel,
+}: {
+  activeSection: StatsSection;
+  onOpenStatsDrilldown?: StatsScreenProps['onOpenStatsDrilldown'];
+  onOpenTransaction?: StatsScreenProps['onOpenTransaction'];
+  viewModel: StatsViewModel;
+}) {
+  switch (activeSection) {
+    case 'breakdown':
+      return (
+        <Animated.View
+          layout={STATS_SECTION_LAYOUT_TRANSITION}
+          style={styles.sectionContent}
+          testID="stats-section-content-breakdown"
+        >
+          <StatsSpendingCard
+            currencyCode={viewModel.currencyCode}
+            onOpenDetailedView={viewModel.openSpendingDetailedView}
+            onOpenDrilldown={onOpenStatsDrilldown ? viewModel.openSpendingDrilldown : undefined}
+            onOpenTransaction={onOpenTransaction}
+            onReturnToCategories={viewModel.returnToSpendingCategories}
+            onSelectRollup={viewModel.selectSpendingRollup}
+            spendingDonut={viewModel.spendingDonut}
+            spendingDonutMode={viewModel.spendingDonutMode}
+            statsReportKind={viewModel.statsReportKind}
+          />
+          {viewModel.selectedSpendingTrend.rollup ? (
+            <Animated.View
+              entering={STATS_LOCAL_ENTERING}
+              exiting={STATS_LOCAL_EXITING}
+              layout={STATS_SECTION_LAYOUT_TRANSITION}
+            >
+              <SelectedSpendingTrendCard
+                currencyCode={viewModel.currencyCode}
+                reportKind={viewModel.statsReportKind}
+                selectedSpendingTrend={viewModel.selectedSpendingTrend}
+              />
+            </Animated.View>
+          ) : null}
+        </Animated.View>
+      );
+    case 'balance':
+      return (
+        <View style={styles.sectionContent} testID="stats-section-content-balance">
+          <StatsBalanceHistoryCard
+            currencyCode={viewModel.currencyCode}
+            emptyLabel={viewModel.balanceHistoryEmptyLabel}
+            mode={viewModel.balanceHistoryMode}
+            onSelectMode={viewModel.selectBalanceHistoryMode}
+            onSelectPoint={viewModel.selectBalanceHistoryPoint}
+            points={viewModel.balanceHistoryPoints}
+            selectedChangeMinor={viewModel.selectedBalanceHistoryChangeMinor}
+            selectedPoint={viewModel.selectedBalanceHistoryPoint}
+          />
+        </View>
+      );
+    case 'changes':
+      return (
+        <View style={styles.sectionContent} testID="stats-section-content-changes">
+          <StatsCategoryChangesCard
+            currencyCode={viewModel.currencyCode}
+            onOpenCategory={onOpenStatsDrilldown ? viewModel.openCategoryChangeDrilldown : undefined}
+            reportKind={viewModel.statsReportKind}
+            rows={viewModel.categoryChanges}
+          />
+        </View>
+      );
+    case 'cashFlow':
+      return (
+        <View style={styles.sectionContent} testID="stats-section-content-cashFlow">
+          <StatsMonthlyCashFlowChartCard
+            currencyCode={viewModel.currencyCode}
+            monthlyTrendSummary={viewModel.monthlyTrendSummary}
+            onSelectMonth={viewModel.selectMonthlyCashFlowMonth}
+            selectedMonthKey={viewModel.selectedMonthlyCashFlowMonthKey}
+          />
+          <StatsCashFlowWaterfallCard
+            model={viewModel.cashFlowWaterfall}
+            onOpenStep={onOpenStatsDrilldown ? viewModel.openCashFlowWaterfallStep : undefined}
+          />
+        </View>
+      );
+    case 'amounts':
+      return (
+        <View style={styles.sectionContent} testID="stats-section-content-amounts">
+          <StatsTransactionAmountDistributionCard
+            distribution={viewModel.transactionAmountDistribution}
+          />
+        </View>
+      );
+  }
+}
+
+function statsSectionUsesReportKind(section: StatsSection): boolean {
+  return section === 'breakdown' || section === 'changes' || section === 'amounts';
 }
 
 function StatsCurrencyScopeBar({

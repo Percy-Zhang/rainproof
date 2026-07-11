@@ -90,6 +90,7 @@ export function useStatsViewModel({
   const [selectedSpendingSubcategoryRollupId, setSelectedSpendingSubcategoryRollupId] = useState<string | null>('');
   const [balanceHistoryMode, setBalanceHistoryMode] = useState<StatsBalanceHistoryMode>('history');
   const [selectedBalanceHistoryPointId, setSelectedBalanceHistoryPointId] = useState('');
+  const [selectedMonthlyCashFlowMonthKey, setSelectedMonthlyCashFlowMonthKey] = useState('');
   const statsNow = useMemo(() => new Date(), []);
   const categories = snapshot.categories ?? defaultCategories;
   const selectedPeriodOption: PeriodCarouselOption = rangeMode === 'custom' ? 'custom' : preset;
@@ -204,6 +205,12 @@ export function useStatsViewModel({
     expenseReport: spendingReport,
     range,
   }), [incomeReport, range, spendingReport]);
+  const selectedMonthlyCashFlowMonth = useMemo(
+    () =>
+      monthlyTrendSummary.buckets.find((bucket) => bucket.monthKey === selectedMonthlyCashFlowMonthKey) ??
+      monthlyTrendSummary.buckets.at(-1),
+    [monthlyTrendSummary.buckets, selectedMonthlyCashFlowMonthKey],
+  );
   const activeStatsReport = statsReportKind === 'income' ? incomeReport : spendingReport;
   const transactionAmountDistribution = useMemo(
     () => getStatsTransactionAmountDistribution({
@@ -378,6 +385,14 @@ export function useStatsViewModel({
     setSelectedBalanceHistoryPointId(balanceHistoryDisplay.defaultSelectedPointId);
   }, [balanceHistoryDisplay]);
 
+  useEffect(() => {
+    setSelectedMonthlyCashFlowMonthKey((currentMonthKey) =>
+      monthlyTrendSummary.buckets.some((bucket) => bucket.monthKey === currentMonthKey)
+        ? currentMonthKey
+        : monthlyTrendSummary.buckets.at(-1)?.monthKey ?? '',
+    );
+  }, [monthlyTrendSummary.buckets]);
+
   function selectPeriodOption(option: PeriodCarouselOption) {
     if (option === 'custom') {
       setRangeMode('custom');
@@ -532,9 +547,11 @@ export function useStatsViewModel({
     returnToSpendingCategories,
     selectBalanceHistoryMode: setBalanceHistoryMode,
     selectBalanceHistoryPoint: setSelectedBalanceHistoryPointId,
+    selectMonthlyCashFlowMonth: setSelectedMonthlyCashFlowMonthKey,
     selectStatsReportKind,
     selectedBalanceHistoryChangeMinor,
     selectedBalanceHistoryPoint,
+    selectedMonthlyCashFlowMonthKey: selectedMonthlyCashFlowMonth?.monthKey ?? null,
     selectedPeriodOption,
     selectedAccountIds,
     selectedSpendingRollup,

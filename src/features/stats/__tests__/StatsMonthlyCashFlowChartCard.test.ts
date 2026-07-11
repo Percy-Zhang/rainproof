@@ -44,7 +44,7 @@ describe('StatsMonthlyCashFlowChartCard', () => {
     const screen = renderCard(summary);
     fireEvent.press(screen.getByTestId('monthly-cash-flow-month-2026-01'));
 
-    screen.rerender(React.createElement(StatsMonthlyCashFlowChartCard, {
+    screen.rerender(React.createElement(MonthlyCashFlowChartHarness, {
       currencyCode: 'AUD',
       monthlyTrendSummary: {
         buckets: [
@@ -103,10 +103,35 @@ describe('StatsMonthlyCashFlowChartCard', () => {
 });
 
 function renderCard(monthlyTrendSummary: StatsMonthlyTrendSummary) {
-  return render(React.createElement(StatsMonthlyCashFlowChartCard, {
+  return render(React.createElement(MonthlyCashFlowChartHarness, {
     currencyCode: 'AUD',
     monthlyTrendSummary,
   }));
+}
+
+function MonthlyCashFlowChartHarness({
+  currencyCode,
+  monthlyTrendSummary,
+}: {
+  currencyCode: string;
+  monthlyTrendSummary: StatsMonthlyTrendSummary;
+}) {
+  const [selectedMonthKey, setSelectedMonthKey] = React.useState(
+    monthlyTrendSummary.buckets.at(-1)?.monthKey ?? null,
+  );
+  const selectedMonthExists = monthlyTrendSummary.buckets.some(
+    (bucket) => bucket.monthKey === selectedMonthKey,
+  );
+  const resolvedSelectedMonthKey = selectedMonthExists
+    ? selectedMonthKey
+    : monthlyTrendSummary.buckets.at(-1)?.monthKey ?? null;
+
+  return React.createElement(StatsMonthlyCashFlowChartCard, {
+    currencyCode,
+    monthlyTrendSummary,
+    onSelectMonth: setSelectedMonthKey,
+    selectedMonthKey: resolvedSelectedMonthKey,
+  });
 }
 
 const summary: StatsMonthlyTrendSummary = {

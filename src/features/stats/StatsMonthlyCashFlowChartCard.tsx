@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { Card } from '../../components/ui';
@@ -13,13 +13,15 @@ const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Se
 export function StatsMonthlyCashFlowChartCard({
   currencyCode,
   monthlyTrendSummary,
+  onSelectMonth,
+  selectedMonthKey,
 }: {
   currencyCode: string;
   monthlyTrendSummary: StatsMonthlyTrendSummary;
+  onSelectMonth: (monthKey: string) => void;
+  selectedMonthKey: string | null;
 }) {
   const buckets = monthlyTrendSummary.buckets;
-  const latestMonthKey = buckets.at(-1)?.monthKey ?? null;
-  const [selectedMonthKey, setSelectedMonthKey] = useState<string | null>(latestMonthKey);
   const chartScrollRef = useRef<ScrollView>(null);
   const maxAmountMinor = buckets.reduce(
     (maximum, bucket) => Math.max(maximum, bucket.incomeNetMinor, bucket.spendingNetMinor),
@@ -28,10 +30,9 @@ export function StatsMonthlyCashFlowChartCard({
   const selectedBucket = buckets.find((bucket) => bucket.monthKey === selectedMonthKey) ?? buckets.at(-1);
 
   useEffect(() => {
-    setSelectedMonthKey(latestMonthKey);
     const frameId = requestAnimationFrame(() => chartScrollRef.current?.scrollToEnd?.({ animated: false }));
     return () => cancelAnimationFrame(frameId);
-  }, [buckets, latestMonthKey]);
+  }, [buckets]);
 
   return (
     <Card testID="monthly-trend-card">
@@ -63,7 +64,7 @@ export function StatsMonthlyCashFlowChartCard({
                   currencyCode={currencyCode}
                   maxAmountMinor={maxAmountMinor}
                   monthLabel={labels.monthLabel}
-                  onPress={() => setSelectedMonthKey(bucket.monthKey)}
+                  onPress={() => onSelectMonth(bucket.monthKey)}
                   selected={bucket.monthKey === selectedBucket?.monthKey}
                   yearLabel={labels.yearLabel}
                 />

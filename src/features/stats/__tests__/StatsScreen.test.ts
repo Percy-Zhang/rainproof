@@ -1,7 +1,7 @@
 import React from 'react';
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { fireEvent, render, within } from '@testing-library/react-native';
-import { Pressable, Text } from 'react-native';
+import { fireEvent, render, within, type RenderAPI } from '@testing-library/react-native';
+import { Pressable, StyleSheet, Text } from 'react-native';
 
 import { defaultCategories } from '../../../domain/categories';
 import type {
@@ -13,6 +13,7 @@ import type {
   TransactionLine,
 } from '../../../domain/types';
 import { StatsScreen } from '../StatsScreen';
+import type { StatsSection } from '../StatsSectionSelector';
 import { useStatsViewModel } from '../useStatsViewModel';
 
 jest.mock('@expo/vector-icons', () => {
@@ -24,6 +25,56 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 
 describe('StatsScreen report kind switch', () => {
+  it('shows the five Statistics sections with Breakdown selected by default', () => {
+    const screen = renderStatsScreen();
+
+    expect(screen.getByTestId('stats-section-breakdown').props.accessibilityState).toEqual({ selected: true });
+    expect(screen.getByText('Breakdown')).toBeTruthy();
+    expect(screen.getByText('Balance')).toBeTruthy();
+    expect(screen.getByText('Changes')).toBeTruthy();
+    expect(screen.getByText('Cash Flow')).toBeTruthy();
+    expect(screen.getByText('Amounts')).toBeTruthy();
+    expect(screen.getByTestId('stats-section-content-breakdown')).toBeTruthy();
+    expect(screen.queryByTestId('stats-section-content-balance')).toBeNull();
+    expect(screen.queryByTestId('stats-section-content-cashFlow')).toBeNull();
+  });
+
+  it('renders only the selected section while keeping shared account and period controls mounted', () => {
+    const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'cashFlow');
+
+    expect(screen.getByTestId('stats-section-content-cashFlow')).toBeTruthy();
+    expect(screen.queryByTestId('stats-section-content-breakdown')).toBeNull();
+    expect(screen.getByTestId('stats-account-selector')).toBeTruthy();
+    expect(screen.getByTestId('stats-period-carousel')).toBeTruthy();
+  });
+
+  it('settles rapid section taps on the final requested section', () => {
+    const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'balance');
+    openStatsSection(screen, 'cashFlow');
+    openStatsSection(screen, 'amounts');
+
+    expect(screen.getByTestId('stats-section-amounts').props.accessibilityState).toEqual({ selected: true });
+    expect(screen.getByTestId('stats-section-content-amounts')).toBeTruthy();
+    expect(screen.queryByTestId('stats-section-content-balance')).toBeNull();
+    expect(screen.queryByTestId('stats-section-content-cashFlow')).toBeNull();
+  });
+
+  it('keeps section content at a stable horizontal position while switching', () => {
+    const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'balance');
+
+    const transitionStyle = StyleSheet.flatten(
+      screen.getByTestId('stats-section-transition').props.style,
+    );
+    expect(transitionStyle.transform).toBeUndefined();
+    expect(screen.getByTestId('stats-section-content-balance')).toBeTruthy();
+  });
+
   it('defaults to Expenses and excludes income and transfers from the donut rows', () => {
     const screen = renderStatsScreen();
 
@@ -33,26 +84,58 @@ describe('StatsScreen report kind switch', () => {
     expect(screen.queryByTestId('stats-match-row-transfer-out')).toBeNull();
   });
 
-  it('keeps the report switch in the spending card with the existing recent rows', () => {
+  it('keeps the report switch at screen level while preserving the spending card recent rows', () => {
     const screen = renderStatsScreen();
     const spendingCard = within(screen.getByTestId('spending-chart-card'));
 
-    expect(spendingCard.getByTestId('stats-report-mode-row')).toBeTruthy();
-    expect(spendingCard.getByTestId('stats-report-mode-expense')).toBeTruthy();
+    expect(screen.getByTestId('stats-report-mode-row')).toBeTruthy();
+    expect(spendingCard.queryByTestId('stats-report-mode-row')).toBeNull();
     expect(spendingCard.getByText('Recent matches')).toBeTruthy();
     expect(spendingCard.getByTestId('stats-match-row-food-line')).toBeTruthy();
   });
 
-  it('removes redundant metric cards while preserving monthly cash-flow trend', () => {
+  it('keeps the monthly cash-flow chart in the Cash Flow section', () => {
     const screen = renderStatsScreen();
 
     expect(screen.queryByTestId('cash-flow-card')).toBeNull();
     expect(screen.queryByTestId('monthly-averages-card')).toBeNull();
     expect(screen.queryByTestId('gross-net-spending-card')).toBeNull();
+    expect(screen.queryByTestId('monthly-trend-card')).toBeNull();
+
+    openStatsSection(screen, 'cashFlow');
+
     expect(screen.getByTestId('monthly-trend-card')).toBeTruthy();
     expect(screen.getByTestId('monthly-cash-flow-chart-scroll')).toBeTruthy();
     expect(screen.getAllByTestId(/^monthly-cash-flow-income-bar-/).length).toBeGreaterThan(0);
     expect(screen.getAllByTestId(/^monthly-cash-flow-spending-bar-/).length).toBeGreaterThan(0);
+  });
+
+  it('renders the monthly chart before the waterfall in Cash Flow', () => {
+    const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'cashFlow');
+    const cardIds = collectTestIds(screen.toJSON()).filter((testID) => testID.endsWith('-card'));
+
+    expect(cardIds.indexOf('monthly-trend-card')).toBeLessThan(
+      cardIds.indexOf('stats-cash-flow-waterfall-card'),
+    );
+  });
+
+  it('shows the report switch only for report-kind sections and preserves its selection', () => {
+    const screen = renderStatsScreen();
+
+    fireEvent.press(screen.getByTestId('stats-report-mode-income'));
+    openStatsSection(screen, 'balance');
+    expect(screen.queryByTestId('stats-report-mode-row')).toBeNull();
+
+    openStatsSection(screen, 'cashFlow');
+    expect(screen.queryByTestId('stats-report-mode-row')).toBeNull();
+
+    openStatsSection(screen, 'changes');
+    expect(screen.getByTestId('stats-report-mode-income').props.accessibilityState).toEqual({ selected: true });
+
+    openStatsSection(screen, 'amounts');
+    expect(screen.getByTestId('stats-report-mode-income').props.accessibilityState).toEqual({ selected: true });
   });
 
   it('renders the selected trend once immediately after the spending breakdown card', () => {
@@ -110,6 +193,8 @@ describe('StatsScreen report kind switch', () => {
   it('shows category changes for the active report mode', () => {
     const screen = renderStatsScreen();
 
+    openStatsSection(screen, 'changes');
+
     expect(screen.getByTestId('stats-category-changes-card')).toBeTruthy();
     expect(screen.getByTestId('stats-category-change-food')).toBeTruthy();
     expect(screen.queryByTestId('stats-category-change-income')).toBeNull();
@@ -123,20 +208,25 @@ describe('StatsScreen report kind switch', () => {
   it('keeps the complete cash flow waterfall independent of the donut report mode', () => {
     const screen = renderStatsScreen();
 
+    fireEvent.press(screen.getByTestId('stats-report-mode-income'));
+    openStatsSection(screen, 'cashFlow');
+
     expect(screen.getByTestId('stats-cash-flow-waterfall-card')).toBeTruthy();
+    expect(screen.getByTestId('stats-cash-flow-net-change')).toBeTruthy();
     expect(screen.getByTestId('stats-cash-flow-step-income')).toBeTruthy();
     expect(screen.getByTestId('stats-cash-flow-step-expense:food')).toBeTruthy();
     expect(screen.queryByTestId('stats-cash-flow-step-transfers')).toBeNull();
 
-    fireEvent.press(screen.getByTestId('stats-report-mode-income'));
-
     expect(screen.getByTestId('stats-cash-flow-step-income')).toBeTruthy();
     expect(screen.getByTestId('stats-cash-flow-step-expense:food')).toBeTruthy();
+    expect(screen.queryByTestId('stats-report-mode-row')).toBeNull();
   });
 
   it('opens existing current-period drilldowns from meaningful waterfall steps', () => {
     const onOpenStatsDrilldown = jest.fn();
     const screen = renderStatsScreen({ onOpenStatsDrilldown });
+
+    openStatsSection(screen, 'cashFlow');
 
     fireEvent.press(screen.getByTestId('stats-cash-flow-step-income'));
     fireEvent.press(screen.getByTestId('stats-cash-flow-step-expense:food'));
@@ -158,6 +248,8 @@ describe('StatsScreen report kind switch', () => {
   it('drives transaction amount distribution from Expenses and Income mode', () => {
     const screen = renderStatsScreen();
 
+    openStatsSection(screen, 'amounts');
+
     expect(screen.getByTestId('stats-transaction-amount-distribution-card')).toBeTruthy();
     expect(screen.getByText('Expense transactions by size')).toBeTruthy();
     expect(screen.getByTestId('stats-transaction-amount-bucket-count-50-100').props.children).toBe(1);
@@ -174,6 +266,8 @@ describe('StatsScreen report kind switch', () => {
     const onOpenStatsDrilldown = jest.fn();
     const screen = renderStatsScreen({ onOpenStatsDrilldown });
 
+    openStatsSection(screen, 'changes');
+
     fireEvent.press(screen.getByTestId('stats-category-change-food'));
 
     expect(onOpenStatsDrilldown).toHaveBeenCalledWith(expect.objectContaining({
@@ -188,6 +282,8 @@ describe('StatsScreen report kind switch', () => {
   it('shows the category changes empty state when neither period has data', () => {
     const screen = renderStatsScreen({ noTransactions: true });
 
+    openStatsSection(screen, 'changes');
+
     expect(screen.getByTestId('stats-category-changes-empty').props.children).toBe(
       'No category changes for this period.',
     );
@@ -195,6 +291,8 @@ describe('StatsScreen report kind switch', () => {
 
   it('renders Balance History with the latest selected combined balance', () => {
     const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'balance');
 
     expect(screen.getByTestId('stats-balance-history-card')).toBeTruthy();
     expect(screen.queryByTestId('stats-balance-range-1m')).toBeNull();
@@ -216,6 +314,8 @@ describe('StatsScreen report kind switch', () => {
       ],
     });
 
+    openStatsSection(screen, 'balance');
+
     fireEvent.press(screen.getByTestId('stats-balance-mode-combined'));
     expect(screen.getByTestId('stats-balance-mode-combined').props.accessibilityState).toEqual({ selected: true });
     expect(screen.getByTestId('stats-balance-selected-balance').props.children).toBe('$1,120.00');
@@ -226,6 +326,18 @@ describe('StatsScreen report kind switch', () => {
     expect(screen.getByText('Projected balance from upcoming payments')).toBeTruthy();
     expect(screen.getByTestId('stats-balance-selected-balance').props.children).toBe('$1,080.00');
     expect(screen.getByTestId('stats-balance-selected-change').props.children).toBe('-$40.00');
+  });
+
+  it('preserves Balance mode when switching away and returning to the section', () => {
+    const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'balance');
+    fireEvent.press(screen.getByTestId('stats-balance-mode-forecast'));
+
+    openStatsSection(screen, 'breakdown');
+    openStatsSection(screen, 'balance');
+
+    expect(screen.getByTestId('stats-balance-mode-forecast').props.accessibilityState).toEqual({ selected: true });
   });
 
   it('does not render forecast event markers in History mode', () => {
@@ -240,6 +352,8 @@ describe('StatsScreen report kind switch', () => {
         }),
       ],
     });
+
+    openStatsSection(screen, 'balance');
 
     expect(screen.queryByTestId(`stats-balance-event-marker-forecast:${today}`)).toBeNull();
   });
@@ -256,6 +370,8 @@ describe('StatsScreen report kind switch', () => {
         }),
       ],
     });
+
+    openStatsSection(screen, 'balance');
 
     fireEvent.press(screen.getByTestId('stats-balance-mode-forecast'));
 
@@ -295,6 +411,8 @@ describe('StatsScreen report kind switch', () => {
       ],
     });
 
+    openStatsSection(screen, 'balance');
+
     fireEvent.press(screen.getByTestId('stats-balance-mode-forecast'));
 
     expect(screen.getByTestId('stats-balance-event-title').props.children).toBe('3 upcoming payments');
@@ -321,6 +439,8 @@ describe('StatsScreen report kind switch', () => {
       ],
     });
 
+    openStatsSection(screen, 'balance');
+
     fireEvent.press(screen.getByTestId('stats-balance-mode-combined'));
 
     expect(screen.getByTestId(`stats-balance-event-marker-forecast:${tomorrow}`)).toBeTruthy();
@@ -340,6 +460,8 @@ describe('StatsScreen report kind switch', () => {
       ],
     });
 
+    openStatsSection(screen, 'balance');
+
     fireEvent.press(screen.getByTestId('stats-balance-mode-forecast'));
     expect(screen.getByTestId('stats-balance-event-detail')).toBeTruthy();
 
@@ -351,6 +473,8 @@ describe('StatsScreen report kind switch', () => {
 
   it('shows a flat forecast from the current selected balance when there are no upcoming payments', () => {
     const screen = renderStatsScreen();
+
+    openStatsSection(screen, 'balance');
 
     fireEvent.press(screen.getByTestId('stats-balance-mode-forecast'));
 
@@ -383,6 +507,8 @@ describe('StatsScreen report kind switch', () => {
       ],
     });
 
+    openStatsSection(screen, 'balance');
+
     fireEvent.press(screen.getByText('USD'));
     fireEvent.press(screen.getByTestId('stats-balance-mode-forecast'));
 
@@ -391,6 +517,8 @@ describe('StatsScreen report kind switch', () => {
 
   it('resets stale selected Balance History points when mode changes', () => {
     const screen = renderStatsScreen({ includeOlderBalanceMovement: true });
+
+    openStatsSection(screen, 'balance');
 
     fireEvent(screen.getByTestId('stats-balance-history-chart'), 'responderGrant', {
       nativeEvent: { locationX: 0 },
@@ -405,6 +533,8 @@ describe('StatsScreen report kind switch', () => {
   it('uses the selected Statistics accounts for Balance History', () => {
     const screen = renderStatsScreen({ defaultSelectedAccountIds: ['acct-a'] });
 
+    openStatsSection(screen, 'balance');
+
     expect(screen.getByTestId('stats-balance-selected-balance').props.children).toBe('$870.00');
   });
 
@@ -413,6 +543,8 @@ describe('StatsScreen report kind switch', () => {
       defaultSelectedAccountIds: ['acct-a', 'acct-usd'],
       includeUsdAccount: true,
     });
+
+    openStatsSection(screen, 'balance');
 
     expect(screen.getByTestId('stats-balance-selected-balance').props.children).toBe('$870.00');
 
@@ -423,6 +555,8 @@ describe('StatsScreen report kind switch', () => {
 
   it('uses the active Statistics period for Balance History and resets selection to the latest point', () => {
     const screen = renderStatsScreen({ includeOlderBalanceMovement: true });
+
+    openStatsSection(screen, 'balance');
 
     fireEvent(screen.getByTestId('stats-balance-history-chart'), 'responderGrant', {
       nativeEvent: { locationX: 0 },
@@ -499,6 +633,10 @@ function renderStatsScreen({
       : statsSnapshot,
     onOpenStatsDrilldown,
   }));
+}
+
+function openStatsSection(screen: RenderAPI, section: StatsSection) {
+  fireEvent.press(screen.getByTestId(`stats-section-${section}`));
 }
 
 function collectTestIds(node: unknown): string[] {

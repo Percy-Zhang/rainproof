@@ -1,4 +1,4 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
 import { ActionButton, Card } from '../../components/ui';
 import { formatMoney } from '../../domain/money';
@@ -15,7 +15,6 @@ export function StatsSpendingCard({
   onOpenTransaction,
   onReturnToCategories,
   onSelectRollup,
-  onSelectStatsReportKind,
   spendingDonut,
   spendingDonutMode,
   statsReportKind,
@@ -26,7 +25,6 @@ export function StatsSpendingCard({
   onOpenTransaction?: (transactionId: string) => void;
   onReturnToCategories: () => void;
   onSelectRollup: (rollupId: string) => void;
-  onSelectStatsReportKind: (reportKind: StatsReportKind) => void;
   spendingDonut: StatsDonutViewModel;
   spendingDonutMode: StatsDonutMode;
   statsReportKind: StatsReportKind;
@@ -77,13 +75,6 @@ export function StatsSpendingCard({
         onSelectRollup={onSelectRollup}
       />
 
-      <View style={styles.reportKindSwitchRow} testID="stats-report-mode-row">
-        <StatsReportKindSwitch
-          selectedReportKind={statsReportKind}
-          onSelectReportKind={onSelectStatsReportKind}
-        />
-      </View>
-
       {hasSpending ? (
         <View style={styles.matchSection}>
           <View style={styles.matchHeaderRow}>
@@ -114,42 +105,6 @@ export function StatsSpendingCard({
         </View>
       ) : null}
     </Card>
-  );
-}
-
-function StatsReportKindSwitch({
-  selectedReportKind,
-  onSelectReportKind,
-}: {
-  selectedReportKind: StatsReportKind;
-  onSelectReportKind: (reportKind: StatsReportKind) => void;
-}) {
-  return (
-    <View accessibilityLabel="Statistics report mode" style={styles.reportKindSwitch}>
-      {(['expense', 'income'] as const).map((reportKind) => {
-        const selected = selectedReportKind === reportKind;
-        const label = reportKind === 'expense' ? 'Expenses' : 'Income';
-
-        return (
-          <Pressable
-            key={reportKind}
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            onPress={() => onSelectReportKind(reportKind)}
-            style={({ pressed }) => [
-              styles.reportKindOption,
-              selected && styles.reportKindOptionSelected,
-              pressed && styles.pressed,
-            ]}
-            testID={`stats-report-mode-${reportKind}`}
-          >
-            <Text style={[styles.reportKindOptionText, selected && styles.reportKindOptionTextSelected]}>
-              {label}
-            </Text>
-          </Pressable>
-        );
-      })}
-    </View>
   );
 }
 
