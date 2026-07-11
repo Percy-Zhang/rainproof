@@ -13,15 +13,12 @@ import type { Account } from '../../domain/types';
 import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
 
-const DRAG_PRESS_RETENTION_OFFSET = { bottom: 36, left: 36, right: 36, top: 36 };
-
 type AccountListRowProps = {
   account: Account;
   balanceMinor: number | undefined;
   dashboardEditMode: boolean;
   dragging: boolean;
   showCurrencyCodes: boolean;
-  onDrag: () => void;
   onPress: () => void;
 };
 
@@ -31,7 +28,6 @@ export function AccountListRow({
   dashboardEditMode,
   dragging,
   showCurrencyCodes,
-  onDrag,
   onPress,
 }: AccountListRowProps) {
   const hiddenFromDashboard = account.isArchived || !account.showOnDashboard;
@@ -62,18 +58,15 @@ export function AccountListRow({
           dashboardEditMode && !hiddenFromDashboard && styles.dashboardVisibleRow,
         ]}
       >
-        <Pressable
-          accessibilityLabel={`Reorder ${getAccountDisplayName(account)}`}
-          accessibilityRole="button"
-          delayLongPress={150}
-          onLongPress={onDrag}
-          pressRetentionOffset={DRAG_PRESS_RETENTION_OFFSET}
-          style={({ pressed }) => [styles.dragHandle, pressed && sharedStyles.pressed]}
+        <View
+          accessible={false}
+          style={styles.dragHandle}
           testID={`account-drag-${account.id}`}
         >
           <Ionicons name="reorder-three-outline" size={24} color={colors.primaryDark} />
-        </Pressable>
+        </View>
         <Pressable
+          accessibilityHint="Long press to reorder."
           accessibilityRole="button"
           disabled={dragging}
           onPress={onPress}

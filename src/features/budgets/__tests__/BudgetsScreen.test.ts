@@ -15,7 +15,11 @@ jest.mock('../BudgetReorderList', () => {
   const { View } = jest.requireActual<typeof import('react-native')>('react-native');
 
   type MockRow = { id: string };
-  type MockRenderState = { dragging: boolean; reorderActive: boolean };
+  type MockRenderState = {
+    dragging: boolean;
+    reorderActive: boolean;
+    shouldSuppressPress: () => boolean;
+  };
 
   return {
     BudgetReorderList: ({
@@ -38,7 +42,11 @@ jest.mock('../BudgetReorderList', () => {
           ? rows.map((row) => React.createElement(
             View,
             { key: row.id },
-            renderRow(row, { dragging: false, reorderActive: false }),
+            renderRow(row, {
+              dragging: false,
+              reorderActive: false,
+              shouldSuppressPress: () => false,
+            }),
           ))
           : emptyComponent,
       ),

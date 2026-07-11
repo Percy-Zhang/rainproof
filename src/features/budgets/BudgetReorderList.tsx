@@ -7,7 +7,7 @@ import {
   type ViewStyle,
   View,
 } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -27,6 +27,17 @@ import {
   type ReorderRowMeasurementMap,
   type ReorderRowOffsetMap,
 } from '../../domain/reorder';
+import {
+  REORDER_TOUCH_INTENT,
+  canActivateReorderFromTouchIntent,
+  createReorderLongPressGesture,
+  createReorderNativeScrollGesture,
+  createReorderPressGuard,
+  getReorderTouchIntentAfterMovement,
+  shouldCancelReorderFromLongPressFinalize,
+  shouldFinishReorderFromLongPress,
+  type ReorderTouchIntent,
+} from '../reorderGestureActivation';
 import { useReorderAutoScroll } from '../useReorderAutoScroll';
 
 const BUDGET_REORDER_ACTIVATION_MS = 150;
@@ -48,6 +59,7 @@ type RowOffsetMap = ReorderRowOffsetMap;
 type BudgetReorderRenderState = {
   dragging: boolean;
   reorderActive: boolean;
+  shouldSuppressPress: () => boolean;
 };
 
 type BudgetReorderListProps = {
@@ -88,6 +100,7 @@ export function BudgetReorderList({
   const rowHeightFlushFrameRef = useRef<number | null>(null);
   const [draggingRowId, setDraggingRowId] = useState<string | null>(null);
   const autoScroll = useReorderAutoScroll();
+  const nativeScrollGesture = useMemo(() => createReorderNativeScrollGesture(), []);
 
   const clearRowHeightFlushFrame = useCallback(() => {
     if (rowHeightFlushFrameRef.current !== null) {
@@ -230,51 +243,54 @@ export function BudgetReorderList({
   }, [flushPendingRowHeights, idleLayoutAnimationsEnabled, onDragEnd]);
 
   return (
-    <ScrollView
-      contentContainerStyle={contentContainerStyle}
-      keyboardShouldPersistTaps="handled"
-      onContentSizeChange={autoScroll.onContentSizeChange}
-      onLayout={autoScroll.onLayout}
-      onScroll={autoScroll.onScroll}
-      ref={autoScroll.scrollRef}
-      scrollEventThrottle={16}
-      scrollEnabled={!draggingRowId}
-      showsVerticalScrollIndicator={false}
-      style={styles.scroll}
-      testID="budgets-reorder-list"
-    >
-      {rows.length ? (
-        <View style={[styles.canvas, { height: metrics.totalHeight }]}>
-          {rows.map((row, index) => (
-            <BudgetReorderItem
-              key={row.id}
-              activeRowId={activeRowId}
-              dragTop={dragTop}
-              dragging={draggingRowId === row.id}
-              index={index}
-              idleLayoutAnimationsEnabled={idleLayoutAnimationsEnabled}
-              measuredHeights={measuredHeights}
-              orderIds={orderIds}
-              reorderActive={draggingRowId !== null}
-              row={row}
-              rowOffsets={rowOffsets}
-              scrollOffset={autoScroll.scrollOffset}
-              slotAnimationsEnabled={slotAnimationsEnabled}
-              totalHeight={totalHeight}
-              onAutoScrollStart={autoScroll.start}
-              onAutoScrollStop={autoScroll.stop}
-              onAutoScrollTouch={autoScroll.updateTouch}
-              onDragFinish={handleDragFinish}
-              onDragStart={handleDragStart}
-              onLayout={handleRowLayout}
-              renderRow={renderRow}
-            />
-          ))}
-        </View>
-      ) : (
-        emptyComponent
-      )}
-    </ScrollView>
+    <GestureDetector gesture={nativeScrollGesture}>
+      <ScrollView
+        contentContainerStyle={contentContainerStyle}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={autoScroll.onContentSizeChange}
+        onLayout={autoScroll.onLayout}
+        onScroll={autoScroll.onScroll}
+        ref={autoScroll.scrollRef}
+        scrollEventThrottle={16}
+        scrollEnabled={!draggingRowId}
+        showsVerticalScrollIndicator={false}
+        style={styles.scroll}
+        testID="budgets-reorder-list"
+      >
+        {rows.length ? (
+          <View style={[styles.canvas, { height: metrics.totalHeight }]}>
+            {rows.map((row, index) => (
+              <BudgetReorderItem
+                key={row.id}
+                activeRowId={activeRowId}
+                dragTop={dragTop}
+                dragging={draggingRowId === row.id}
+                index={index}
+                idleLayoutAnimationsEnabled={idleLayoutAnimationsEnabled}
+                measuredHeights={measuredHeights}
+                nativeScrollGesture={nativeScrollGesture}
+                orderIds={orderIds}
+                reorderActive={draggingRowId !== null}
+                row={row}
+                rowOffsets={rowOffsets}
+                scrollOffset={autoScroll.scrollOffset}
+                slotAnimationsEnabled={slotAnimationsEnabled}
+                totalHeight={totalHeight}
+                onAutoScrollStart={autoScroll.start}
+                onAutoScrollStop={autoScroll.stop}
+                onAutoScrollTouch={autoScroll.updateTouch}
+                onDragFinish={handleDragFinish}
+                onDragStart={handleDragStart}
+                onLayout={handleRowLayout}
+                renderRow={renderRow}
+              />
+            ))}
+          </View>
+        ) : (
+          emptyComponent
+        )}
+      </ScrollView>
+    </GestureDetector>
   );
 }
 
@@ -285,6 +301,7 @@ type BudgetReorderItemProps = {
   index: number;
   idleLayoutAnimationsEnabled: SharedValue<boolean>;
   measuredHeights: SharedValue<RowHeightMap>;
+  nativeScrollGesture: GestureType;
   orderIds: SharedValue<string[]>;
   reorderActive: boolean;
   row: BudgetUsageDisplayRow;
@@ -308,6 +325,7 @@ function BudgetReorderItem({
   index,
   idleLayoutAnimationsEnabled,
   measuredHeights,
+  nativeScrollGesture,
   orderIds,
   reorderActive,
   row,
@@ -329,9 +347,13 @@ function BudgetReorderItem({
   const dragActive = useSharedValue(false);
   const latestTouchAbsoluteY = useSharedValue(0);
   const activationTouchAbsoluteY = useSharedValue(0);
+  const initialTouchAbsoluteX = useSharedValue(0);
+  const initialTouchAbsoluteY = useSharedValue(0);
+  const touchIntent = useSharedValue<ReorderTouchIntent>(REORDER_TOUCH_INTENT.idle);
   const activationScrollOffset = useSharedValue(0);
   const activationTranslationY = useSharedValue(0);
   const visualTop = useSharedValue(index * BUDGET_REORDER_FALLBACK_ROW_HEIGHT);
+  const pressGuard = useRef(createReorderPressGuard()).current;
 
   const updateDragPosition = useCallback((touchOffsetY: number) => {
     'worklet';
@@ -430,10 +452,9 @@ function BudgetReorderItem({
 
   const gesture = useMemo(
     () => {
-      const getTouchAbsoluteY = (touches: readonly { absoluteY: number }[]) => {
+      const getTouch = (touches: readonly { absoluteX: number; absoluteY: number }[]) => {
         'worklet';
-        const touch = touches[0];
-        return touch ? touch.absoluteY : null;
+        return touches[0] ?? null;
       };
 
       const getRowHeight = (rowId: string) => {
@@ -459,6 +480,12 @@ function BudgetReorderItem({
 
       const armDrag = () => {
         'worklet';
+        if (!canActivateReorderFromTouchIntent(touchIntent.value)) {
+          return;
+        }
+
+        touchIntent.value = REORDER_TOUCH_INTENT.reorder;
+        runOnJS(pressGuard.suppressPress)();
         activeRowId.value = row.id;
         idleLayoutAnimationsEnabled.value = false;
         slotAnimationsEnabled.value = false;
@@ -492,6 +519,7 @@ function BudgetReorderItem({
           }
 
           activeRowId.value = null;
+          touchIntent.value = REORDER_TOUCH_INTENT.idle;
           runOnJS(onAutoScrollStop)();
           runOnJS(onDragFinish)([...orderIds.value]);
         });
@@ -507,22 +535,34 @@ function BudgetReorderItem({
         dragActive.value = false;
         slotAnimationsEnabled.value = false;
         activeRowId.value = null;
+        touchIntent.value = REORDER_TOUCH_INTENT.idle;
         runOnJS(onAutoScrollStop)();
         runOnJS(onDragFinish)([...orderIds.value]);
       };
 
-      const longPressGesture = Gesture.LongPress()
-        .minDuration(BUDGET_REORDER_ACTIVATION_MS)
-        .maxDistance(100000)
-        .shouldCancelWhenOutside(false)
-        .cancelsTouchesInView(false)
+      const longPressGesture = createReorderLongPressGesture(BUDGET_REORDER_ACTIVATION_MS)
+        .simultaneousWithExternalGesture(nativeScrollGesture)
         .onStart((event) => {
+          'worklet';
           latestTouchAbsoluteY.value = event.absoluteY;
           armDrag();
         })
-        .onEnd(finishDrag)
+        .onEnd((_event, success) => {
+          'worklet';
+          if (shouldFinishReorderFromLongPress({
+            dragActive: dragActive.value,
+            dragArmed: dragArmed.value,
+            success,
+          })) {
+            finishDrag();
+          }
+        })
         .onFinalize((_event, success) => {
-          if (success) {
+          'worklet';
+          if (!shouldCancelReorderFromLongPressFinalize({
+            dragArmed: dragArmed.value,
+            success,
+          })) {
             return;
           }
 
@@ -534,21 +574,50 @@ function BudgetReorderItem({
         .minDistance(0)
         .averageTouches(true)
         .shouldCancelWhenOutside(false)
-        .cancelsTouchesInView(false)
+        .cancelsTouchesInView(true)
+        .simultaneousWithExternalGesture(nativeScrollGesture)
         .onTouchesDown((event) => {
-          const absoluteY = getTouchAbsoluteY(event.allTouches.length ? event.allTouches : event.changedTouches);
-          if (absoluteY === null) {
+          'worklet';
+          const touch = getTouch(event.allTouches.length ? event.allTouches : event.changedTouches);
+          if (!touch) {
             return;
           }
 
-          latestTouchAbsoluteY.value = absoluteY;
+          initialTouchAbsoluteX.value = touch.absoluteX;
+          initialTouchAbsoluteY.value = touch.absoluteY;
+          latestTouchAbsoluteY.value = touch.absoluteY;
+          touchIntent.value = REORDER_TOUCH_INTENT.pending;
+          runOnJS(pressGuard.beginTouchSession)();
         })
         .onTouchesMove((event, stateManager) => {
-          const absoluteY = getTouchAbsoluteY(event.allTouches.length ? event.allTouches : event.changedTouches);
-          if (absoluteY !== null) {
-            latestTouchAbsoluteY.value = absoluteY;
-            runOnJS(onAutoScrollTouch)(absoluteY);
+          'worklet';
+          const touch = getTouch(event.allTouches.length ? event.allTouches : event.changedTouches);
+          if (!touch) {
+            return;
           }
+
+          latestTouchAbsoluteY.value = touch.absoluteY;
+          if (!dragArmed.value && activeRowId.value !== row.id) {
+            const nextTouchIntent = getReorderTouchIntentAfterMovement({
+              currentX: touch.absoluteX,
+              currentY: touch.absoluteY,
+              intent: touchIntent.value,
+              startX: initialTouchAbsoluteX.value,
+              startY: initialTouchAbsoluteY.value,
+            });
+            if (
+              nextTouchIntent === REORDER_TOUCH_INTENT.scroll &&
+              touchIntent.value !== REORDER_TOUCH_INTENT.scroll
+            ) {
+              touchIntent.value = nextTouchIntent;
+              runOnJS(pressGuard.suppressPress)();
+              stateManager.fail();
+            }
+
+            return;
+          }
+
+          runOnJS(onAutoScrollTouch)(touch.absoluteY);
 
           if (dragArmed.value && !dragActive.value && activeRowId.value === row.id) {
             dragActive.value = true;
@@ -561,6 +630,7 @@ function BudgetReorderItem({
           }
         })
         .onStart((event) => {
+          'worklet';
           if (!dragArmed.value || activeRowId.value !== row.id) {
             return;
           }
@@ -570,12 +640,14 @@ function BudgetReorderItem({
           runOnJS(onAutoScrollStart)(event.absoluteY);
         })
         .onUpdate((event) => {
+          'worklet';
           latestTouchAbsoluteY.value = event.absoluteY;
           runOnJS(onAutoScrollTouch)(event.absoluteY);
           updateDragPosition(event.translationY - activationTranslationY.value);
         })
         .onEnd(finishDrag)
         .onFinalize((_event, success) => {
+          'worklet';
           if (success) {
             return;
           }
@@ -595,14 +667,18 @@ function BudgetReorderItem({
       dragTop,
       idleLayoutAnimationsEnabled,
       index,
+      initialTouchAbsoluteX,
+      initialTouchAbsoluteY,
       latestTouchAbsoluteY,
       measuredHeights,
+      nativeScrollGesture,
       onAutoScrollStart,
       onAutoScrollStop,
       onAutoScrollTouch,
       onDragFinish,
       onDragStart,
       orderIds,
+      pressGuard,
       releaseScheduled,
       row.id,
       rowOffsets,
@@ -610,6 +686,7 @@ function BudgetReorderItem({
       slotAnimationsEnabled,
       startTop,
       totalHeight,
+      touchIntent,
       updateDragPosition,
     ],
   );
@@ -697,7 +774,11 @@ function BudgetReorderItem({
         onLayout={(event) => onLayout(row.id, event.nativeEvent.layout.height)}
         style={[styles.item, animatedStyle]}
       >
-        {renderRow(row, { dragging, reorderActive })}
+        {renderRow(row, {
+          dragging,
+          reorderActive,
+          shouldSuppressPress: pressGuard.shouldSuppressPress,
+        })}
       </Animated.View>
     </GestureDetector>
   );

@@ -168,7 +168,15 @@ export function BudgetsScreen({
 
   const renderBudgetRow = useCallback((
     row: BudgetUsageDisplayRow,
-    { dragging, reorderActive }: { dragging: boolean; reorderActive: boolean },
+    {
+      dragging,
+      reorderActive,
+      shouldSuppressPress,
+    }: {
+      dragging: boolean;
+      reorderActive: boolean;
+      shouldSuppressPress: () => boolean;
+    },
   ) => {
     const isHistoryExpanded = row.id === expandedBudgetId;
 
@@ -181,10 +189,10 @@ export function BudgetsScreen({
         historyVariant={historyMode === 'compare' || row.budget.period === 'weekly' ? 'bar' : 'line'}
         interactionsDisabled={reorderActive}
         isHistoryExpanded={isHistoryExpanded}
-        onDrag={noop}
         onToggleHistory={handleToggleBudgetHistory}
         onPress={handlePressBudget}
         periodOffset={periodOffset}
+        shouldSuppressPress={shouldSuppressPress}
       />
     );
   }, [
@@ -267,10 +275,6 @@ function getBudgetUsageRowsForSnapshot(
   });
 
   return sortBudgetUsageDisplayRowsByDisplayOrder(getBudgetUsageDisplayRows(usages, snapshot.categories));
-}
-
-function noop() {
-  return undefined;
 }
 
 const styles = StyleSheet.create({

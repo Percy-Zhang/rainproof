@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Gesture, GestureDetector } from 'react-native-gesture-handler';
+import { Gesture, GestureDetector, type GestureType } from 'react-native-gesture-handler';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -14,6 +14,17 @@ import { runOnJS } from 'react-native-worklets';
 
 import type { Account } from '../../domain/types';
 import { spacing } from '../../theme/tokens';
+import {
+  REORDER_TOUCH_INTENT,
+  canActivateReorderFromTouchIntent,
+  createReorderLongPressGesture,
+  createReorderNativeScrollGesture,
+  createReorderPressGuard,
+  getReorderTouchIntentAfterMovement,
+  shouldCancelReorderFromLongPressFinalize,
+  shouldFinishReorderFromLongPress,
+  type ReorderTouchIntent,
+} from '../reorderGestureActivation';
 import { useReorderAutoScroll } from '../useReorderAutoScroll';
 import { AccountListRow } from './AccountListRow';
 
@@ -55,6 +66,7 @@ export function AccountsReorderList({
   const positions = useSharedValue<AccountPositionMap>(positionMap);
   const [draggingAccountId, setDraggingAccountId] = useState<string | null>(null);
   const autoScroll = useReorderAutoScroll();
+  const nativeScrollGesture = useMemo(() => createReorderNativeScrollGesture(), []);
 
   useEffect(() => {
     accountIdsRef.current = accountIds;
@@ -75,43 +87,46 @@ export function AccountsReorderList({
   }, [onDragEnd]);
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.content}
-      keyboardShouldPersistTaps="handled"
-      onContentSizeChange={autoScroll.onContentSizeChange}
-      onLayout={autoScroll.onLayout}
-      onScroll={autoScroll.onScroll}
-      ref={autoScroll.scrollRef}
-      scrollEventThrottle={16}
-      scrollEnabled={!draggingAccountId}
-      showsVerticalScrollIndicator={false}
-      style={styles.scroll}
-    >
-      <View style={[styles.canvas, { height: accounts.length * ACCOUNT_ROW_FRAME_HEIGHT }]}>
-        {accounts.map((account, index) => (
-          <AccountReorderItem
-            key={account.id}
-            account={account}
-            accountIds={accountIds}
-            activeAccountId={activeAccountId}
-            balanceMinor={balanceByAccountId.get(account.id)}
-            dashboardEditMode={dashboardEditMode}
-            dragTop={dragTop}
-            dragging={draggingAccountId === account.id}
-            index={index}
-            scrollOffset={autoScroll.scrollOffset}
-            positions={positions}
-            showCurrencyCodes={showCurrencyCodes}
-            onAutoScrollStart={autoScroll.start}
-            onAutoScrollStop={autoScroll.stop}
-            onAutoScrollTouch={autoScroll.updateTouch}
-            onDragFinish={handleDragFinish}
-            onDragStart={handleDragStart}
-            onPress={() => onPressAccount(account)}
-          />
-        ))}
-      </View>
-    </ScrollView>
+    <GestureDetector gesture={nativeScrollGesture}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={autoScroll.onContentSizeChange}
+        onLayout={autoScroll.onLayout}
+        onScroll={autoScroll.onScroll}
+        ref={autoScroll.scrollRef}
+        scrollEventThrottle={16}
+        scrollEnabled={!draggingAccountId}
+        showsVerticalScrollIndicator={false}
+        style={styles.scroll}
+      >
+        <View style={[styles.canvas, { height: accounts.length * ACCOUNT_ROW_FRAME_HEIGHT }]}>
+          {accounts.map((account, index) => (
+            <AccountReorderItem
+              key={account.id}
+              account={account}
+              accountIds={accountIds}
+              activeAccountId={activeAccountId}
+              balanceMinor={balanceByAccountId.get(account.id)}
+              dashboardEditMode={dashboardEditMode}
+              dragTop={dragTop}
+              dragging={draggingAccountId === account.id}
+              index={index}
+              nativeScrollGesture={nativeScrollGesture}
+              scrollOffset={autoScroll.scrollOffset}
+              positions={positions}
+              showCurrencyCodes={showCurrencyCodes}
+              onAutoScrollStart={autoScroll.start}
+              onAutoScrollStop={autoScroll.stop}
+              onAutoScrollTouch={autoScroll.updateTouch}
+              onDragFinish={handleDragFinish}
+              onDragStart={handleDragStart}
+              onPress={() => onPressAccount(account)}
+            />
+          ))}
+        </View>
+      </ScrollView>
+    </GestureDetector>
   );
 }
 
@@ -124,6 +139,7 @@ type AccountReorderItemProps = {
   dragTop: SharedValue<number>;
   dragging: boolean;
   index: number;
+  nativeScrollGesture: GestureType;
   scrollOffset: SharedValue<number>;
   positions: SharedValue<AccountPositionMap>;
   showCurrencyCodes: boolean;
@@ -144,6 +160,7 @@ function AccountReorderItem({
   dragTop,
   dragging,
   index,
+  nativeScrollGesture,
   scrollOffset,
   positions,
   showCurrencyCodes,
@@ -160,8 +177,18 @@ function AccountReorderItem({
   const dragActive = useSharedValue(false);
   const latestTouchAbsoluteY = useSharedValue(0);
   const activationTouchAbsoluteY = useSharedValue(0);
+  const initialTouchAbsoluteX = useSharedValue(0);
+  const initialTouchAbsoluteY = useSharedValue(0);
+  const touchIntent = useSharedValue<ReorderTouchIntent>(REORDER_TOUCH_INTENT.idle);
   const activationScrollOffset = useSharedValue(0);
   const activationTranslationY = useSharedValue(0);
+  const pressGuard = useRef(createReorderPressGuard()).current;
+
+  const handlePress = useCallback(() => {
+    if (!pressGuard.shouldSuppressPress()) {
+      onPress();
+    }
+  }, [onPress, pressGuard]);
 
   const updateDragPosition = useCallback((touchOffsetY: number) => {
     'worklet';
@@ -257,14 +284,19 @@ function AccountReorderItem({
 
   const gesture = useMemo(
     () => {
-      const getTouchAbsoluteY = (touches: readonly { absoluteY: number }[]) => {
+      const getTouch = (touches: readonly { absoluteX: number; absoluteY: number }[]) => {
         'worklet';
-        const touch = touches[0];
-        return touch ? touch.absoluteY : null;
+        return touches[0] ?? null;
       };
 
       const armDrag = () => {
         'worklet';
+        if (!canActivateReorderFromTouchIntent(touchIntent.value)) {
+          return;
+        }
+
+        touchIntent.value = REORDER_TOUCH_INTENT.reorder;
+        runOnJS(pressGuard.suppressPress)();
         const currentIndex = positions.value[account.id] ?? index;
         activeAccountId.value = account.id;
         dragArmed.value = true;
@@ -295,6 +327,7 @@ function AccountReorderItem({
           }
 
           activeAccountId.value = null;
+          touchIntent.value = REORDER_TOUCH_INTENT.idle;
           runOnJS(onAutoScrollStop)();
           runOnJS(onDragFinish)({ ...positions.value });
         });
@@ -309,22 +342,34 @@ function AccountReorderItem({
         dragArmed.value = false;
         dragActive.value = false;
         activeAccountId.value = null;
+        touchIntent.value = REORDER_TOUCH_INTENT.idle;
         runOnJS(onAutoScrollStop)();
         runOnJS(onDragFinish)({ ...positions.value });
       };
 
-      const longPressGesture = Gesture.LongPress()
-        .minDuration(ACCOUNT_REORDER_ACTIVATION_MS)
-        .maxDistance(100000)
-        .shouldCancelWhenOutside(false)
-        .cancelsTouchesInView(false)
+      const longPressGesture = createReorderLongPressGesture(ACCOUNT_REORDER_ACTIVATION_MS)
+        .simultaneousWithExternalGesture(nativeScrollGesture)
         .onStart((event) => {
+          'worklet';
           latestTouchAbsoluteY.value = event.absoluteY;
           armDrag();
         })
-        .onEnd(finishDrag)
+        .onEnd((_event, success) => {
+          'worklet';
+          if (shouldFinishReorderFromLongPress({
+            dragActive: dragActive.value,
+            dragArmed: dragArmed.value,
+            success,
+          })) {
+            finishDrag();
+          }
+        })
         .onFinalize((_event, success) => {
-          if (success) {
+          'worklet';
+          if (!shouldCancelReorderFromLongPressFinalize({
+            dragArmed: dragArmed.value,
+            success,
+          })) {
             return;
           }
 
@@ -336,21 +381,50 @@ function AccountReorderItem({
         .minDistance(0)
         .averageTouches(true)
         .shouldCancelWhenOutside(false)
-        .cancelsTouchesInView(false)
+        .cancelsTouchesInView(true)
+        .simultaneousWithExternalGesture(nativeScrollGesture)
         .onTouchesDown((event) => {
-          const absoluteY = getTouchAbsoluteY(event.allTouches.length ? event.allTouches : event.changedTouches);
-          if (absoluteY === null) {
+          'worklet';
+          const touch = getTouch(event.allTouches.length ? event.allTouches : event.changedTouches);
+          if (!touch) {
             return;
           }
 
-          latestTouchAbsoluteY.value = absoluteY;
+          initialTouchAbsoluteX.value = touch.absoluteX;
+          initialTouchAbsoluteY.value = touch.absoluteY;
+          latestTouchAbsoluteY.value = touch.absoluteY;
+          touchIntent.value = REORDER_TOUCH_INTENT.pending;
+          runOnJS(pressGuard.beginTouchSession)();
         })
         .onTouchesMove((event, stateManager) => {
-          const absoluteY = getTouchAbsoluteY(event.allTouches.length ? event.allTouches : event.changedTouches);
-          if (absoluteY !== null) {
-            latestTouchAbsoluteY.value = absoluteY;
-            runOnJS(onAutoScrollTouch)(absoluteY);
+          'worklet';
+          const touch = getTouch(event.allTouches.length ? event.allTouches : event.changedTouches);
+          if (!touch) {
+            return;
           }
+
+          latestTouchAbsoluteY.value = touch.absoluteY;
+          if (!dragArmed.value && activeAccountId.value !== account.id) {
+            const nextTouchIntent = getReorderTouchIntentAfterMovement({
+              currentX: touch.absoluteX,
+              currentY: touch.absoluteY,
+              intent: touchIntent.value,
+              startX: initialTouchAbsoluteX.value,
+              startY: initialTouchAbsoluteY.value,
+            });
+            if (
+              nextTouchIntent === REORDER_TOUCH_INTENT.scroll &&
+              touchIntent.value !== REORDER_TOUCH_INTENT.scroll
+            ) {
+              touchIntent.value = nextTouchIntent;
+              runOnJS(pressGuard.suppressPress)();
+              stateManager.fail();
+            }
+
+            return;
+          }
+
+          runOnJS(onAutoScrollTouch)(touch.absoluteY);
 
           if (dragArmed.value && !dragActive.value && activeAccountId.value === account.id) {
             dragActive.value = true;
@@ -363,6 +437,7 @@ function AccountReorderItem({
           }
         })
         .onStart((event) => {
+          'worklet';
           if (!dragArmed.value || activeAccountId.value !== account.id) {
             return;
           }
@@ -372,12 +447,14 @@ function AccountReorderItem({
           runOnJS(onAutoScrollStart)(event.absoluteY);
         })
         .onUpdate((event) => {
+          'worklet';
           latestTouchAbsoluteY.value = event.absoluteY;
           runOnJS(onAutoScrollTouch)(event.absoluteY);
           updateDragPosition(event.translationY - activationTranslationY.value);
         })
         .onEnd(finishDrag)
         .onFinalize((_event, success) => {
+          'worklet';
           if (success) {
             return;
           }
@@ -397,16 +474,21 @@ function AccountReorderItem({
       dragArmed,
       dragTop,
       index,
+      initialTouchAbsoluteX,
+      initialTouchAbsoluteY,
       latestTouchAbsoluteY,
+      nativeScrollGesture,
       onAutoScrollStart,
       onAutoScrollStop,
       onAutoScrollTouch,
       onDragFinish,
       onDragStart,
       positions,
+      pressGuard,
       releaseScheduled,
       scrollOffset,
       startTop,
+      touchIntent,
       updateDragPosition,
     ],
   );
@@ -437,8 +519,7 @@ function AccountReorderItem({
           dashboardEditMode={dashboardEditMode}
           dragging={dragging}
           showCurrencyCodes={showCurrencyCodes}
-          onDrag={noop}
-          onPress={onPress}
+          onPress={handlePress}
         />
       </Animated.View>
     </GestureDetector>
@@ -458,10 +539,6 @@ function getAccountIdsByPosition(
   positions: AccountPositionMap,
 ): string[] {
   return [...accountIds].sort((left, right) => (positions[left] ?? 0) - (positions[right] ?? 0));
-}
-
-function noop() {
-  return undefined;
 }
 
 const styles = StyleSheet.create({

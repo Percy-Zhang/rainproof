@@ -48,7 +48,6 @@ const BUDGET_HISTORY_REVEAL_CONTENT_OFFSET = -8;
 const BUDGET_HISTORY_REVEAL_CHROME_HEIGHT = 116;
 const BUDGET_HISTORY_REVEAL_HEIGHT =
   BUDGET_HISTORY_PLOT_HEIGHT + BUDGET_HISTORY_LABEL_HEIGHT + BUDGET_HISTORY_REVEAL_CHROME_HEIGHT;
-const DRAG_PRESS_RETENTION_OFFSET = { bottom: 36, left: 36, right: 36, top: 36 };
 const HISTORY_TOGGLE_SCROLL_CANCEL_Y = 10;
 const HISTORY_TOGGLE_PRESS_RETENTION_OFFSET = { bottom: 4, left: 8, right: 8, top: 4 };
 
@@ -63,11 +62,11 @@ type BudgetUsageCardProps = {
   historyVariant: 'bar' | 'line';
   interactionsDisabled?: boolean;
   isHistoryExpanded: boolean;
-  onDrag: () => void;
   onToggleHistory: (budgetId: string) => void;
   row: BudgetUsageDisplayRow;
   onPress: (budgetId: string) => void;
   periodOffset: number;
+  shouldSuppressPress: () => boolean;
 };
 
 export const BudgetUsageCard = memo(function BudgetUsageCard({
@@ -77,11 +76,11 @@ export const BudgetUsageCard = memo(function BudgetUsageCard({
   historyVariant,
   interactionsDisabled = false,
   isHistoryExpanded,
-  onDrag,
   row,
   onToggleHistory,
   onPress,
   periodOffset,
+  shouldSuppressPress,
 }: BudgetUsageCardProps) {
   const status = getStatusCopy(row);
   const progressColor = getBudgetStatusColor(row.status);
@@ -96,15 +95,21 @@ export const BudgetUsageCard = memo(function BudgetUsageCard({
   }, [isHistoryExpanded]);
 
   const handleToggleHistory = useCallback(() => {
+    if (shouldSuppressPress()) {
+      return;
+    }
+
     const nextExpanded = !visualHistoryExpandedRef.current;
     visualHistoryExpandedRef.current = nextExpanded;
     historyRevealRef.current?.animateToExpanded(nextExpanded);
     onToggleHistory(row.id);
-  }, [onToggleHistory, row.id]);
+  }, [onToggleHistory, row.id, shouldSuppressPress]);
 
   const handlePress = useCallback(() => {
-    onPress(row.id);
-  }, [onPress, row.id]);
+    if (!shouldSuppressPress()) {
+      onPress(row.id);
+    }
+  }, [onPress, row.id, shouldSuppressPress]);
 
   const historyTogglePressHandlers = useScrollAwarePressHandlers(handleToggleHistory, !controlsDisabled);
 
@@ -120,11 +125,8 @@ export const BudgetUsageCard = memo(function BudgetUsageCard({
         <Pressable
           accessibilityHint="Long press to reorder."
           accessibilityRole="button"
-          delayLongPress={150}
           disabled={controlsDisabled}
-          onLongPress={onDrag}
           onPress={handlePress}
-          pressRetentionOffset={DRAG_PRESS_RETENTION_OFFSET}
           style={({ pressed }) => [styles.budgetContent, pressed && sharedStyles.pressed]}
         >
           <View style={styles.budgetHeader}>
@@ -212,11 +214,11 @@ function areBudgetUsageCardPropsEqual(
     previous.historyVariant === next.historyVariant &&
     previous.interactionsDisabled === next.interactionsDisabled &&
     previous.isHistoryExpanded === next.isHistoryExpanded &&
-    previous.onDrag === next.onDrag &&
     previous.onPress === next.onPress &&
     previous.onToggleHistory === next.onToggleHistory &&
     previous.periodOffset === next.periodOffset &&
-    previous.row === next.row
+    previous.row === next.row &&
+    previous.shouldSuppressPress === next.shouldSuppressPress
   );
 }
 

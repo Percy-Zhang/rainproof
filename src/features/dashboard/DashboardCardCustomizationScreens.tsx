@@ -87,7 +87,15 @@ export function DashboardEditScreen({
 
   const renderEditCardRow = useCallback((
     setting: DashboardCardSetting,
-    { dragging, reorderActive }: { dragging: boolean; reorderActive: boolean },
+    {
+      dragging,
+      reorderActive,
+      shouldSuppressPress,
+    }: {
+      dragging: boolean;
+      reorderActive: boolean;
+      shouldSuppressPress: () => boolean;
+    },
   ) => (
     <DashboardEditCardRow
       availability={availability}
@@ -96,6 +104,7 @@ export function DashboardEditScreen({
       reorderActive={reorderActive}
       setting={setting}
       onHideCard={hideCard}
+      shouldSuppressPress={shouldSuppressPress}
     />
   ), [availability, hideCard, visibleSettings.length]);
 
@@ -176,6 +185,7 @@ function DashboardEditCardRow({
   reorderActive,
   setting,
   onHideCard,
+  shouldSuppressPress,
 }: {
   availability: DashboardCardAvailability;
   canHide: boolean;
@@ -183,6 +193,7 @@ function DashboardEditCardRow({
   reorderActive: boolean;
   setting: DashboardCardSetting;
   onHideCard: (cardId: DashboardCardId) => void;
+  shouldSuppressPress: () => boolean;
 }) {
   const definition = getDashboardCardDefinition(setting.id);
   const available = availability[setting.id] !== false;
@@ -218,7 +229,11 @@ function DashboardEditCardRow({
             accessibilityLabel={`Remove ${definition.title}`}
             accessibilityRole="button"
             disabled={!hideEnabled}
-            onPress={() => onHideCard(setting.id)}
+            onPress={() => {
+              if (!shouldSuppressPress()) {
+                onHideCard(setting.id);
+              }
+            }}
             style={({ pressed }) => [
               styles.hideButton,
               !hideEnabled && styles.disabledButton,
