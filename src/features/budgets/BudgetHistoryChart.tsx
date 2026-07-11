@@ -18,6 +18,7 @@ import {
   BUDGET_HISTORY_PLOT_HEIGHT,
   getBudgetHistoryLineAxisLabels,
   getBudgetHistoryLineChartModel,
+  getBudgetHistoryPointIndexAtX,
   getBudgetHistoryChartScale,
   shouldShowBudgetHistoryBarLabel,
 } from './budgetHistoryChartModel';
@@ -37,6 +38,7 @@ export const BudgetHistoryChart = memo(function BudgetHistoryChart({
 }: BudgetHistoryChartProps) {
   const [selectedPointId, setSelectedPointId] = useState(points.at(-1)?.id ?? '');
   const [linePressableWidth, setLinePressableWidth] = useState(0);
+  const renderedLineWidth = linePressableWidth || BUDGET_HISTORY_LINE_WIDTH;
   const selectedPoint = useMemo(
     () => points.find((point) => point.id === selectedPointId) ?? points.at(-1),
     [points, selectedPointId],
@@ -47,8 +49,10 @@ export const BudgetHistoryChart = memo(function BudgetHistoryChart({
     [points, selectedPoint],
   );
   const lineModel = useMemo(
-    () => selectedPoint ? getBudgetHistoryLineChartModel(points, selectedPoint) : null,
-    [points, selectedPoint],
+    () => selectedPoint
+      ? getBudgetHistoryLineChartModel(points, selectedPoint, { width: renderedLineWidth })
+      : null,
+    [points, renderedLineWidth, selectedPoint],
   );
   const lineAxisLabels = useMemo(
     () => getBudgetHistoryLineAxisLabels(points),
@@ -63,17 +67,17 @@ export const BudgetHistoryChart = memo(function BudgetHistoryChart({
   }, []);
 
   const handleLinePress = useCallback((event: GestureResponderEvent) => {
-    const width = linePressableWidth || BUDGET_HISTORY_LINE_WIDTH;
-    const clampedX = Math.max(0, Math.min(width, event.nativeEvent.locationX));
-    const selectedIndex = points.length <= 1
-      ? 0
-      : Math.round((clampedX / width) * (points.length - 1));
+    const selectedIndex = getBudgetHistoryPointIndexAtX({
+      pointCount: points.length,
+      width: renderedLineWidth,
+      x: event.nativeEvent.locationX,
+    });
     const nextPoint = points[selectedIndex];
 
     if (nextPoint) {
       setSelectedPointId(nextPoint.id);
     }
-  }, [linePressableWidth, points]);
+  }, [points, renderedLineWidth]);
 
   if (!selectedPoint || !scale || !lineModel) {
     return null;
@@ -113,10 +117,16 @@ export const BudgetHistoryChart = memo(function BudgetHistoryChart({
             style={({ pressed }) => [styles.linePressable, pressed && styles.pressed]}
             testID="budget-history-line-chart"
           >
-            <Svg pointerEvents="none" width="100%" height={BUDGET_HISTORY_PLOT_HEIGHT} viewBox={`0 0 ${BUDGET_HISTORY_LINE_WIDTH} ${BUDGET_HISTORY_PLOT_HEIGHT}`}>
+            <Svg
+              pointerEvents="none"
+              width="100%"
+              height={BUDGET_HISTORY_PLOT_HEIGHT}
+              viewBox={`0 0 ${renderedLineWidth} ${BUDGET_HISTORY_PLOT_HEIGHT}`}
+              testID="budget-history-line-svg"
+            >
               <Line
                 x1={0}
-                x2={BUDGET_HISTORY_LINE_WIDTH}
+                x2={renderedLineWidth}
                 y1={lineModel.limitY}
                 y2={lineModel.limitY}
                 stroke={colors.ink}
@@ -139,6 +149,7 @@ export const BudgetHistoryChart = memo(function BudgetHistoryChart({
                   r={5}
                   stroke={colors.surface}
                   strokeWidth={2}
+                  testID="budget-history-selected-chart-point"
                 />
               ) : null}
             </Svg>

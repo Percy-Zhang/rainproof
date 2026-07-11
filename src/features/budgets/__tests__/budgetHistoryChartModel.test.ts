@@ -4,6 +4,7 @@ import {
   BUDGET_HISTORY_LABEL_HEIGHT,
   getBudgetHistoryLineAxisLabels,
   getBudgetHistoryLineChartModel,
+  getBudgetHistoryPointIndexAtX,
   getBudgetHistoryChartScale,
   shouldShowBudgetHistoryBarLabel,
 } from '../budgetHistoryChartModel';
@@ -60,6 +61,33 @@ describe('budget history chart scale', () => {
     expect(model.chartPoints[1].y).toBe(model.limitY);
     expect(model.chartPoints[2].y).toBeLessThan(model.limitY);
     expect(model.selectedChartPoint?.point.id).toBe('at');
+  });
+
+  it('uses the full measured plot width for phone and tablet line geometry', () => {
+    const points = [
+      makePoint('first', 0, 7500, 10000, '1 Jun'),
+      makePoint('middle', 1, 10000, 10000, '15 Jun'),
+      makePoint('last', 2, 12500, 10000, '30 Jun'),
+    ];
+    const phoneModel = getBudgetHistoryLineChartModel(points, points[1], { width: 320 });
+    const tabletModel = getBudgetHistoryLineChartModel(points, points[1], { width: 768 });
+
+    expect(phoneModel.chartPoints.map((item) => item.x)).toEqual([0, 160, 320]);
+    expect(tabletModel.chartPoints.map((item) => item.x)).toEqual([0, 384, 768]);
+    expect(tabletModel.selectedChartPoint?.x).toBe(384);
+  });
+
+  it('maps line touches through the same responsive plot geometry', () => {
+    expect(getBudgetHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 0 })).toBe(0);
+    expect(getBudgetHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 153.6 })).toBe(1);
+    expect(getBudgetHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 384 })).toBe(2);
+    expect(getBudgetHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 768 })).toBe(4);
+  });
+
+  it('centers a single line point within the measured plot width', () => {
+    const onlyPoint = makePoint('only', 0, 7500, 10000, 'Jun');
+
+    expect(getBudgetHistoryLineChartModel([onlyPoint], onlyPoint, { width: 768 }).chartPoints[0].x).toBe(384);
   });
 
   it('uses sparse line axis labels that are independent of point width', () => {

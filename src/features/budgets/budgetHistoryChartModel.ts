@@ -1,4 +1,9 @@
 import type { BudgetHistoryPoint } from '../../domain/budgets';
+import {
+  getHorizontalPlotGeometry,
+  getHorizontalPlotX,
+  getNearestHorizontalPlotPointIndex,
+} from '../chartPlotGeometry';
 
 export const BUDGET_HISTORY_PLOT_HEIGHT = 104;
 export const BUDGET_HISTORY_LABEL_HEIGHT = 24;
@@ -70,9 +75,9 @@ export function getBudgetHistoryLineChartModel(
   const width = options.width ?? BUDGET_HISTORY_LINE_WIDTH;
   const plotHeight = options.plotHeight ?? BUDGET_HISTORY_PLOT_HEIGHT;
   const scale = getBudgetHistoryChartScale(points, selectedPoint, { ...options, plotHeight, labelHeight: 0 });
-  const divisor = Math.max(1, points.length - 1);
+  const plotGeometry = getHorizontalPlotGeometry(width);
   const chartPoints = points.map((point, index) => {
-    const x = (index / divisor) * width;
+    const x = getHorizontalPlotX(index, points.length, plotGeometry);
     const y = plotHeight - scale.getValueHeight(point.spentMinor);
 
     return { point, x, y };
@@ -86,6 +91,22 @@ export function getBudgetHistoryLineChartModel(
     polylinePoints: chartPoints.map((point) => `${point.x},${point.y}`).join(' '),
     selectedChartPoint,
   };
+}
+
+export function getBudgetHistoryPointIndexAtX({
+  pointCount,
+  width,
+  x,
+}: {
+  pointCount: number;
+  width: number;
+  x: number;
+}): number {
+  return getNearestHorizontalPlotPointIndex({
+    geometry: getHorizontalPlotGeometry(width),
+    pointCount,
+    x,
+  });
 }
 
 export function getBudgetHistoryLineAxisLabels(points: BudgetHistoryPoint[]) {

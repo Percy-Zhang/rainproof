@@ -57,12 +57,14 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
 }: StatsBalanceHistoryCardProps) {
   const [chartWidth, setChartWidth] = useState(0);
   const [dismissedEventPointId, setDismissedEventPointId] = useState<string | null>(null);
+  const renderedChartWidth = chartWidth || STATS_BALANCE_HISTORY_CHART_WIDTH;
   const chartModel = useMemo(
     () => getStatsBalanceHistoryChartModel({
       points,
       selectedPointId: selectedPoint?.id,
+      width: renderedChartWidth,
     }),
-    [points, selectedPoint?.id],
+    [points, renderedChartWidth, selectedPoint?.id],
   );
   const axisLabels = useMemo(() => getStatsBalanceHistoryAxisLabels(points), [points]);
   const selectedEvent = selectedPoint?.event;
@@ -75,10 +77,9 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
     setDismissedEventPointId(null);
   }, [mode, points]);
   const selectNearestPoint = useCallback((event: GestureResponderEvent) => {
-    const width = chartWidth || STATS_BALANCE_HISTORY_CHART_WIDTH;
     const eventMarker = chartModel
       ? getStatsBalanceHistoryEventMarkerAtPosition({
-        chartWidth: width,
+        chartWidth: renderedChartWidth,
         markers: chartModel.eventMarkers,
         x: event.nativeEvent.locationX,
         y: event.nativeEvent.locationY,
@@ -93,7 +94,7 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
 
     const index = getStatsBalanceHistoryPointIndexAtX({
       pointCount: points.length,
-      width,
+      width: renderedChartWidth,
       x: event.nativeEvent.locationX,
     });
     const point = points[index];
@@ -102,7 +103,7 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
       setDismissedEventPointId(null);
       onSelectPoint(point.id);
     }
-  }, [chartModel, chartWidth, onSelectPoint, points]);
+  }, [chartModel, onSelectPoint, points, renderedChartWidth]);
   const changeTone = getNetTone(selectedChangeMinor);
   const selectedCopy = getSelectedPointCopy(selectedPoint);
 
@@ -183,12 +184,13 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
               pointerEvents="none"
               width="100%"
               height={STATS_BALANCE_HISTORY_CHART_HEIGHT}
-              viewBox={`0 0 ${STATS_BALANCE_HISTORY_CHART_WIDTH} ${STATS_BALANCE_HISTORY_CHART_HEIGHT}`}
+              viewBox={`0 0 ${renderedChartWidth} ${STATS_BALANCE_HISTORY_CHART_HEIGHT}`}
+              testID="stats-balance-history-svg"
             >
               {chartModel.zeroY !== undefined ? (
                 <Line
                   x1={0}
-                  x2={STATS_BALANCE_HISTORY_CHART_WIDTH}
+                  x2={renderedChartWidth}
                   y1={chartModel.zeroY}
                   y2={chartModel.zeroY}
                   stroke={colors.faint}
@@ -212,8 +214,8 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
                     fill={colors.muted}
                     fontSize={10}
                     fontWeight="800"
-                    textAnchor={chartModel.todayDividerX > STATS_BALANCE_HISTORY_CHART_WIDTH - 42 ? 'end' : 'start'}
-                    x={Math.min(STATS_BALANCE_HISTORY_CHART_WIDTH - 4, chartModel.todayDividerX + 4)}
+                    textAnchor={chartModel.todayDividerX > renderedChartWidth - 42 ? 'end' : 'start'}
+                    x={Math.min(renderedChartWidth - 4, chartModel.todayDividerX + 4)}
                     y={14}
                   >
                     Today
@@ -266,6 +268,7 @@ export const StatsBalanceHistoryCard = memo(function StatsBalanceHistoryCard({
                   r={5.5}
                   stroke={colors.surface}
                   strokeWidth={2}
+                  testID="stats-balance-selected-chart-point"
                 />
               ) : null}
             </Svg>

@@ -1,6 +1,11 @@
 import type { BalanceHistoryPoint } from '../../domain/balanceHistory';
 import type { ForecastBalancePoint, ForecastDayEvent } from '../../domain/forecastBalance';
 import type { DateRange } from '../../domain/types';
+import {
+  getHorizontalPlotGeometry,
+  getHorizontalPlotX,
+  getNearestHorizontalPlotPointIndex,
+} from '../chartPlotGeometry';
 
 export type StatsBalanceHistoryMode = 'history' | 'combined' | 'forecast';
 
@@ -173,9 +178,9 @@ export function getStatsBalanceHistoryChartModel({
   const domainMax = rawSpan === 0 ? rawMax + padding : rawMax + padding;
   const domainSpan = Math.max(1, domainMax - domainMin);
   const usableHeight = Math.max(1, height - chartPaddingTop - chartPaddingBottom);
-  const divisor = Math.max(1, points.length - 1);
+  const plotGeometry = getHorizontalPlotGeometry(width);
   const chartPoints = points.map((point, index) => {
-    const x = points.length === 1 ? width / 2 : (index / divisor) * width;
+    const x = getHorizontalPlotX(index, points.length, plotGeometry);
     const y = chartPaddingTop + ((domainMax - point.balanceMinor) / domainSpan) * usableHeight;
 
     return { ...point, x, y };
@@ -233,10 +238,9 @@ export function getStatsBalanceHistoryEventMarkerAtPosition({
     return undefined;
   }
 
-  const safeChartWidth = Math.max(1, chartWidth);
+  const plotGeometry = getHorizontalPlotGeometry(chartWidth);
   const safeChartHeight = Math.max(1, chartHeight);
-  const viewBoxX = (Math.max(0, Math.min(safeChartWidth, x)) / safeChartWidth) *
-    STATS_BALANCE_HISTORY_CHART_WIDTH;
+  const viewBoxX = Math.max(plotGeometry.left, Math.min(plotGeometry.right, x));
   const viewBoxY = (Math.max(0, Math.min(safeChartHeight, y)) / safeChartHeight) *
     STATS_BALANCE_HISTORY_CHART_HEIGHT;
   const hitRadiusSquared = hitRadius * hitRadius;
@@ -289,9 +293,11 @@ export function getStatsBalanceHistoryPointIndexAtX({
     return 0;
   }
 
-  const safeWidth = Math.max(1, width);
-  const clampedX = Math.max(0, Math.min(safeWidth, x));
-  return Math.max(0, Math.min(pointCount - 1, Math.round((clampedX / safeWidth) * (pointCount - 1))));
+  return getNearestHorizontalPlotPointIndex({
+    geometry: getHorizontalPlotGeometry(width),
+    pointCount,
+    x,
+  });
 }
 
 function formatShortAxisDate(dateValue: string): string {

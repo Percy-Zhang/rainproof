@@ -37,8 +37,29 @@ describe('stats balance history helpers', () => {
     expect(model?.chartPoints).toHaveLength(2);
   });
 
+  it('uses the full measured plot width for phone and tablet geometry', () => {
+    const points = [
+      point('2026-05-01', 100),
+      point('2026-05-02', 200),
+      point('2026-05-03', 300),
+    ];
+    const phoneModel = getStatsBalanceHistoryChartModel({ points, width: 320 });
+    const tabletModel = getStatsBalanceHistoryChartModel({
+      points,
+      selectedPointId: 'history:2026-05-02',
+      width: 768,
+    });
+
+    expect(phoneModel?.chartPoints.map((item) => item.x)).toEqual([0, 160, 320]);
+    expect(tabletModel?.chartPoints.map((item) => item.x)).toEqual([0, 384, 768]);
+    expect(tabletModel?.selectedChartPoint?.x).toBe(384);
+  });
+
   it('maps tap positions to the nearest point index', () => {
     expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 5, width: 320, x: 0 })).toBe(0);
+    expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 153.6 })).toBe(1);
+    expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 384 })).toBe(2);
+    expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 5, width: 768, x: 768 })).toBe(4);
     expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 5, width: 320, x: 160 })).toBe(2);
     expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 5, width: 320, x: 999 })).toBe(4);
     expect(getStatsBalanceHistoryPointIndexAtX({ pointCount: 1, width: 320, x: 200 })).toBe(0);
@@ -233,18 +254,19 @@ describe('stats balance history helpers', () => {
           kind: 'forecast',
         }),
       ],
+      width: 768,
     });
     const marker = model?.eventMarkers[0];
 
     expect(marker).toBeDefined();
     expect(getStatsBalanceHistoryEventMarkerAtPosition({
-      chartWidth: 320,
+      chartWidth: 768,
       markers: model?.eventMarkers ?? [],
       x: marker?.point.x ?? 0,
       y: marker?.point.y ?? 0,
     })?.point.id).toBe('forecast:2026-07-11');
     expect(getStatsBalanceHistoryEventMarkerAtPosition({
-      chartWidth: 320,
+      chartWidth: 768,
       markers: model?.eventMarkers ?? [],
       x: 0,
       y: 0,
