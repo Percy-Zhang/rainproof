@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useMemo } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -13,10 +14,14 @@ import { FormError } from '../../components/ui';
 import {
   formatEditDateLabel,
 } from '../../domain/transactionEdit';
+import {
+  createTransactionLinkAllocationStatusContext,
+  getTransactionLineLinkAllocationStatus,
+  getTransactionLinkAllocationStatus,
+} from '../../domain/transactionLinkAllocationStatus';
 import type {
   AppSnapshot,
   UpdateTransactionInput,
-  UpdateTransactionLinkInput,
 } from '../../domain/types';
 import type {
   CategorySelectLaunchParams,
@@ -39,10 +44,11 @@ import { useEditTransactionController } from './useEditTransactionController';
 type EditTransactionScreenProps = {
   snapshot: AppSnapshot;
   transactionId: string;
-  onUpdateTransaction: (input: UpdateTransactionInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onUpdateTransaction: (
+    input: UpdateTransactionInput,
+    options?: { optimistic?: boolean; transactionLinkDeleteIds?: string[] },
+  ) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
   onOpenTransactionLink: () => void;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
@@ -57,8 +63,6 @@ export function EditTransactionScreen({
   transactionId,
   onUpdateTransaction,
   onDeleteTransaction,
-  onUpdateTransactionLink,
-  onDeleteTransactionLink,
   onOpenTransactionLink,
   onOpenCategorySelect,
   onCancel,
@@ -69,8 +73,6 @@ export function EditTransactionScreen({
     transactionId,
     onUpdateTransaction,
     onDeleteTransaction,
-    onUpdateTransactionLink,
-    onDeleteTransactionLink,
     onOpenCategorySelect,
     onCancel,
     onDone,
@@ -123,6 +125,46 @@ export function EditTransactionScreen({
     updateDraft,
     updateSplitLine,
   } = controller;
+  const splitAllocationStatus = useMemo(() => {
+    const transaction = snapshot.transactions.find((item) => item.id === transactionId);
+    if (!transaction || transaction.kind === 'transfer') {
+      return { byLineId: new Map(), whole: null };
+    }
+    const side = transaction.kind === 'income' ? 'source' as const : 'target' as const;
+    const lines = snapshot.transactionLines.filter((line) =>
+      line.transactionId === transactionId && (side === 'source' ? line.amountMinor > 0 : line.amountMinor < 0));
+    const currencyCode = lines[0]?.currencyCode;
+    if (!currencyCode) {
+      return { byLineId: new Map(), whole: null };
+    }
+    const context = createTransactionLinkAllocationStatusContext({
+      lines: snapshot.transactionLines,
+      persistedLinks: snapshot.transactionLinks,
+    });
+    const byLineId = new Map(lines.map((line) => [
+      line.id,
+      getTransactionLineLinkAllocationStatus({
+        transactionId,
+        lineId: line.id,
+        currencyCode: line.currencyCode,
+        side,
+        lines: snapshot.transactionLines,
+        persistedLinks: snapshot.transactionLinks,
+        context,
+      }),
+    ]));
+    return {
+      byLineId,
+      whole: getTransactionLinkAllocationStatus({
+        transactionId,
+        currencyCode,
+        side,
+        lines: snapshot.transactionLines,
+        persistedLinks: snapshot.transactionLinks,
+        context,
+      }),
+    };
+  }, [snapshot.transactionLines, snapshot.transactionLinks, snapshot.transactions, transactionId]);
 
   if (draft && pickerMode) {
     return (
@@ -207,6 +249,8 @@ export function EditTransactionScreen({
             showCurrencyCodes={showCurrencyCodes}
             splitMode={draft.splitMode ?? 'standard'}
             totalMinor={getSplitTotalMinor(draft)}
+            allocationStatusByLineId={splitAllocationStatus.byLineId}
+            wholeAllocationStatus={splitAllocationStatus.whole}
             onAddLine={addSplitLine}
             onChangeLineKind={changeSplitLineKind}
             onChangeSplitMode={changeSplitMode}

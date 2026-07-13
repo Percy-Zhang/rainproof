@@ -277,9 +277,9 @@ describe('transaction linking helpers', () => {
       }),
     ).toEqual({
       linked: true,
-      title: 'Linked transaction',
-      detail: 'Paid back for: Groceries / May 17',
-      secondaryDetail: 'Linked amount: AUD $25.00',
+      title: 'Settled · 1 use',
+      detail: 'Received: AUD $25.00 / Allocated: AUD $25.00 / Available: AUD $0.00',
+      secondaryDetail: '',
     });
   });
 
@@ -435,9 +435,9 @@ describe('transaction linking helpers', () => {
       }),
     ).toEqual({
       linked: true,
-      title: 'Linked to 2 expenses',
-      detail: 'Linked amount: AUD $25.00',
-      secondaryDetail: 'Refund: AUD $10.00 / Reimbursement: AUD $15.00',
+      title: 'Settled · 2 uses',
+      detail: 'Received: AUD $25.00 / Allocated: AUD $25.00 / Available: AUD $0.00',
+      secondaryDetail: '',
     });
   });
 
@@ -452,13 +452,13 @@ describe('transaction linking helpers', () => {
       }),
     ).toEqual({
       linked: true,
-      title: 'Linked transaction',
-      detail: 'Refund from: Refund / May 17 / Received back: AUD $15.00',
-      secondaryDetail: 'Original: AUD $40.00 / Counted in stats: AUD $25.00',
+      title: 'Partial · 1 payment',
+      detail: 'Original: AUD $40.00 / Allocated: AUD $15.00 / Remaining: AUD $25.00',
+      secondaryDetail: '',
     });
   });
 
-  it('clamps linked expense counted amount at zero for full refunds and overpayments', () => {
+  it('surfaces over-allocated expense totals without hiding the stored allocation', () => {
     expect(
       getTransactionLinkEditSummary({
         transactionId: 'expense-aud',
@@ -466,7 +466,7 @@ describe('transaction linking helpers', () => {
         lines,
         transactionLinks: [link({ amountMinor: 5000 })],
         formatAmount: formatTestMoney,
-      }).secondaryDetail,
-    ).toBe('Original: AUD $40.00 / Counted in stats: AUD $0.00');
+      }).detail,
+    ).toBe('Original: AUD $40.00 / Allocated: AUD $50.00 / Remaining: AUD $0.00');
   });
 });

@@ -597,7 +597,7 @@ describe('transaction edit helpers', () => {
     ]);
   });
 
-  it('plans source transaction link update after editing an income transaction', () => {
+  it('preserves source allocation identity and amount after editing an income transaction', () => {
     const draft = createTransactionEditDraft(
       snapshot('income', [line({ amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' })]),
       'tx-1',
@@ -608,19 +608,7 @@ describe('transaction edit helpers', () => {
       input,
       transactionId: 'tx-1',
       transactionLinks: [link({ amountMinor: 1200 })],
-    })).toEqual({
-      sourceLinkUpdate: {
-        id: 'link-1',
-        sourceTransactionId: 'tx-1',
-        targetTransactionId: 'expense-1',
-        sourceLineId: null,
-        targetLineId: null,
-        linkType: 'reimbursement',
-        amountMinor: 4500,
-        currencyCode: 'AUD',
-      },
-      targetLinkDeleteIds: [],
-    });
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
   });
 
   it('preserves split-line source link identity after editing parent and split item names', () => {
@@ -658,19 +646,7 @@ describe('transaction edit helpers', () => {
           amountMinor: 3400,
         }),
       ],
-    })).toEqual({
-      sourceLinkUpdate: {
-        id: 'link-1',
-        sourceTransactionId: 'tx-1',
-        targetTransactionId: 'expense-1',
-        sourceLineId: 'bonus-line',
-        targetLineId: 'expense-line',
-        linkType: 'reimbursement',
-        amountMinor: 3400,
-        currencyCode: 'AUD',
-      },
-      targetLinkDeleteIds: [],
-    });
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
   });
 
   it('keeps parent-level source links parent-level after editing', () => {
@@ -684,15 +660,10 @@ describe('transaction edit helpers', () => {
       input,
       transactionId: 'tx-1',
       transactionLinks: [link({ sourceLineId: null, targetLineId: null })],
-    }).sourceLinkUpdate).toEqual(
-      expect.objectContaining({
-        sourceLineId: null,
-        targetLineId: null,
-      }),
-    );
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
   });
 
-  it('plans source link deletion when edited transaction is no longer income', () => {
+  it('requires unlinking before an income transaction changes kind', () => {
     const input = buildTransactionUpdateInput(
       {
         ...createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1'),
@@ -701,19 +672,48 @@ describe('transaction edit helpers', () => {
       accounts,
     );
 
-    expect(getTransactionEditLinkSavePlan({
+    expect(() => getTransactionEditLinkSavePlan({
       input,
       transactionId: 'tx-1',
       transactionLinks: [link({})],
-    })).toEqual({
-      sourceLinkDeleteId: 'link-1',
-      targetLinkDeleteIds: [],
-    });
+    })).toThrow('Unlink this transaction before changing its type.');
   });
 
-  it('plans target link deletion when edited transaction is no longer an expense', () => {
+  it('requires unlinking before an expense transaction changes kind', () => {
     const draft = createTransactionEditDraft(
       snapshot('income', [line({ amountMinor: 1200, categoryId: 'income', subcategoryId: 'salary' })]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput(draft, accounts);
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({ id: 'target-link', sourceTransactionId: 'income-2', targetTransactionId: 'tx-1' })],
+    })).toThrow('Unlink this transaction before changing its type.');
+  });
+
+  it('preserves every source link when one income is allocated across multiple targets', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [line({ amountMinor: 10000, categoryId: 'income', subcategoryId: 'salary' })]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({ ...draft, title: 'Renamed payment' }, accounts);
+    const transactionLinks = [
+      link({ id: 'link-c', targetTransactionId: 'expense-c', amountMinor: 2000 }),
+      link({ id: 'link-a', targetTransactionId: 'expense-a', amountMinor: 3000 }),
+      link({ id: 'link-b', targetTransactionId: 'expense-b', amountMinor: 4000 }),
+    ];
+
+    expect(getTransactionEditLinkSavePlan({ input, transactionId: 'tx-1', transactionLinks }))
+      .toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
+    expect(getTransactionEditLinkSavePlan({ input, transactionId: 'tx-1', transactionLinks: [...transactionLinks].reverse() }))
+      .toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
+  });
+
+  it('preserves equal-amount source links as distinct records', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [line({ amountMinor: 5000, categoryId: 'income', subcategoryId: 'salary' })]),
       'tx-1',
     );
     const input = buildTransactionUpdateInput(draft, accounts);
@@ -721,9 +721,166 @@ describe('transaction edit helpers', () => {
     expect(getTransactionEditLinkSavePlan({
       input,
       transactionId: 'tx-1',
-      transactionLinks: [link({ id: 'target-link', sourceTransactionId: 'income-2', targetTransactionId: 'tx-1' })],
-    })).toEqual({
-      targetLinkDeleteIds: ['target-link'],
-    });
+      transactionLinks: [
+        link({ id: 'equal-a', targetTransactionId: 'expense-a', amountMinor: 2000 }),
+        link({ id: 'equal-b', targetTransactionId: 'expense-b', amountMinor: 2000 }),
+      ],
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
+  });
+
+  it('requires unlinking before a linked source split line is removed', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({ id: 'keep-line', amountMinor: 6000, categoryId: 'income', subcategoryId: 'salary' }),
+        line({ id: 'remove-line', amountMinor: 4000, categoryId: 'income', subcategoryId: 'bonus' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({
+      ...draft,
+      amount: '60.00',
+      splitLines: draft.splitLines?.filter((splitLine) => splitLine.id === 'keep-line'),
+    }, accounts);
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({ id: 'keep-parent', amountMinor: 2000, sourceLineId: null }),
+        link({ id: 'remove-direct', amountMinor: 3000, sourceLineId: 'remove-line' }),
+      ],
+    })).toThrow('Cannot remove or change a linked split line. Unlink it first.');
+  });
+
+  it('rejects reducing a linked source split line below its retained allocation', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [
+        line({ id: 'linked-line', amountMinor: 6000, categoryId: 'income', subcategoryId: 'salary' }),
+        line({ id: 'other-line', amountMinor: 4000, categoryId: 'income', subcategoryId: 'bonus' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({
+      ...draft,
+      amount: '100.00',
+      splitLines: draft.splitLines?.map((splitLine) =>
+        splitLine.id === 'linked-line' ? { ...splitLine, amount: '30.00' } : { ...splitLine, amount: '70.00' }),
+    }, accounts);
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({ sourceLineId: 'linked-line', amountMinor: 5000 })],
+    })).toThrow('Cannot reduce this split line below its existing linked allocation.');
+  });
+
+  it('rejects changing the sign of a linked mixed-split line', () => {
+    const input = {
+      id: 'tx-1',
+      kind: 'income' as const,
+      title: 'Mixed income',
+      datetime: '2026-05-17T00:00:00.000Z',
+      lines: [
+        { id: 'linked-line', accountId: 'acct-1', amountMinor: -3000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+        { id: 'other-line', accountId: 'acct-1', amountMinor: 8000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+      ],
+    };
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [link({ sourceLineId: 'linked-line', amountMinor: 2000 })],
+    })).toThrow('Cannot remove or change a linked split line. Unlink it first.');
+  });
+
+  it('rejects a kind change regardless of source link order', () => {
+    const input = buildTransactionUpdateInput(
+      createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1'),
+      accounts,
+    );
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({ id: 'z-link' }),
+        link({ id: 'a-link', targetTransactionId: 'expense-2' }),
+      ],
+    })).toThrow('Unlink this transaction before changing its type.');
+  });
+
+  it('rejects an edit that would leave multiple source allocations over capacity', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('income', [line({ amountMinor: 10000, categoryId: 'income', subcategoryId: 'salary' })]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({ ...draft, amount: '50.00' }, accounts);
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({ id: 'a', amountMinor: 3000 }),
+        link({ id: 'b', targetTransactionId: 'expense-2', amountMinor: 4000 }),
+      ],
+    })).toThrow('Cannot reduce this transaction below its existing linked allocations.');
+  });
+
+  it('preserves multiple incoming target links when an expense edit keeps their scope valid', () => {
+    const draft = createTransactionEditDraft(snapshot('expense', [line({ amountMinor: -10000 })]), 'tx-1');
+    const input = buildTransactionUpdateInput({ ...draft, title: 'Renamed expense' }, accounts);
+
+    expect(getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({ id: 'payment-a', sourceTransactionId: 'income-a', targetTransactionId: 'tx-1', amountMinor: 3000 }),
+        link({ id: 'payment-b', sourceTransactionId: 'income-b', targetTransactionId: 'tx-1', amountMinor: 4000 }),
+      ],
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
+  });
+
+  it('requires unlinking before a linked target split line is removed', () => {
+    const draft = createTransactionEditDraft(
+      snapshot('expense', [
+        line({ id: 'keep-line', amountMinor: -6000 }),
+        line({ id: 'remove-line', amountMinor: -4000, categoryId: 'shopping', subcategoryId: 'clothing' }),
+      ]),
+      'tx-1',
+    );
+    const input = buildTransactionUpdateInput({
+      ...draft,
+      amount: '60.00',
+      splitLines: draft.splitLines?.filter((splitLine) => splitLine.id === 'keep-line'),
+    }, accounts);
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({ id: 'keep-parent', sourceTransactionId: 'income-a', targetTransactionId: 'tx-1', amountMinor: 2000 }),
+        link({
+          id: 'remove-direct',
+          sourceTransactionId: 'income-b',
+          targetTransactionId: 'tx-1',
+          targetLineId: 'remove-line',
+          amountMinor: 3000,
+        }),
+      ],
+    })).toThrow('Cannot remove or change a linked split line. Unlink it first.');
+  });
+
+  it('rejects an expense edit that would leave incoming payments over target capacity', () => {
+    const draft = createTransactionEditDraft(snapshot('expense', [line({ amountMinor: -10000 })]), 'tx-1');
+    const input = buildTransactionUpdateInput({ ...draft, amount: '50.00' }, accounts);
+
+    expect(() => getTransactionEditLinkSavePlan({
+      input,
+      transactionId: 'tx-1',
+      transactionLinks: [
+        link({ id: 'a', sourceTransactionId: 'income-a', targetTransactionId: 'tx-1', amountMinor: 3000 }),
+        link({ id: 'b', sourceTransactionId: 'income-b', targetTransactionId: 'tx-1', amountMinor: 4000 }),
+      ],
+    })).toThrow('Cannot reduce this transaction below its existing linked allocations.');
   });
 });

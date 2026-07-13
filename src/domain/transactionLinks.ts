@@ -1,4 +1,8 @@
 import { normalizeCurrencyCode } from './money';
+import {
+  getTransactionLineLinkAllocationStatus,
+  getTransactionLinkAllocationStatus,
+} from './transactionLinkAllocationStatus';
 import type {
   CurrencyCode,
   NewTransactionLinkInput,
@@ -149,6 +153,7 @@ export function validateTransactionLinkInput({
       targetTransactionId,
       sourceLineId,
       targetLineId,
+      linkType: input.linkType,
       amountMinor: input.amountMinor,
       currencyCode,
     },
@@ -177,118 +182,72 @@ function validateAllocationLimits({
     targetTransactionId: string;
     sourceLineId: string | null;
     targetLineId: string | null;
+    linkType: TransactionLinkType;
     amountMinor: number;
     currencyCode: CurrencyCode;
   };
   lines: TransactionLine[];
   relatedExistingLinks: TransactionLink[];
 }): void {
-  const sourceAvailableMinor = getTransactionSignedCurrencyTotal(
+  const draftChanges = {
+    toAdd: [input],
+    toUpdate: [],
+    deleteIds: [],
+  };
+  const sourceStatus = getTransactionLinkAllocationStatus({
+    transactionId: input.sourceTransactionId,
+    currencyCode: input.currencyCode,
+    side: 'source',
     lines,
-    input.sourceTransactionId,
-    input.currencyCode,
-    (amountMinor) => amountMinor > 0,
-  );
-  const targetAvailableMinor = getTransactionSignedCurrencyTotal(
+    persistedLinks: relatedExistingLinks,
+    draftChanges,
+  });
+  const targetStatus = getTransactionLinkAllocationStatus({
+    transactionId: input.targetTransactionId,
+    currencyCode: input.currencyCode,
+    side: 'target',
     lines,
-    input.targetTransactionId,
-    input.currencyCode,
-    (amountMinor) => amountMinor < 0,
-  );
-  const sourceAllocatedMinor = getAllocatedTransactionMinor(
-    relatedExistingLinks,
-    input.sourceTransactionId,
-    input.currencyCode,
-    'source',
-  ) + input.amountMinor;
-  const targetAllocatedMinor = getAllocatedTransactionMinor(
-    relatedExistingLinks,
-    input.targetTransactionId,
-    input.currencyCode,
-    'target',
-  ) + input.amountMinor;
+    persistedLinks: relatedExistingLinks,
+    draftChanges,
+  });
 
-  if (sourceAllocatedMinor > sourceAvailableMinor) {
+  if (sourceStatus.invalidLinkCount || sourceStatus.parentOverAllocatedMinor > 0) {
     throw new Error('Linked amounts cannot exceed the source income transaction.');
   }
 
-  if (targetAllocatedMinor > targetAvailableMinor) {
+  if (targetStatus.invalidLinkCount || targetStatus.parentOverAllocatedMinor > 0) {
     throw new Error('Linked amounts cannot exceed the target expense transaction.');
   }
 
   if (input.sourceLineId) {
-    const sourceLineAvailableMinor = getLineAvailableMinor(lines, input.sourceLineId, input.currencyCode, (amountMinor) => amountMinor > 0);
-    const sourceLineAllocatedMinor = getAllocatedLineMinor(relatedExistingLinks, input.sourceLineId, input.currencyCode, 'source') + input.amountMinor;
-    if (sourceLineAllocatedMinor > sourceLineAvailableMinor) {
+    const sourceLineStatus = getTransactionLineLinkAllocationStatus({
+      transactionId: input.sourceTransactionId,
+      lineId: input.sourceLineId,
+      currencyCode: input.currencyCode,
+      side: 'source',
+      lines,
+      persistedLinks: relatedExistingLinks,
+      draftChanges,
+    });
+    if (!sourceLineStatus.scopeExists || sourceLineStatus.invalidLinkCount || sourceLineStatus.overAllocatedMinor > 0) {
       throw new Error('Linked amounts cannot exceed the source income line.');
     }
   }
 
   if (input.targetLineId) {
-    const targetLineAvailableMinor = getLineAvailableMinor(lines, input.targetLineId, input.currencyCode, (amountMinor) => amountMinor < 0);
-    const targetLineAllocatedMinor = getAllocatedLineMinor(relatedExistingLinks, input.targetLineId, input.currencyCode, 'target') + input.amountMinor;
-    if (targetLineAllocatedMinor > targetLineAvailableMinor) {
+    const targetLineStatus = getTransactionLineLinkAllocationStatus({
+      transactionId: input.targetTransactionId,
+      lineId: input.targetLineId,
+      currencyCode: input.currencyCode,
+      side: 'target',
+      lines,
+      persistedLinks: relatedExistingLinks,
+      draftChanges,
+    });
+    if (!targetLineStatus.scopeExists || targetLineStatus.invalidLinkCount || targetLineStatus.overAllocatedMinor > 0) {
       throw new Error('Linked amounts cannot exceed the target expense line.');
     }
   }
-}
-
-function getTransactionSignedCurrencyTotal(
-  lines: TransactionLine[],
-  transactionId: string,
-  currencyCode: CurrencyCode,
-  amountFilter: (amountMinor: number) => boolean,
-): number {
-  return lines
-    .filter(
-      (line) =>
-        line.transactionId === transactionId &&
-        normalizeCurrencyCode(line.currencyCode) === currencyCode &&
-        amountFilter(line.amountMinor),
-    )
-    .reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
-}
-
-function getLineAvailableMinor(
-  lines: TransactionLine[],
-  lineId: string,
-  currencyCode: CurrencyCode,
-  amountFilter: (amountMinor: number) => boolean,
-): number {
-  const line = lines.find((item) => item.id === lineId);
-  if (!line || normalizeCurrencyCode(line.currencyCode) !== currencyCode || !amountFilter(line.amountMinor)) {
-    return 0;
-  }
-
-  return Math.abs(line.amountMinor);
-}
-
-function getAllocatedTransactionMinor(
-  links: TransactionLink[],
-  transactionId: string,
-  currencyCode: CurrencyCode,
-  side: 'source' | 'target',
-): number {
-  return links
-    .filter((link) => {
-      const linkedTransactionId = side === 'source' ? link.sourceTransactionId : link.targetTransactionId;
-      return linkedTransactionId === transactionId && normalizeCurrencyCode(link.currencyCode) === currencyCode;
-    })
-    .reduce((sum, link) => sum + link.amountMinor, 0);
-}
-
-function getAllocatedLineMinor(
-  links: TransactionLink[],
-  lineId: string,
-  currencyCode: CurrencyCode,
-  side: 'source' | 'target',
-): number {
-  return links
-    .filter((link) => {
-      const linkedLineId = side === 'source' ? normalizeOptionalId(link.sourceLineId) : normalizeOptionalId(link.targetLineId);
-      return linkedLineId === lineId && normalizeCurrencyCode(link.currencyCode) === currencyCode;
-    })
-    .reduce((sum, link) => sum + link.amountMinor, 0);
 }
 
 function normalizeOptionalId(value: string | null | undefined): string | null {

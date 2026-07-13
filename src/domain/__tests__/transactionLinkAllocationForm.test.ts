@@ -9,6 +9,7 @@ import {
   getTransactionLinkSourceOptions,
   getTransactionLinkTargetOptions,
   getTransactionLinkTargetScopes,
+  isValidTransactionLinkAllocationAmount,
 } from '../transactionLinkAllocationForm';
 import type { Transaction, TransactionLine, TransactionLink } from '../types';
 
@@ -321,5 +322,24 @@ describe('transaction link allocation form helpers', () => {
     expect(changes.toAdd).toEqual([
       expect.objectContaining({ sourceTransactionId: 'income-3', targetLineId: 'expense-line-3', amountMinor: 500 }),
     ]);
+  });
+
+  it('rejects zero and negative allocation drafts instead of converting them to positive values', () => {
+    const allocation = {
+      id: 'draft',
+      sourceLineId: null,
+      targetTransactionId: 'expense-1',
+      targetLineId: null,
+      linkType: 'reimbursement' as const,
+      amount: '-5.00',
+      currencyCode: 'AUD',
+    };
+
+    expect(isValidTransactionLinkAllocationAmount(allocation)).toBe(false);
+    expect(() => getTransactionLinkAllocationChanges({
+      sourceTransactionId: 'income-1',
+      existingLinks: [],
+      allocations: [allocation],
+    })).toThrow('Link amount must be greater than zero.');
   });
 });

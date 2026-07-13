@@ -10,7 +10,7 @@ import {
   isCrossCurrencyTransferAccountPair,
 } from './crossCurrencyTransfers';
 import { parseLabelsInput } from './labels';
-import { parseMoneyInput } from './money';
+import { normalizeCurrencyCode, parseMoneyInput } from './money';
 import {
   buildMixedSplitLinesFromForm,
   createSplitTransactionFormLine,
@@ -26,6 +26,11 @@ import {
   type SplitTransactionLineKind,
   type SplitTransactionMode,
 } from './splitTransactions';
+import {
+  getTransactionLineLinkAllocationStatus,
+  getTransactionLinkAllocationStatus,
+  type TransactionLinkAllocationSide,
+} from './transactionLinkAllocationStatus';
 import type {
   Account,
   AppSnapshot,
@@ -34,7 +39,7 @@ import type {
   TransactionLine,
   TransactionLink,
   UpdateTransactionInput,
-  UpdateTransactionLinkInput,
+  TransactionLinkBatchInput,
 } from './types';
 
 export const OUTSIDE_ACCOUNT_ID = 'outside';
@@ -72,11 +77,7 @@ export type TransactionEditSplitLineDraft = {
   note: string;
 };
 
-export type TransactionEditLinkSavePlan = {
-  sourceLinkUpdate?: UpdateTransactionLinkInput;
-  sourceLinkDeleteId?: string;
-  targetLinkDeleteIds: string[];
-};
+export type TransactionEditLinkSavePlan = TransactionLinkBatchInput;
 
 export function createTransactionEditDraft(snapshot: AppSnapshot, transactionId: string): TransactionEditDraft {
   const transaction = snapshot.transactions.find((item) => item.id === transactionId);
@@ -375,41 +376,134 @@ export function getTransactionEditLinkSavePlan({
   transactionId: string;
   transactionLinks: TransactionLink[];
 }): TransactionEditLinkSavePlan {
-  const existingSourceLink = transactionLinks.find((link) => link.sourceTransactionId === transactionId);
-  const existingTargetLinks = transactionLinks.filter((link) => link.targetTransactionId === transactionId);
+  const sourceLinks = transactionLinks
+    .filter((link) => link.sourceTransactionId === transactionId)
+    .sort(compareTransactionLinksById);
+  const targetLinks = transactionLinks
+    .filter((link) => link.targetTransactionId === transactionId)
+    .sort(compareTransactionLinksById);
+  const editedLines = input.lines.map((line, index) => ({
+    id: line.id ?? `edited-line:${index}`,
+    transactionId,
+    amountMinor: line.amountMinor,
+    currencyCode: line.currencyCode,
+  }));
+  if (
+    (sourceLinks.length && input.kind !== 'income') ||
+    (targetLinks.length && input.kind !== 'expense')
+  ) {
+    throw new Error('Unlink this transaction before changing its type.');
+  }
+
+  const invalidSourceLink = sourceLinks.find((link) =>
+    !doesEditedTransactionPreserveLinkEndpoint(link, 'source', editedLines));
+  const invalidTargetLink = targetLinks.find((link) =>
+    !doesEditedTransactionPreserveLinkEndpoint(link, 'target', editedLines));
+  if (invalidSourceLink || invalidTargetLink) {
+    const invalidLink = invalidSourceLink ?? invalidTargetLink;
+    if (invalidLink?.sourceLineId || invalidLink?.targetLineId) {
+      throw new Error('Cannot remove or change a linked split line. Unlink it first.');
+    }
+    throw new Error('Unlink this transaction before changing its linked currency or account scope.');
+  }
+
   const plan: TransactionEditLinkSavePlan = {
-    targetLinkDeleteIds: input.kind !== 'expense' ? existingTargetLinks.map((link) => link.id) : [],
+    toAdd: [],
+    toUpdate: [],
+    deleteIds: [],
   };
 
-  if (existingSourceLink && input.kind === 'income') {
-    const positiveLines = input.lines.filter((line) =>
-      line.amountMinor > 0 &&
-      (!existingSourceLink.sourceLineId || line.id === existingSourceLink.sourceLineId),
-    );
-    const currencyCode = positiveLines[0]?.currencyCode;
-    const amountMinor = positiveLines
-      .filter((line) => line.currencyCode === currencyCode)
-      .reduce((sum, line) => sum + line.amountMinor, 0);
+  if (input.kind === 'income') {
+    assertEditedTransactionLinkCapacity({
+      transactionId,
+      side: 'source',
+      lines: editedLines,
+      transactionLinks,
+      draftChanges: plan,
+    });
+  }
 
-    if (currencyCode && amountMinor > 0) {
-      plan.sourceLinkUpdate = {
-        id: existingSourceLink.id,
-        sourceTransactionId: existingSourceLink.sourceTransactionId,
-        targetTransactionId: existingSourceLink.targetTransactionId,
-        sourceLineId: existingSourceLink.sourceLineId ?? null,
-        targetLineId: existingSourceLink.targetLineId ?? null,
-        linkType: existingSourceLink.linkType,
-        amountMinor,
-        currencyCode,
-      };
-    } else {
-      plan.sourceLinkDeleteId = existingSourceLink.id;
-    }
-  } else if (existingSourceLink) {
-    plan.sourceLinkDeleteId = existingSourceLink.id;
+  if (input.kind === 'expense') {
+    assertEditedTransactionLinkCapacity({
+      transactionId,
+      side: 'target',
+      lines: editedLines,
+      transactionLinks,
+      draftChanges: plan,
+    });
   }
 
   return plan;
+}
+
+function doesEditedTransactionPreserveLinkEndpoint(
+  link: TransactionLink,
+  side: TransactionLinkAllocationSide,
+  lines: { id: string; amountMinor: number; currencyCode: string }[],
+): boolean {
+  const endpointLineId = side === 'source' ? link.sourceLineId : link.targetLineId;
+  const normalizedCurrencyCode = normalizeCurrencyCode(link.currencyCode);
+  return lines.some((line) =>
+    (!endpointLineId || line.id === endpointLineId) &&
+    normalizeCurrencyCode(line.currencyCode) === normalizedCurrencyCode &&
+    (side === 'source' ? line.amountMinor > 0 : line.amountMinor < 0));
+}
+
+function assertEditedTransactionLinkCapacity({
+  transactionId,
+  side,
+  lines,
+  transactionLinks,
+  draftChanges,
+}: {
+  transactionId: string;
+  side: TransactionLinkAllocationSide;
+  lines: { id: string; transactionId: string; amountMinor: number; currencyCode: string }[];
+  transactionLinks: TransactionLink[];
+  draftChanges: TransactionLinkBatchInput;
+}): void {
+  const retainedLinks = transactionLinks.filter((link) =>
+    (side === 'source' ? link.sourceTransactionId : link.targetTransactionId) === transactionId &&
+    !draftChanges.deleteIds.includes(link.id));
+  const currencyCodes = [...new Set(retainedLinks.map((link) => normalizeCurrencyCode(link.currencyCode)))].sort();
+
+  for (const currencyCode of currencyCodes) {
+    const lineIds = [...new Set(retainedLinks
+      .filter((link) => normalizeCurrencyCode(link.currencyCode) === currencyCode)
+      .map((link) => side === 'source' ? link.sourceLineId : link.targetLineId)
+      .filter((lineId): lineId is string => !!lineId))]
+      .sort();
+    for (const lineId of lineIds) {
+      const lineStatus = getTransactionLineLinkAllocationStatus({
+        transactionId,
+        lineId,
+        currencyCode,
+        side,
+        lines,
+        persistedLinks: transactionLinks,
+        draftChanges,
+      });
+      if (!lineStatus.scopeExists || lineStatus.invalidLinkCount || lineStatus.overAllocatedMinor > 0) {
+        throw new Error('Cannot reduce this split line below its existing linked allocation.');
+      }
+    }
+
+    const transactionStatus = getTransactionLinkAllocationStatus({
+      transactionId,
+      currencyCode,
+      side,
+      lines,
+      persistedLinks: transactionLinks,
+      draftChanges,
+    });
+    if (transactionStatus.invalidLinkCount || transactionStatus.parentOverAllocatedMinor > 0) {
+      throw new Error('Cannot reduce this transaction below its existing linked allocations.');
+    }
+  }
+}
+
+function compareTransactionLinksById(left: TransactionLink, right: TransactionLink): number {
+  return left.id.localeCompare(right.id);
 }
 
 export function formatEditDateLabel(dateValue: string): string {

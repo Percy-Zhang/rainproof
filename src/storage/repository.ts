@@ -93,6 +93,7 @@ import {
   createAddTransactionStorageRecords,
   createUpdateTransactionStorageRecords,
   type AddTransactionStorageResult,
+  type UpdateTransactionStorageOptions,
   type UpdateTransactionStorageResult,
   deleteTransactionStorage,
   updateTransactionStorage,
@@ -122,7 +123,11 @@ export type FinanceRepository = {
     existingTransaction: Transaction,
     existingLines: TransactionLine[],
   ): UpdateTransactionStorageResult;
-  updateTransaction(input: UpdateTransactionInput, records?: UpdateTransactionStorageResult): Promise<UpdateTransactionStorageResult>;
+  updateTransaction(
+    input: UpdateTransactionInput,
+    records?: UpdateTransactionStorageResult,
+    options?: UpdateTransactionStorageOptions,
+  ): Promise<UpdateTransactionStorageResult>;
   deleteTransaction(transactionId: string): Promise<void>;
   prepareAddTransactionLink(
     input: NewTransactionLinkInput,
@@ -258,8 +263,9 @@ class SQLiteFinanceRepository implements FinanceRepository {
   async updateTransaction(
     input: UpdateTransactionInput,
     records?: UpdateTransactionStorageResult,
+    options?: UpdateTransactionStorageOptions,
   ): Promise<UpdateTransactionStorageResult> {
-    return updateTransactionStorage(this.db, input, records);
+    return updateTransactionStorage(this.db, input, records, options);
   }
 
   async deleteTransaction(transactionId: string): Promise<void> {

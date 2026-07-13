@@ -1,10 +1,11 @@
-import { getLinkedStatsAdjustments } from './linkedStats';
-import { normalizeCurrencyCode } from './money';
+import { getAccountDisplayName } from './accountThemes';
+import { formatMoney, normalizeCurrencyCode } from './money';
 import { formatTransactionShortDate, getSplitLineChildDisplayText } from './transactionDisplay';
-import { isTransactionParentLinked } from './transactionLinks';
+import { getTransactionLinkAllocationStatus } from './transactionLinkAllocationStatus';
 import { getCategory, getSubcategory, getSubcategoryName } from './categories';
 import type {
   CategoryDefinition,
+  Account,
   CurrencyCode,
   Transaction,
   TransactionLine,
@@ -31,6 +32,7 @@ export type ExpenseLinkTargetCandidate = {
   isLinked: boolean;
   searchMatchesParent: boolean;
   searchMatchedLineIds: string[];
+  searchIndex: TransactionLinkCandidateSearchIndex;
 };
 
 export type IncomeLinkSourceCandidate = {
@@ -43,6 +45,12 @@ export type IncomeLinkSourceCandidate = {
   isLinked: boolean;
   searchMatchesParent: boolean;
   searchMatchedLineIds: string[];
+  searchIndex: TransactionLinkCandidateSearchIndex;
+};
+
+export type TransactionLinkCandidateSearchIndex = {
+  parentText: string;
+  lineTextById: Readonly<Record<string, string>>;
 };
 
 export type TransactionLinkEditSummary = {
@@ -61,24 +69,6 @@ export type TransactionLinkEndpointDisplay = {
   dateLabel: string;
   context: string;
   label: string;
-};
-
-const linkTypeShortLabels: Record<TransactionLinkType, string> = {
-  refund: 'Refund',
-  reimbursement: 'Reimbursement',
-  shared_expense_contribution: 'Shared expense contribution',
-};
-
-const incomeLinkPrefixes: Record<TransactionLinkType, string> = {
-  refund: 'Refund for',
-  reimbursement: 'Paid back for',
-  shared_expense_contribution: 'Contribution toward',
-};
-
-const expenseLinkPrefixes: Record<TransactionLinkType, string> = {
-  refund: 'Refund from',
-  reimbursement: 'Paid back by',
-  shared_expense_contribution: 'Contribution from',
 };
 
 export function getIncomeLinkTreatment(
@@ -128,6 +118,7 @@ export function getExpenseLinkTargetCandidates({
   transactionLinks = [],
   query,
   categories,
+  accounts,
 }: {
   sourceTransactionId: string;
   sourceCurrencyCode: CurrencyCode | null;
@@ -136,10 +127,14 @@ export function getExpenseLinkTargetCandidates({
   transactionLinks?: TransactionLink[];
   query: string;
   categories?: CategoryDefinition[];
+  accounts?: Account[];
 }): ExpenseLinkTargetCandidate[] {
   const normalizedQuery = normalizeLinkSearchText(query);
   const normalizedSourceCurrencyCode = sourceCurrencyCode ? normalizeCurrencyCode(sourceCurrencyCode) : null;
   const linesByTransactionId = groupLinesByTransactionId(lines);
+  const linkedParentTransactionIds = new Set(transactionLinks
+    .filter((link) => !normalizeOptionalId(link.targetLineId))
+    .map((link) => link.targetTransactionId));
 
   return transactions
     .filter((transaction) => transaction.kind === 'expense' && transaction.id !== sourceTransactionId)
@@ -158,16 +153,18 @@ export function getExpenseLinkTargetCandidates({
         .filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode)
         .reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
       const eligible = !!normalizedSourceCurrencyCode && currencyCode === normalizedSourceCurrencyCode;
-      const searchMatch = getLinkCandidateSearchMatch({
+      const searchIndex = createTransactionLinkCandidateSearchIndex({
         transaction,
         lines: displayLines,
         categories,
-        normalizedQuery,
+        accounts,
         parentValues: [
           ...getLineCategorySearchValues(firstLine, categories),
           currencyCode,
+          ...getAmountSearchValues(amountMinor, currencyCode),
         ],
       });
+      const searchMatch = matchTransactionLinkCandidateSearch(searchIndex, normalizedQuery);
 
       return {
         transaction,
@@ -178,9 +175,10 @@ export function getExpenseLinkTargetCandidates({
         subcategoryId: firstLine?.subcategoryId ?? '',
         eligible,
         disabledReason: eligible ? '' : 'Different currency',
-        isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
+        isLinked: linkedParentTransactionIds.has(transaction.id),
         searchMatchesParent: searchMatch.parentMatches,
         searchMatchedLineIds: searchMatch.lineIds,
+        searchIndex,
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)
@@ -202,6 +200,7 @@ export function getIncomeLinkSourceCandidates({
   transactionLinks,
   query,
   categories,
+  accounts,
 }: {
   targetTransactionId: string;
   targetCurrencyCode: CurrencyCode | null;
@@ -210,10 +209,14 @@ export function getIncomeLinkSourceCandidates({
   transactionLinks: TransactionLink[];
   query: string;
   categories?: CategoryDefinition[];
+  accounts?: Account[];
 }): IncomeLinkSourceCandidate[] {
   const normalizedQuery = normalizeLinkSearchText(query);
   const normalizedTargetCurrencyCode = targetCurrencyCode ? normalizeCurrencyCode(targetCurrencyCode) : null;
   const linesByTransactionId = groupLinesByTransactionId(lines);
+  const linkedParentTransactionIds = new Set(transactionLinks
+    .filter((link) => !normalizeOptionalId(link.sourceLineId))
+    .map((link) => link.sourceTransactionId));
 
   return transactions
     .filter((transaction) => transaction.kind === 'income' && transaction.id !== targetTransactionId)
@@ -232,13 +235,14 @@ export function getIncomeLinkSourceCandidates({
         .filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode)
         .reduce((sum, line) => sum + line.amountMinor, 0);
       const currencyMatches = !!normalizedTargetCurrencyCode && currencyCode === normalizedTargetCurrencyCode;
-      const searchMatch = getLinkCandidateSearchMatch({
+      const searchIndex = createTransactionLinkCandidateSearchIndex({
         transaction,
         lines: displayLines,
         categories,
-        normalizedQuery,
-        parentValues: [currencyCode],
+        accounts,
+        parentValues: [currencyCode, ...getAmountSearchValues(amountMinor, currencyCode)],
       });
+      const searchMatch = matchTransactionLinkCandidateSearch(searchIndex, normalizedQuery);
 
       return {
         transaction,
@@ -247,9 +251,10 @@ export function getIncomeLinkSourceCandidates({
         accountId: firstLine?.accountId ?? '',
         eligible: currencyMatches,
         disabledReason: currencyMatches ? '' : 'Different currency',
-        isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
+        isLinked: linkedParentTransactionIds.has(transaction.id),
         searchMatchesParent: searchMatch.parentMatches,
         searchMatchedLineIds: searchMatch.lineIds,
+        searchIndex,
       };
     })
     .filter((candidate) => candidate.amountMinor > 0)
@@ -263,51 +268,91 @@ export function getIncomeLinkSourceCandidates({
     .sort(compareIncomeSourceCandidatesDescending);
 }
 
-type LinkCandidateSearchMatch = {
+export type LinkCandidateSearchMatch = {
   parentMatches: boolean;
   lineIds: string[];
 };
 
-function getLinkCandidateSearchMatch({
+export function createTransactionLinkCandidateSearchIndex({
   transaction,
   lines,
   categories,
-  normalizedQuery,
+  accounts,
   parentValues,
 }: {
   transaction: Transaction;
   lines: TransactionLine[];
   categories?: CategoryDefinition[];
-  normalizedQuery: string;
+  accounts?: Account[];
   parentValues: string[];
-}): LinkCandidateSearchMatch {
+}): TransactionLinkCandidateSearchIndex {
+  const lineTextById: Record<string, string> = {};
+  for (const line of lines) {
+    lineTextById[line.id] = createNormalizedSearchText(getLineSearchValues(line, categories, accounts));
+  }
+
+  return {
+    parentText: createNormalizedSearchText([
+      transaction.title,
+      transaction.notes,
+      ...transaction.labels,
+      transaction.datetime,
+      formatTransactionSearchDate(transaction.datetime),
+      ...parentValues,
+    ]),
+    lineTextById,
+  };
+}
+
+export function matchTransactionLinkCandidateSearch(
+  searchIndex: TransactionLinkCandidateSearchIndex,
+  query: string,
+): LinkCandidateSearchMatch {
+  const normalizedQuery = normalizeLinkSearchText(query);
   if (!normalizedQuery) {
     return { parentMatches: true, lineIds: [] };
   }
 
-  const parentMatches = valuesMatchLinkSearch(
-    [
-      transaction.title,
-      ...parentValues,
-    ],
-    normalizedQuery,
-  );
-  const lineIds = lines
-    .filter((line) => valuesMatchLinkSearch(getLineSearchValues(line, categories), normalizedQuery))
-    .map((line) => line.id);
+  const lineIds = Object.entries(searchIndex.lineTextById)
+    .filter(([, text]) => text.includes(normalizedQuery))
+    .map(([lineId]) => lineId);
 
-  return { parentMatches, lineIds };
+  return { parentMatches: searchIndex.parentText.includes(normalizedQuery), lineIds };
 }
 
 function getLineSearchValues(
   line: TransactionLine,
   categories?: CategoryDefinition[],
+  accounts?: Account[],
 ): string[] {
+  const account = accounts?.find((item) => item.id === line.accountId);
   return [
     line.note,
+    line.externalParty,
     line.currencyCode,
+    account ? getAccountDisplayName(account) : '',
+    ...getAmountSearchValues(Math.abs(line.amountMinor), line.currencyCode),
     ...getLineCategorySearchValues(line, categories),
   ];
+}
+
+function getAmountSearchValues(amountMinor: number, currencyCode: CurrencyCode): string[] {
+  const fixedAmount = (Math.abs(amountMinor) / 100).toFixed(2);
+  return [
+    String(Math.abs(amountMinor)),
+    fixedAmount,
+    fixedAmount.replace(/\.00$/, ''),
+    formatMoney(Math.abs(amountMinor), currencyCode),
+  ];
+}
+
+function formatTransactionSearchDate(datetime: string): string {
+  const date = new Date(datetime);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function getLineCategorySearchValues(
@@ -326,8 +371,8 @@ function getLineCategorySearchValues(
   ];
 }
 
-function valuesMatchLinkSearch(values: string[], normalizedQuery: string): boolean {
-  return values.some((value) => normalizeLinkSearchText(value).includes(normalizedQuery));
+function createNormalizedSearchText(values: string[]): string {
+  return values.map(normalizeLinkSearchText).filter(Boolean).join('\n');
 }
 
 function normalizeLinkSearchText(value: string): string {
@@ -355,7 +400,6 @@ export function getTransactionLinkEditSummary({
   lines,
   transactionLinks,
   formatAmount,
-  categories,
 }: {
   transactionId: string;
   transactions: Transaction[];
@@ -372,32 +416,24 @@ export function getTransactionLinkEditSummary({
       return {
         linked: false,
         title: 'Link to expense',
-        detail: 'No linked expense yet. Add refunds, reimbursements, or shared costs.',
+        detail: 'No linked expenses yet.',
         secondaryDetail: '',
       };
     }
 
-    const sourceLink = sourceLinks[0];
-    const currencyCode = sourceLink.currencyCode;
-    const linkedAmountMinor = sourceLinks
-      .filter((link) => normalizeCurrencyCode(link.currencyCode) === normalizeCurrencyCode(currencyCode))
-      .reduce((sum, link) => sum + link.amountMinor, 0);
-    const targetLabel = getTransactionLinkCounterpartDisplayLabel({
-      link: sourceLink,
-      endpoint: 'target',
-      transactions,
+    const currencyCode = sourceLinks[0].currencyCode;
+    const status = getTransactionLinkAllocationStatus({
+      transactionId,
+      currencyCode,
+      side: 'source',
       lines,
-      categories,
+      persistedLinks: transactionLinks,
     });
     return {
       linked: true,
-      title: sourceLinks.length === 1 ? 'Linked transaction' : `Linked to ${sourceLinks.length} expenses`,
-      detail: sourceLinks.length === 1
-        ? `${incomeLinkPrefixes[sourceLink.linkType]}: ${targetLabel || 'expense'}`
-        : `Linked amount: ${formatAmount(linkedAmountMinor, currencyCode)}`,
-      secondaryDetail: sourceLinks.length === 1
-        ? `Linked amount: ${formatAmount(linkedAmountMinor, currencyCode)}`
-        : getLinkTypeAmountSummary(sourceLinks, currencyCode, formatAmount),
+      title: `${formatAllocationState(status.status)} · ${status.linkCount} ${status.linkCount === 1 ? 'use' : 'uses'}`,
+      detail: `Received: ${formatAmount(status.originalMinor, currencyCode)} / Allocated: ${formatAmount(status.allocatedMinor, currencyCode)} / Available: ${formatAmount(status.remainingMinor, currencyCode)}`,
+      secondaryDetail: '',
     };
   }
 
@@ -407,48 +443,25 @@ export function getTransactionLinkEditSummary({
       return {
         linked: false,
         title: 'Link money received',
-        detail: 'No linked money received yet. Add refunds, reimbursements, or shared costs.',
+        detail: 'No linked payments yet.',
         secondaryDetail: '',
       };
     }
 
     const currencyCode = targetLinks[0].currencyCode;
-    const originalAmountMinor = getExpenseLinkTargetMoney(transactionId, lines, currencyCode)?.amountMinor ?? 0;
-    const linkedAmountMinor = targetLinks
-      .filter((link) => normalizeCurrencyCode(link.currencyCode) === normalizeCurrencyCode(currencyCode))
-      .reduce((sum, link) => sum + link.amountMinor, 0);
-    const adjustments = getLinkedStatsAdjustments({ transactions, lines, transactionLinks });
-    const countedAmountMinor = lines
-      .filter(
-        (line) =>
-          line.transactionId === transactionId &&
-          line.amountMinor < 0 &&
-          normalizeCurrencyCode(line.currencyCode) === normalizeCurrencyCode(currencyCode),
-      )
-      .reduce(
-        (sum, line) =>
-          sum + Math.max(0, Math.abs(line.amountMinor) - (adjustments.expenseLineReductionMinorByLineId.get(line.id) ?? 0)),
-        0,
-      );
-    const typeSummary = getLinkTypeAmountSummary(targetLinks, currencyCode, formatAmount);
-    const sourceLabel = getTransactionLinkCounterpartDisplayLabel({
-      link: targetLinks[0],
-      endpoint: 'source',
-      transactions,
+    const status = getTransactionLinkAllocationStatus({
+      transactionId,
+      currencyCode,
+      side: 'target',
       lines,
-      categories,
+      persistedLinks: transactionLinks,
     });
 
     return {
       linked: true,
-      title: targetLinks.length === 1 ? 'Linked transaction' : `Linked to ${targetLinks.length} incoming payments`,
-      detail: targetLinks.length === 1
-        ? `${expenseLinkPrefixes[targetLinks[0].linkType]}: ${sourceLabel || 'income'} / Received back: ${formatAmount(linkedAmountMinor, currencyCode)}`
-        : `Money received back: ${formatAmount(linkedAmountMinor, currencyCode)}`,
-      secondaryDetail: [
-        `Original: ${formatAmount(originalAmountMinor, currencyCode)} / Counted in stats: ${formatAmount(countedAmountMinor, currencyCode)}`,
-        targetLinks.length > 1 ? typeSummary : '',
-      ].filter(Boolean).join(' / '),
+      title: `${formatAllocationState(status.status)} · ${status.linkCount} ${status.linkCount === 1 ? 'payment' : 'payments'}`,
+      detail: `Original: ${formatAmount(status.originalMinor, currencyCode)} / Allocated: ${formatAmount(status.allocatedMinor, currencyCode)} / Remaining: ${formatAmount(status.remainingMinor, currencyCode)}`,
+      secondaryDetail: '',
     };
   }
 
@@ -458,6 +471,12 @@ export function getTransactionLinkEditSummary({
     detail: 'Transfers cannot be linked',
     secondaryDetail: '',
   };
+}
+
+function formatAllocationState(status: 'unlinked' | 'partial' | 'settled'): string {
+  if (status === 'partial') return 'Partial';
+  if (status === 'settled') return 'Settled';
+  return 'Open';
 }
 
 export function getTransactionLinkCounterpartDisplayLabel({
@@ -666,28 +685,6 @@ function isSameDisplayText(left: string, right: string): boolean {
 function normalizeOptionalId(value: string | null | undefined): string | null {
   const trimmed = value?.trim() ?? '';
   return trimmed || null;
-}
-
-function getLinkTypeAmountSummary(
-  links: TransactionLink[],
-  currencyCode: CurrencyCode,
-  formatAmount: (amountMinor: number, currencyCode: CurrencyCode) => string,
-): string {
-  const totals = new Map<TransactionLinkType, number>();
-  const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
-
-  for (const link of links) {
-    if (normalizeCurrencyCode(link.currencyCode) !== normalizedCurrencyCode) {
-      continue;
-    }
-
-    totals.set(link.linkType, (totals.get(link.linkType) ?? 0) + link.amountMinor);
-  }
-
-  return (['refund', 'reimbursement', 'shared_expense_contribution'] as TransactionLinkType[])
-    .filter((linkType) => (totals.get(linkType) ?? 0) > 0)
-    .map((linkType) => `${linkTypeShortLabels[linkType]}: ${formatAmount(totals.get(linkType) ?? 0, currencyCode)}`)
-    .join(' / ');
 }
 
 function compareCandidateTransactionsDescending(

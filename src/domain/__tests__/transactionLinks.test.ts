@@ -255,7 +255,7 @@ describe('transaction link validation', () => {
         input: input({ targetLineId: 'expense-1-acct-1--7000' }),
         transactions,
         lines,
-        existingLinks: [existingLink({ targetLineId: 'expense-2-acct-1--3000' })],
+        existingLinks: [existingLink({ targetLineId: 'expense-1-acct-side-expense--3000' })],
       }),
     ).not.toThrow();
   });

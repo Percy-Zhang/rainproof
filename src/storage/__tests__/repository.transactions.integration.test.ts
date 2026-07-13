@@ -1231,6 +1231,106 @@ describe('SQLite finance repository transactions and links', () => {
     });
   });
 
+  it('updates a transaction and removes all invalidated links atomically', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Multi-link income edit',
+        lines: [{ accountId: everyday.id, amountMinor: 7000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const firstExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'First linked expense',
+        lines: [{ accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const secondExpense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Second linked expense',
+        lines: [{ accountId: everyday.id, amountMinor: -4000, categoryId: 'food-dining', subcategoryId: 'groceries' }],
+      });
+      const firstLink = await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: firstExpense.id,
+        linkType: 'reimbursement',
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+      });
+      const secondLink = await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: secondExpense.id,
+        linkType: 'reimbursement',
+        amountMinor: 4000,
+        currencyCode: 'AUD',
+      });
+
+      await repository.updateTransaction({
+        id: income.id,
+        kind: 'expense',
+        title: 'Converted expense',
+        datetime: income.datetime,
+        lines: [{
+          accountId: everyday.id,
+          amountMinor: -7000,
+          currencyCode: 'AUD',
+          categoryId: 'food-dining',
+          subcategoryId: 'restaurants',
+        }],
+      }, undefined, {
+        transactionLinkDeleteIds: [secondLink.id, firstLink.id],
+      });
+
+      const snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.find((transaction) => transaction.id === income.id)?.kind).toBe('expense');
+      expect(snapshot.transactionLinks).toEqual([]);
+    });
+  });
+
+  it('rolls back a transaction edit when link reconciliation is stale', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Stale reconciliation income',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Stale reconciliation expense',
+        lines: [{ accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const existingLink = await repository.addTransactionLink({
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'reimbursement',
+        amountMinor: 3000,
+        currencyCode: 'AUD',
+      });
+
+      await expect(repository.updateTransaction({
+        id: income.id,
+        kind: 'expense',
+        title: 'Should not persist',
+        datetime: income.datetime,
+        lines: [{
+          accountId: everyday.id,
+          amountMinor: -3000,
+          currencyCode: 'AUD',
+          categoryId: 'food-dining',
+          subcategoryId: 'restaurants',
+        }],
+      }, undefined, {
+        transactionLinkDeleteIds: [existingLink.id, 'missing-link'],
+      })).rejects.toThrow('Transaction link reconciliation is stale.');
+
+      const snapshot = await repository.getSnapshot();
+      expect(snapshot.transactions.find((transaction) => transaction.id === income.id)).toEqual(
+        expect.objectContaining({ kind: 'income', title: 'Stale reconciliation income' }),
+      );
+      expect(snapshot.transactionLinks).toEqual([existingLink]);
+    });
+  });
+
   it('saves transaction link batches atomically for allocation add update and delete plans', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday' });

@@ -6,6 +6,7 @@ import type {
   Transaction,
   TransactionLine,
   TransactionLink,
+  TransactionLinkBatchInput,
   TransactionLinkType,
   UpdateTransactionLinkInput,
 } from './types';
@@ -342,6 +343,16 @@ export function getAllocationAmountMinor(draft: Pick<TransactionLinkAllocationDr
   }
 }
 
+export function isValidTransactionLinkAllocationAmount(
+  draft: Pick<TransactionLinkAllocationDraft, 'amount'>,
+): boolean {
+  try {
+    return parseMoneyInput(draft.amount) > 0;
+  } catch {
+    return false;
+  }
+}
+
 export function getAllocatedAmountMinor(
   allocations: TransactionLinkAllocationDraft[],
   sourceLineId: string | null,
@@ -382,7 +393,7 @@ export function getTransactionLinkAllocationChanges({
   const toUpdate: UpdateTransactionLinkInput[] = [];
 
   for (const allocation of allocations) {
-    const amountMinor = Math.abs(parseMoneyInput(allocation.amount));
+    const amountMinor = parsePositiveAllocationAmount(allocation.amount);
     const input = {
       sourceTransactionId,
       targetTransactionId: allocation.targetTransactionId,
@@ -425,7 +436,7 @@ export function getExpenseTransactionLinkAllocationChanges({
   const toUpdate: UpdateTransactionLinkInput[] = [];
 
   for (const allocation of allocations) {
-    const amountMinor = Math.abs(parseMoneyInput(allocation.amount));
+    const amountMinor = parsePositiveAllocationAmount(allocation.amount);
     const input = {
       sourceTransactionId: allocation.sourceTransactionId,
       targetTransactionId,
@@ -444,6 +455,94 @@ export function getExpenseTransactionLinkAllocationChanges({
   }
 
   return { toAdd, toUpdate, deleteIds };
+}
+
+export function getTransactionLinkAllocationDraftStatusChanges({
+  sourceTransactionId,
+  existingLinks,
+  allocations,
+}: {
+  sourceTransactionId: string;
+  existingLinks: TransactionLink[];
+  allocations: TransactionLinkAllocationDraft[];
+}): TransactionLinkBatchInput {
+  return getTransactionLinkDraftStatusChanges({
+    existingLinks: existingLinks.filter((link) => link.sourceTransactionId === sourceTransactionId),
+    allocations: allocations.map((allocation) => ({
+      existingLinkId: allocation.existingLinkId,
+      input: {
+        sourceTransactionId,
+        targetTransactionId: allocation.targetTransactionId,
+        sourceLineId: allocation.sourceLineId,
+        targetLineId: allocation.targetLineId,
+        linkType: allocation.linkType,
+        amountMinor: getDraftStatusAmountMinor(allocation.amount),
+        currencyCode: allocation.currencyCode,
+      },
+    })),
+  });
+}
+
+export function getExpenseTransactionLinkAllocationDraftStatusChanges({
+  targetTransactionId,
+  existingLinks,
+  allocations,
+}: {
+  targetTransactionId: string;
+  existingLinks: TransactionLink[];
+  allocations: ExpenseTransactionLinkAllocationDraft[];
+}): TransactionLinkBatchInput {
+  return getTransactionLinkDraftStatusChanges({
+    existingLinks: existingLinks.filter((link) => link.targetTransactionId === targetTransactionId),
+    allocations: allocations.map((allocation) => ({
+      existingLinkId: allocation.existingLinkId,
+      input: {
+        sourceTransactionId: allocation.sourceTransactionId,
+        targetTransactionId,
+        sourceLineId: allocation.sourceLineId,
+        targetLineId: allocation.targetLineId,
+        linkType: allocation.linkType,
+        amountMinor: getDraftStatusAmountMinor(allocation.amount),
+        currencyCode: allocation.currencyCode,
+      },
+    })),
+  });
+}
+
+function getTransactionLinkDraftStatusChanges({
+  existingLinks,
+  allocations,
+}: {
+  existingLinks: TransactionLink[];
+  allocations: { existingLinkId?: string; input: NewTransactionLinkInput }[];
+}): TransactionLinkBatchInput {
+  const retainedIds = new Set(
+    allocations.map((allocation) => allocation.existingLinkId).filter((id): id is string => !!id),
+  );
+
+  return {
+    deleteIds: existingLinks.filter((link) => !retainedIds.has(link.id)).map((link) => link.id),
+    toAdd: allocations.filter((allocation) => !allocation.existingLinkId).map((allocation) => allocation.input),
+    toUpdate: allocations
+      .filter((allocation): allocation is typeof allocation & { existingLinkId: string } => !!allocation.existingLinkId)
+      .map((allocation) => ({ id: allocation.existingLinkId, ...allocation.input })),
+  };
+}
+
+function parsePositiveAllocationAmount(amount: string): number {
+  const amountMinor = parseMoneyInput(amount);
+  if (amountMinor <= 0) {
+    throw new Error('Link amount must be greater than zero.');
+  }
+  return amountMinor;
+}
+
+function getDraftStatusAmountMinor(amount: string): number {
+  try {
+    return parseMoneyInput(amount);
+  } catch {
+    return 0;
+  }
 }
 
 export function formatMinorInput(amountMinor: number): string {

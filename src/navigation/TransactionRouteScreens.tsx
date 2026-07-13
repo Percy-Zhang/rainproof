@@ -114,8 +114,6 @@ export function EditTransactionRouteScreen() {
         transactionId={transactionId}
         onUpdateTransaction={actions.updateTransaction}
         onDeleteTransaction={actions.deleteTransaction}
-        onUpdateTransactionLink={actions.updateTransactionLink}
-        onDeleteTransactionLink={actions.deleteTransactionLink}
         onOpenTransactionLink={() => navigation.navigate('LinkTransaction', { transactionId })}
         onOpenCategorySelect={openCategorySelect}
         onCancel={() => navigation.goBack()}

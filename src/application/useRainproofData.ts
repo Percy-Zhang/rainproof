@@ -98,7 +98,7 @@ type RainproofActions = {
   addAccount(input: NewAccountInput): Promise<void>;
   updateAccount(input: UpdateAccountInput): Promise<void>;
   addTransaction(input: NewTransactionInput, addTransactionDefaults?: AddTransactionDefaults): Promise<void>;
-  updateTransaction(input: UpdateTransactionInput, options?: { optimistic?: boolean }): Promise<void>;
+  updateTransaction(input: UpdateTransactionInput, options?: UpdateTransactionMutationOptions): Promise<void>;
   deleteTransaction(transactionId: string): Promise<void>;
   addTransactionLink(input: NewTransactionLinkInput, options?: TransactionLinkMutationOptions): Promise<void>;
   updateTransactionLink(input: UpdateTransactionLinkInput, options?: TransactionLinkMutationOptions): Promise<void>;
@@ -153,6 +153,10 @@ type BackgroundWriteQueueRef = {
 };
 type TransactionLinkMutationOptions = {
   optimistic?: boolean;
+};
+type UpdateTransactionMutationOptions = {
+  optimistic?: boolean;
+  transactionLinkDeleteIds?: string[];
 };
 type OptimisticTransactionActionLabel =
   | 'addTransaction'
@@ -388,7 +392,7 @@ export function useRainproofData(): RainproofDataState {
   );
 
   const updateTransactionOptimistically = useCallback(
-    (input: UpdateTransactionInput, options: { optimistic?: boolean } = {}): Promise<void> => {
+    (input: UpdateTransactionInput, options: UpdateTransactionMutationOptions = {}): Promise<void> => {
       const repository = repositoryRef.current;
       if (!repository) {
         return Promise.resolve();
@@ -398,12 +402,13 @@ export function useRainproofData(): RainproofDataState {
       const startedAt = Date.now();
 
       try {
-        if (options.optimistic === false) {
+        if (options.optimistic === false || options.transactionLinkDeleteIds?.length) {
           return withFullRefreshActionTiming('updateTransaction', startedAt, persistUpdateTransactionWithSaving({
             input,
             refresh,
             repository,
             setSaving,
+            transactionLinkDeleteIds: options.transactionLinkDeleteIds,
           }));
         }
 
@@ -2378,11 +2383,13 @@ async function persistUpdateTransactionWithSaving({
   refresh,
   repository,
   setSaving,
+  transactionLinkDeleteIds,
 }: {
   input: UpdateTransactionInput;
   refresh: () => Promise<void>;
   repository: FinanceRepository;
   setSaving: (saving: boolean) => void;
+  transactionLinkDeleteIds?: string[];
 }): Promise<void> {
   try {
     setSaving(true);
@@ -2390,6 +2397,7 @@ async function persistUpdateTransactionWithSaving({
       input,
       refresh,
       repository,
+      transactionLinkDeleteIds,
     });
   } finally {
     setSaving(false);
@@ -2400,14 +2408,16 @@ async function persistUpdateTransactionWithFullRefresh({
   input,
   refresh,
   repository,
+  transactionLinkDeleteIds,
 }: {
   input: UpdateTransactionInput;
   refresh: () => Promise<void>;
   repository: FinanceRepository;
+  transactionLinkDeleteIds?: string[];
 }): Promise<void> {
   await timeDevPerfAsync(
     'rainproofData.updateTransaction.repositoryUpdate',
-    () => repository.updateTransaction(input),
+    () => repository.updateTransaction(input, undefined, { transactionLinkDeleteIds }),
     getNewTransactionInputPerfMetadata(input),
   );
   await refresh();

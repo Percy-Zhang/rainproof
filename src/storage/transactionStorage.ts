@@ -35,6 +35,10 @@ export type UpdateTransactionStorageResult = {
   updatedLineIds: string[];
 };
 
+export type UpdateTransactionStorageOptions = {
+  transactionLinkDeleteIds?: string[];
+};
+
 type CreateAddTransactionRecordsOptions = {
   createdAt?: string;
   transactionId?: string;
@@ -193,11 +197,18 @@ export async function updateTransactionStorage(
   db: RepositoryDatabase,
   input: UpdateTransactionInput,
   records?: UpdateTransactionStorageResult,
+  options: UpdateTransactionStorageOptions = {},
 ): Promise<UpdateTransactionStorageResult> {
   validateTransactionLinesForStorage(input.kind, input.lines);
 
   let result: UpdateTransactionStorageResult | null = null;
   await db.withTransactionAsync(async () => {
+    await deleteTransactionLinksForEditStorage(
+      db,
+      input.id,
+      options.transactionLinkDeleteIds ?? [],
+    );
+
     if (records) {
       validateUpdateTransactionStorageRecords(input, records);
       result = records;
@@ -259,6 +270,44 @@ export async function updateTransactionStorage(
   }
 
   return result;
+}
+
+async function deleteTransactionLinksForEditStorage(
+  db: RepositoryDatabase,
+  transactionId: string,
+  linkIds: string[],
+): Promise<void> {
+  const normalizedLinkIds = linkIds.map((linkId) => linkId.trim());
+  const uniqueLinkIds = [...new Set(normalizedLinkIds)];
+  if (!uniqueLinkIds.length) {
+    return;
+  }
+
+  if (uniqueLinkIds.length !== linkIds.length || uniqueLinkIds.some((linkId) => !linkId)) {
+    throw new Error('Transaction link reconciliation contains invalid link IDs.');
+  }
+
+  const placeholders = uniqueLinkIds.map(() => '?').join(', ');
+  const rows = await db.getAllAsync<{ id: string }>(
+    `SELECT id FROM transaction_links
+     WHERE id IN (${placeholders})
+       AND (source_transaction_id = ? OR target_transaction_id = ?)`,
+    ...uniqueLinkIds,
+    transactionId,
+    transactionId,
+  );
+  if (rows.length !== uniqueLinkIds.length) {
+    throw new Error('Transaction link reconciliation is stale. Refresh and try again.');
+  }
+
+  await db.runAsync(
+    `DELETE FROM transaction_links
+     WHERE id IN (${placeholders})
+       AND (source_transaction_id = ? OR target_transaction_id = ?)`,
+    ...uniqueLinkIds,
+    transactionId,
+    transactionId,
+  );
 }
 
 export async function deleteTransactionStorage(

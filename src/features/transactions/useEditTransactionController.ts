@@ -14,6 +14,10 @@ import {
 import { applyLabelSuggestion } from '../../domain/labels';
 import { parseMoneyInput } from '../../domain/money';
 import {
+  getTransactionLineLinkAllocationStatus,
+  type ScopedTransactionLinkAllocationStatus,
+} from '../../domain/transactionLinkAllocationStatus';
+import {
   createSplitTransactionFormLine,
   formatMinorInput,
   getMixedSplitTransactionFormSummary,
@@ -40,7 +44,6 @@ import type {
   AppSnapshot,
   TransactionKind,
   UpdateTransactionInput,
-  UpdateTransactionLinkInput,
 } from '../../domain/types';
 import type {
   CategorySelectLaunchParams,
@@ -56,10 +59,11 @@ export type EditTransactionPage = 'form' | 'split';
 type UseEditTransactionControllerOptions = {
   snapshot: AppSnapshot;
   transactionId: string;
-  onUpdateTransaction: (input: UpdateTransactionInput, options?: { optimistic?: boolean }) => Promise<void>;
+  onUpdateTransaction: (
+    input: UpdateTransactionInput,
+    options?: { optimistic?: boolean; transactionLinkDeleteIds?: string[] },
+  ) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
-  onUpdateTransactionLink: (input: UpdateTransactionLinkInput, options?: { optimistic?: boolean }) => Promise<void>;
-  onDeleteTransactionLink: (linkId: string, options?: { optimistic?: boolean }) => Promise<void>;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
@@ -71,11 +75,9 @@ type UseEditTransactionControllerOptions = {
 export function useEditTransactionController({
   onCancel,
   onDeleteTransaction,
-  onDeleteTransactionLink,
   onDone,
   onOpenCategorySelect,
   onUpdateTransaction,
-  onUpdateTransactionLink,
   snapshot,
   transactionId,
 }: UseEditTransactionControllerOptions) {
@@ -309,6 +311,10 @@ export function useEditTransactionController({
   }
 
   function changeSplitLineKind(lineId: string, lineKind: SplitTransactionLineKind) {
+    if (getExistingLineAllocationStatus(lineId)?.allocatedMinor) {
+      setError('Unlink this split line before changing whether it is income or expense.');
+      return;
+    }
     const defaultCategory = getDefaultCategoryForKind(lineKind, categories);
     updateSplitLine(lineId, {
       kind: lineKind,
@@ -318,6 +324,10 @@ export function useEditTransactionController({
   }
 
   function removeSplitLine(lineId: string) {
+    if (getExistingLineAllocationStatus(lineId)?.allocatedMinor) {
+      setError('This split line has existing allocations. Unlink it before removing the line.');
+      return;
+    }
     setDraft((current) => {
       if (!current) {
         return current;
@@ -353,6 +363,14 @@ export function useEditTransactionController({
   }
 
   function changeKind(kind: TransactionKind) {
+    if (
+      kind !== draft?.kind &&
+      snapshot.transactionLinks.some((link) =>
+        link.sourceTransactionId === transactionId || link.targetTransactionId === transactionId)
+    ) {
+      setError('Unlink this transaction before changing its type.');
+      return;
+    }
     const defaultCategory = getDefaultCategoryForKind(kind, categories);
     if (kind === 'transfer' || kind !== draft?.kind) {
       setPage('form');
@@ -376,6 +394,22 @@ export function useEditTransactionController({
     );
   }
 
+  function getExistingLineAllocationStatus(lineId: string): ScopedTransactionLinkAllocationStatus | null {
+    const line = snapshot.transactionLines.find((item) => item.id === lineId && item.transactionId === transactionId);
+    if (!line || line.amountMinor === 0) {
+      return null;
+    }
+
+    return getTransactionLineLinkAllocationStatus({
+      transactionId,
+      lineId,
+      currencyCode: line.currencyCode,
+      side: line.amountMinor > 0 ? 'source' : 'target',
+      lines: snapshot.transactionLines,
+      persistedLinks: snapshot.transactionLinks,
+    });
+  }
+
   async function save() {
     if (!draft) {
       return;
@@ -394,24 +428,16 @@ export function useEditTransactionController({
         transactionId,
         transactionLinks: snapshot.transactionLinks,
       });
-      const hasLinkSavePlanChanges = Boolean(
-        linkSavePlan.sourceLinkUpdate ||
-        linkSavePlan.sourceLinkDeleteId ||
-        linkSavePlan.targetLinkDeleteIds.length,
-      );
+      if (linkSavePlan.toAdd.length || linkSavePlan.toUpdate.length) {
+        throw new Error('Transaction edit link reconciliation produced unsupported link changes.');
+      }
+      const hasLinkSavePlanChanges = linkSavePlan.deleteIds.length > 0;
 
-      await onUpdateTransaction(input, { optimistic: !hasLinkSavePlanChanges });
+      await onUpdateTransaction(input, {
+        optimistic: !hasLinkSavePlanChanges,
+        transactionLinkDeleteIds: linkSavePlan.deleteIds,
+      });
       logDevPerfDuration('editTransactionController.updateAccepted', saveStartedAt);
-
-      if (linkSavePlan.sourceLinkUpdate) {
-        await onUpdateTransactionLink(linkSavePlan.sourceLinkUpdate, { optimistic: false });
-      } else if (linkSavePlan.sourceLinkDeleteId) {
-        await onDeleteTransactionLink(linkSavePlan.sourceLinkDeleteId, { optimistic: false });
-      }
-
-      for (const targetLinkId of linkSavePlan.targetLinkDeleteIds) {
-        await onDeleteTransactionLink(targetLinkId, { optimistic: false });
-      }
 
       logDevPerfDuration('editTransactionController.closeRequested', saveStartedAt);
       onDone();

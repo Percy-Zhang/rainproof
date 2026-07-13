@@ -55,7 +55,7 @@ export function LinkTransactionScreen({
             <Ionicons name="chevron-back" size={22} color={colors.primaryDark} />
             <Text style={styles.backButtonText}>Back</Text>
           </Pressable>
-          <Text style={styles.title}>Link transaction</Text>
+          <Text style={styles.title}>Links</Text>
           <View style={styles.headerPlaceholder} />
         </View>
       ) : null}
@@ -90,7 +90,7 @@ export function LinkTransactionScreen({
             />
           ) : (
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Transfers cannot be linked as refunds or reimbursements.</Text>
+              <Text style={styles.sectionTitle}>Transfers cannot be linked.</Text>
             </View>
           )}
         </ScrollView>

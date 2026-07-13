@@ -12,6 +12,7 @@ import type {
   SplitTransactionMode,
 } from '../../domain/splitTransactions';
 import type { CategoryDefinition, CurrencyCode } from '../../domain/types';
+import type { ScopedTransactionLinkAllocationStatus } from '../../domain/transactionLinkAllocationStatus';
 import { spacing } from '../../theme/tokens';
 import {
   AddSplitLineButton,
@@ -32,6 +33,8 @@ type SplitTransactionEditorProps = {
   showCurrencyCodes: boolean;
   splitMode?: SplitTransactionMode;
   totalMinor: number;
+  allocationStatusByLineId?: ReadonlyMap<string, ScopedTransactionLinkAllocationStatus>;
+  wholeAllocationStatus?: ScopedTransactionLinkAllocationStatus | null;
   onAddLine: () => void;
   onChangeLineKind?: (lineId: string, kind: SplitTransactionLineKind) => void;
   onChangeSplitMode?: (mode: SplitTransactionMode) => void;
@@ -49,6 +52,8 @@ export function SplitTransactionEditor({
   showCurrencyCodes,
   splitMode = 'standard',
   totalMinor,
+  allocationStatusByLineId,
+  wholeAllocationStatus,
   onAddLine,
   onChangeLineKind,
   onChangeSplitMode,
@@ -79,6 +84,7 @@ export function SplitTransactionEditor({
         showCurrencyCodes={showCurrencyCodes}
         standardSummary={standardSummary}
         totalMinor={totalMinor}
+        wholeAllocationStatus={wholeAllocationStatus}
       />
 
       <SplitValidationError lineCount={lines.length} validationMessage={validationMessage} />
@@ -91,6 +97,7 @@ export function SplitTransactionEditor({
           index={index}
           itemNameSuggestions={itemNameSuggestions}
           line={line}
+          allocationStatus={allocationStatusByLineId?.get(line.id)}
           parentKind={parentKind}
           showCurrencyCodes={showCurrencyCodes}
           splitMode={splitMode}

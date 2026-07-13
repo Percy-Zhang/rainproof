@@ -21,6 +21,7 @@ import type {
 import { getFilteredTransactionItemNameSuggestions } from '../../domain/transactionItemSuggestions';
 import { formatMoney } from '../../domain/money';
 import type { CategoryDefinition, CurrencyCode } from '../../domain/types';
+import type { ScopedTransactionLinkAllocationStatus } from '../../domain/transactionLinkAllocationStatus';
 import { colors, spacing, typography } from '../../theme/tokens';
 import { AutocompleteField, InlineField, SelectorRow } from './TransactionFormComponents';
 import { RevealableSplitField } from './SplitTransactionEditorScrollContainer';
@@ -68,16 +69,20 @@ export function SplitSummaryHeader({
   showCurrencyCodes,
   standardSummary,
   totalMinor,
+  wholeAllocationStatus,
 }: {
   currencyCode: CurrencyCode;
   mixedSummary: MixedSummary | null;
   showCurrencyCodes: boolean;
   standardSummary: StandardSummary | null;
   totalMinor: number;
+  wholeAllocationStatus?: ScopedTransactionLinkAllocationStatus | null;
 }) {
   if (mixedSummary) {
     return (
-      <View style={styles.summaryGrid}>
+      <View style={styles.summaryStack}>
+        <WholeAllocationSummary status={wholeAllocationStatus} currencyCode={currencyCode} showCurrencyCodes={showCurrencyCodes} />
+        <View style={styles.summaryGrid}>
         <SummaryCell
           label="Parent net"
           value={formatSignedAmount(mixedSummary.parentSignedMinor, currencyCode, showCurrencyCodes)}
@@ -95,6 +100,7 @@ export function SplitSummaryHeader({
           value={formatSignedAmount(mixedSummary.differenceMinor, currencyCode, showCurrencyCodes)}
           tone={mixedSummary.differenceMinor === 0 && mixedSummary.isBalanced ? 'balanced' : 'warning'}
         />
+        </View>
       </View>
     );
   }
@@ -104,7 +110,9 @@ export function SplitSummaryHeader({
   }
 
   return (
-    <View style={styles.summaryGrid}>
+    <View style={styles.summaryStack}>
+      <WholeAllocationSummary status={wholeAllocationStatus} currencyCode={currencyCode} showCurrencyCodes={showCurrencyCodes} />
+      <View style={styles.summaryGrid}>
       <SummaryCell label="Total" value={formatMoney(totalMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} />
       <SummaryCell
         label="Allocated"
@@ -115,6 +123,29 @@ export function SplitSummaryHeader({
         value={formatMoney(Math.abs(standardSummary.remainingMinor), currencyCode, { showCurrencyCode: showCurrencyCodes })}
         tone={standardSummary.remainingMinor === 0 ? 'balanced' : 'warning'}
       />
+      </View>
+    </View>
+  );
+}
+
+function WholeAllocationSummary({
+  status,
+  currencyCode,
+  showCurrencyCodes,
+}: {
+  status?: ScopedTransactionLinkAllocationStatus | null;
+  currencyCode: CurrencyCode;
+  showCurrencyCodes: boolean;
+}) {
+  if (!status?.wholeScopeAllocatedMinor) {
+    return null;
+  }
+  return (
+    <View style={styles.wholeAllocationSummary}>
+      <Text style={styles.wholeAllocationTitle}>Whole transaction</Text>
+      <Text style={styles.wholeAllocationText}>
+        {`Allocated ${formatMoney(status.wholeScopeAllocatedMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} / ${formatMoney(status.parentRemainingMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} remaining`}
+      </Text>
     </View>
   );
 }
@@ -135,6 +166,7 @@ export function SplitLineRow({
   index,
   itemNameSuggestions,
   line,
+  allocationStatus,
   onChangeLineKind,
   onPickCategory,
   onRemoveLine,
@@ -148,6 +180,7 @@ export function SplitLineRow({
   index: number;
   itemNameSuggestions: string[];
   line: SplitTransactionFormLine;
+  allocationStatus?: ScopedTransactionLinkAllocationStatus;
   onChangeLineKind?: (lineId: string, kind: SplitTransactionLineKind) => void;
   onPickCategory: (lineId: string) => void;
   onRemoveLine: (lineId: string) => void;
@@ -171,6 +204,15 @@ export function SplitLineRow({
           <Ionicons name="trash-outline" size={18} color={colors.danger} />
         </Pressable>
       </View>
+      {allocationStatus ? (
+        <Text style={styles.lineAllocationText}>
+          {allocationStatus.directAllocatedMinor <= 0
+            ? 'Unlinked'
+            : allocationStatus.remainingMinor > 0
+              ? `Linked ${formatMoney(allocationStatus.directAllocatedMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} · ${formatMoney(allocationStatus.remainingMinor, currencyCode, { showCurrencyCode: showCurrencyCodes })} left`
+              : 'Settled'}
+        </Text>
+      ) : null}
       {splitMode === 'mixed' && parentKind && onChangeLineKind ? (
         <SplitLineKindToggle
           line={line}
@@ -357,6 +399,11 @@ const styles = StyleSheet.create({
     fontSize: typography.body,
     fontWeight: '900',
   },
+  lineAllocationText: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
   modeOption: {
     alignItems: 'center',
     borderRadius: 6,
@@ -414,6 +461,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.sm,
+  },
+  summaryStack: {
+    gap: spacing.sm,
+  },
+  wholeAllocationSummary: {
+    backgroundColor: colors.surfaceMuted,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 2,
+    padding: spacing.sm,
+  },
+  wholeAllocationText: {
+    color: colors.primaryDark,
+    fontSize: typography.small,
+    fontWeight: '800',
+  },
+  wholeAllocationTitle: {
+    color: colors.ink,
+    fontSize: typography.small,
+    fontWeight: '900',
   },
   summaryLabel: {
     color: colors.muted,
