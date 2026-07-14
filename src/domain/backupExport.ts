@@ -43,6 +43,28 @@ export type RainproofBackup = {
   data: RainproofBackupData;
 };
 
+export type BackupRestorePreview = {
+  createdAt: string;
+  appVersion: string;
+  counts: {
+    accounts: number;
+    transactions: number;
+    budgets: number;
+    categories: number;
+    upcomingPayments: number;
+  };
+};
+
+export type BackupRestoreProgressStage =
+  | 'prepare-restore'
+  | 'restore-data'
+  | 'refresh-state'
+  | 'finish';
+
+export type BackupRestoreProgressReporter = (
+  stage: BackupRestoreProgressStage,
+) => Promise<void> | void;
+
 export function buildRainproofBackup(
   snapshot: AppSnapshot,
   exportedAt = new Date().toISOString(),
@@ -77,7 +99,29 @@ export function getRainproofBackupFilename(exportedAt: string): string {
   return `rainproof-backup-${date}-${time}.rainproof`;
 }
 
+export function buildBackupRestorePreview(backup: RainproofBackup): BackupRestorePreview {
+  return {
+    createdAt: backup.metadata.exportedAt,
+    appVersion: backup.metadata.appVersion,
+    counts: {
+      accounts: backup.data.accounts.length,
+      transactions: backup.data.transactions.length,
+      budgets: backup.data.budgets.length,
+      categories: backup.data.categories.length,
+      upcomingPayments: backup.data.recurringItems.length,
+    },
+  };
+}
+
 export function parseRainproofBackup(value: unknown): RainproofBackup {
+  return parseRainproofBackupValue(value, true);
+}
+
+export function parseDetachedRainproofBackup(value: unknown): RainproofBackup {
+  return parseRainproofBackupValue(value, false);
+}
+
+function parseRainproofBackupValue(value: unknown, clone: boolean): RainproofBackup {
   if (!isRecord(value) || value.format !== RAINPROOF_BACKUP_FORMAT) {
     throw new Error('This is not a Rainproof backup.');
   }
@@ -113,7 +157,7 @@ export function parseRainproofBackup(value: unknown): RainproofBackup {
     throw new Error('The backup is missing settings or rainy day fund data.');
   }
 
-  const backup = cloneJsonData(value) as RainproofBackup;
+  const backup = (clone ? cloneJsonData(value) : value) as RainproofBackup;
   for (const recurringItem of backup.data.recurringItems) {
     recurringItem.splitLines = Array.isArray(recurringItem.splitLines) ? recurringItem.splitLines : [];
   }

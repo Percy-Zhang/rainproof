@@ -1,12 +1,13 @@
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { CategoryIconBadge } from '../../components/CategoryDisplay';
 import { CurrencyDropdown } from '../../components/CurrencyDropdown';
-import { ActionButton, Card, FormError, SectionHeader } from '../../components/ui';
+import { ActionButton, Card, SectionHeader } from '../../components/ui';
 import type { RainproofBackup } from '../../domain/backupExport';
 import { getActiveAccountCurrencyOptions } from '../../domain/currencyCatalog';
 import type { AppSnapshot, CurrencyCode, UpdateAppSettingsInput } from '../../domain/types';
 import { colors, spacing, typography } from '../../theme/tokens';
+import { BackupSettingsFlow } from './BackupSettingsFlow';
 import { useBackupSettingsController } from './useBackupSettingsController';
 
 type SettingsScreenProps = {
@@ -89,65 +90,32 @@ export function SettingsScreen({
       </Card>
 
       <Card testID="backup-settings-card">
-        <Text style={styles.cardTitle}>Backup</Text>
+        <Text style={styles.cardTitle}>Backup & restore</Text>
         <Text style={styles.smallMuted}>
-          Export an encrypted, compressed Rainproof backup. Keep your recovery key separately; Rainproof cannot
-          recover it for you.
+          Export a backup of your Rainproof data or restore from an existing .rainproof file.
         </Text>
         <ActionButton
           disabled={backup.isBackupBusy}
-          onPress={() => void backup.exportBackup()}
+          onPress={backup.openExportFlow}
           testID="export-rainproof-backup"
           variant="secondary"
         >
-          {backup.isBackupBusy ? 'Working...' : 'Export encrypted backup'}
+          Export backup
         </ActionButton>
         <ActionButton
           disabled={backup.isBackupBusy}
-          onPress={() => void backup.chooseBackup()}
+          onPress={backup.openRestoreFlow}
           testID="restore-rainproof-backup"
           variant="secondary"
         >
-          Choose backup to restore
+          Restore backup
         </ActionButton>
-        <ActionButton
-          disabled={backup.isBackupBusy}
-          onPress={() => void backup.showRecoveryKey()}
-          testID="show-backup-recovery-key"
-          variant="secondary"
-        >
-          Show recovery key
-        </ActionButton>
-        {backup.shownRecoveryKey ? (
-          <View style={styles.recoveryKeyPanel}>
-            <Text style={styles.recoveryKeyLabel}>Recovery key</Text>
-            <Text selectable style={styles.recoveryKeyValue}>{backup.shownRecoveryKey}</Text>
-          </View>
+        {backup.backupStatus ? (
+          <Text accessibilityLiveRegion="polite" style={styles.exportStatus}>{backup.backupStatus}</Text>
         ) : null}
-        {backup.pendingBackupBytes ? (
-          <View style={styles.restoreStack}>
-            <Text style={styles.settingTitle}>{backup.pendingBackupName || 'Selected backup'}</Text>
-            <TextInput
-              autoCapitalize="characters"
-              autoCorrect={false}
-              onChangeText={backup.setRecoveryKey}
-              placeholder="Recovery key"
-              placeholderTextColor={colors.muted}
-              style={styles.recoveryKeyInput}
-              value={backup.recoveryKey}
-            />
-            <ActionButton
-              disabled={backup.isBackupBusy || !backup.recoveryKey.trim()}
-              onPress={backup.restorePendingBackup}
-              testID="confirm-backup-recovery-key"
-            >
-              Restore selected backup
-            </ActionButton>
-          </View>
-        ) : null}
-        <FormError message={backup.backupError} />
-        {backup.backupStatus ? <Text style={styles.exportStatus}>{backup.backupStatus}</Text> : null}
       </Card>
+
+      <BackupSettingsFlow controller={backup} />
 
       <Text style={styles.note}>
         Currency conversion and exchange rates are not active yet. Until then, balances remain separated internally by
@@ -209,40 +177,6 @@ const styles = StyleSheet.create({
     color: colors.success,
     fontSize: typography.small,
     fontWeight: '700',
-  },
-  recoveryKeyPanel: {
-    backgroundColor: colors.surfaceMuted,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    gap: spacing.xs,
-    padding: spacing.md,
-  },
-  recoveryKeyLabel: {
-    color: colors.ink,
-    fontSize: typography.small,
-    fontWeight: '800',
-  },
-  recoveryKeyValue: {
-    color: colors.primaryDark,
-    fontFamily: 'monospace',
-    fontSize: typography.small,
-    lineHeight: 20,
-  },
-  restoreStack: {
-    gap: spacing.sm,
-  },
-  recoveryKeyInput: {
-    backgroundColor: colors.surface,
-    borderColor: colors.faint,
-    borderRadius: 8,
-    borderWidth: 1,
-    color: colors.ink,
-    fontFamily: 'monospace',
-    fontSize: typography.body,
-    minHeight: 48,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
   },
   note: {
     color: colors.muted,

@@ -19,7 +19,18 @@ export function logDevPerfDuration(label: string, startedAt: number, metadata: P
     return;
   }
 
-  const durationMs = Date.now() - startedAt;
+  logDevPerfMeasurement(label, Date.now() - startedAt, metadata);
+}
+
+export function logDevPerfMeasurement(
+  label: string,
+  durationMs: number,
+  metadata: PerfMetadataFactory = {},
+): void {
+  if (!isDevPerfLoggingEnabled()) {
+    return;
+  }
+
   const details = formatPerfMetadata(resolvePerfMetadataFactory(metadata));
   console.info(`[perf] ${label} ${durationMs}ms${details}`);
 }

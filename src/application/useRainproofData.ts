@@ -43,7 +43,10 @@ import type {
   UpdateTransactionLinkInput,
   UpdateTransactionInput,
 } from '../domain/types';
-import type { RainproofBackup } from '../domain/backupExport';
+import type {
+  BackupRestoreProgressReporter,
+  RainproofBackup,
+} from '../domain/backupExport';
 import { logDevPerfDuration, timeDevPerf, timeDevPerfAsync } from '../performance';
 import { createSQLiteFinanceRepository, type FinanceRepository } from '../storage/repository';
 import { getDeviceDefaultCurrencyCode } from './deviceCurrency';
@@ -129,7 +132,10 @@ type RainproofActions = {
   closeAccount(accountId: string): Promise<void>;
   reopenAccount(accountId: string): Promise<void>;
   deleteAccount(accountId: string): Promise<void>;
-  restoreBackup(backup: RainproofBackup): Promise<void>;
+  restoreBackup(
+    backup: RainproofBackup,
+    onProgress?: BackupRestoreProgressReporter,
+  ): Promise<void>;
   refresh(): Promise<void>;
 };
 
@@ -1179,7 +1185,21 @@ export function useRainproofData(): RainproofDataState {
       closeAccount: (accountId) => runMutation((repository) => repository.closeAccount(accountId)),
       reopenAccount: (accountId) => runMutation((repository) => repository.reopenAccount(accountId)),
       deleteAccount: (accountId) => runMutation((repository) => repository.deleteAccount(accountId)),
-      restoreBackup: (backup) => runMutation((repository) => repository.restoreBackup(backup), { rethrow: true }),
+      restoreBackup: async (backup, onProgress) => {
+        await onProgress?.('prepare-restore');
+        await runMutation(
+          async (repository) => {
+            await onProgress?.('restore-data');
+            await repository.restoreBackup(backup);
+            await onProgress?.('refresh-state');
+          },
+          {
+            label: 'restoreBackup',
+            rethrow: true,
+          },
+        );
+        await onProgress?.('finish');
+      },
       refresh,
     }),
     [

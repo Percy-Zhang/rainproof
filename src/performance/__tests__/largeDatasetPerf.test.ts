@@ -11,6 +11,11 @@ import {
   type TransactionDisplayEntry,
 } from '../../domain/aggregates';
 import { getBudgetUsagesForPeriods } from '../../domain/budgetUsage';
+import {
+  createRainproofBackupContainerFromSnapshot,
+  validateRainproofBackup,
+  type BackupContainerObserver,
+} from '../../domain/backupContainer';
 import { defaultCategories } from '../../domain/categories';
 import { getEffectiveDisplayCurrency } from '../../domain/currency';
 import { getDateRangeForPreset, isWithinDateRange } from '../../domain/dates';
@@ -102,6 +107,8 @@ describePerf('large dataset performance harness', () => {
         const snapshot = await measureAsync(() => fixture.repository.getSnapshot());
         const globalDerived = measureGlobalDerived(snapshot.result);
         const transactionList = measureTransactionsViewModel(snapshot.result);
+        const backupExport = await measureBackupExport(snapshot.result);
+        const backupValidation = await measureBackupValidation(backupExport.container);
         const addWrite = await measureAsync(() =>
           fixture.repository.addTransaction(getPerfAddTransactionInput(seed.result.accounts.everyday.id)),
         );
@@ -118,6 +125,8 @@ describePerf('large dataset performance harness', () => {
           tableReads,
           globalDerived,
           transactionList,
+          backupExport: backupExport.report,
+          backupValidation,
           addTransactionWriteMs: addWrite.durationMs,
           addTransactionRefreshMs: addRefresh.durationMs,
           afterAddGlobalDerivedTotalMs: afterAddGlobalDerived.totalMs,
@@ -135,6 +144,52 @@ describePerf('large dataset performance harness', () => {
     });
   }
 });
+
+async function measureBackupExport(snapshot: AppSnapshot) {
+  const stages: Record<string, number> = {};
+  const startedAt = Date.now();
+  const container = await createRainproofBackupContainerFromSnapshot(
+    snapshot,
+    '2026-06-19T12:00:00.000Z',
+    'synthetic benchmark password',
+    {
+      salt: new Uint8Array(16).fill(7),
+      nonce: new Uint8Array(24).fill(9),
+    },
+    collectBackupStageTimings(stages),
+  );
+  return {
+    container,
+    report: {
+      totalMs: Date.now() - startedAt,
+      outputBytes: container.length,
+      stages,
+    },
+  };
+}
+
+async function measureBackupValidation(container: Uint8Array) {
+  const stages: Record<string, number> = {};
+  const startedAt = Date.now();
+  await validateRainproofBackup(
+    container,
+    'synthetic benchmark password',
+    collectBackupStageTimings(stages),
+  );
+  return {
+    totalMs: Date.now() - startedAt,
+    inputBytes: container.length,
+    stages,
+  };
+}
+
+function collectBackupStageTimings(stages: Record<string, number>): BackupContainerObserver {
+  return {
+    onStageComplete(timing) {
+      stages[timing.stage] = (stages[timing.stage] ?? 0) + timing.durationMs;
+    },
+  };
+}
 
 async function seedPerfDataset(
   { db, repository }: RepositoryFixture,

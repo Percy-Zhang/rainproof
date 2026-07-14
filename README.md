@@ -1,6 +1,6 @@
 # Rainproof
 
-Rainproof is a local-first personal finance app built with Expo and React Native. It helps track accounts, transactions, budgets, upcoming payments, templates, statistics, and encrypted local backups.
+Rainproof is a local-first personal finance app built with Expo and React Native. It helps track accounts, transactions, budgets, upcoming payments, templates, statistics, and local backups.
 
 ## Features
 
@@ -12,7 +12,7 @@ Rainproof is a local-first personal finance app built with Expo and React Native
 - **Dashboard:** customize visible cards, reorder Dashboard cards, filter by selected accounts, and use quick actions.
 - **Templates and upcoming payments:** save reusable transaction templates, prefill Add Transaction from templates or planned payments, and manage one-time or recurring Upcoming Payments.
 - **Linked transactions:** link reimbursements, refunds, and shared expense contributions, including parent and split-line endpoints where supported.
-- **Backup and restore:** export and restore encrypted local Rainproof backups.
+- **Backup and restore:** export and restore password-protected or unencrypted local Rainproof backups.
 - **Multi-currency handling:** keep currencies separated in balances, statistics, budgets, splits, transfers, and displays.
 
 ## Financial Model
@@ -27,7 +27,7 @@ Rainproof is a local-first personal finance app built with Expo and React Native
 
 ## Backup And Privacy
 
-Rainproof exports encrypted, compressed `.rainproof` backup files. Restoring a backup requires the matching recovery key, and the app validates backup metadata and references before applying restored data.
+Rainproof exports compressed `.rainproof` backup files. A non-empty, confirmed password protects the file with password-derived authenticated encryption; a blank password creates an unencrypted backup after a clear warning. Export, validation, and restore show progress at real processing boundaries. Restore shows safe file metadata, validates the complete backup, presents a data-count preview and requires explicit replacement confirmation before applying restored data atomically.
 
 ## Development
 
@@ -61,7 +61,7 @@ npm run perf:large-data -- --sizes=1000
 
 ## Project Structure
 
-- `src/application`: app-level data loading, mutation actions, optimistic updates, and backup key storage.
+- `src/application`: app-level data loading, mutation actions, and optimistic updates.
 - `src/components`: shared UI components and primitives.
 - `src/domain`: financial rules, derived data, validation, display models, and pure helpers.
 - `src/features`: screen-level features for accounts, transactions, budgets, dashboard, statistics, templates, upcoming payments, settings, imports, and rainy day funds.

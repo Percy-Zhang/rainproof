@@ -5,7 +5,7 @@ import {
   getColumnNames,
   withInitializedRepository,
 } from './repositoryTestUtils';
-describe('encrypted backup restore storage', () => {
+describe('backup restore storage', () => {
   it('replaces app-owned data atomically while preserving ids and amounts', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const account = await addAccount(repository, {
@@ -65,6 +65,30 @@ describe('encrypted backup restore storage', () => {
       backup.data.rainyDayFund.linkedAccountIds = ['missing-account'];
 
       await expect(repository.restoreBackup(backup)).rejects.toThrow();
+      expect(await repository.getSnapshot()).toEqual(before);
+    });
+  });
+
+  it('rolls back cleared data when a database write fails during restore', async () => {
+    await withInitializedRepository(async ({ db, repository }) => {
+      await addAccount(repository, { name: 'Backup account' });
+      const backup = buildRainproofBackup(
+        await repository.getSnapshot(),
+        '2026-06-10T10:00:00.000Z',
+      );
+      await addAccount(repository, { name: 'Current account' });
+      const before = await repository.getSnapshot();
+      const originalRunAsync = db.runAsync.bind(db);
+      db.runAsync = async (source: string, ...params: unknown[]) => {
+        if (source.includes('INSERT INTO accounts')) {
+          throw new Error('Simulated restore write failure.');
+        }
+        return originalRunAsync(source, ...params);
+      };
+
+      await expect(repository.restoreBackup(backup)).rejects.toThrow('Simulated restore write failure');
+      db.runAsync = originalRunAsync;
+
       expect(await repository.getSnapshot()).toEqual(before);
     });
   });

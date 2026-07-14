@@ -28,7 +28,8 @@ import type {
   UpdateTransactionInput,
   UpdateTransactionLinkInput,
 } from '../domain/types';
-import type { RainproofBackup } from '../domain/backupExport';
+import { parseRainproofBackup, type RainproofBackup } from '../domain/backupExport';
+import { logDevPerfDuration } from '../performance';
 import {
   addAccountStorage,
   closeAccountStorage,
@@ -230,7 +231,15 @@ class SQLiteFinanceRepository implements FinanceRepository {
 
   async restoreBackup(backup: RainproofBackup): Promise<void> {
     await this.ensureRecurringItemsSchemaReady();
-    return restoreRainproofBackupStorage(this.db, backup.data);
+    const validationStartedAt = Date.now();
+    const validatedBackup = parseRainproofBackup(backup);
+    logDevPerfDuration('backup.restore.revalidate', validationStartedAt);
+    const databaseStartedAt = Date.now();
+    try {
+      return await restoreRainproofBackupStorage(this.db, validatedBackup.data);
+    } finally {
+      logDevPerfDuration('backup.restore.database', databaseStartedAt);
+    }
   }
 
   async addAccount(input: NewAccountInput): Promise<void> {

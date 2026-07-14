@@ -48,7 +48,6 @@ export function createBackupMetadata(exportedAt = new Date().toISOString()): Bac
   };
 }
 
-// Future restore/import should validate backup metadata before applying data in a restore transaction.
 export function checkBackupFormatCompatibility(backupFormatVersion: unknown): BackupFormatCompatibility {
   if (!Number.isInteger(backupFormatVersion) || Number(backupFormatVersion) <= 0) {
     return {

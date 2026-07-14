@@ -1,6 +1,8 @@
 import {
+  buildBackupRestorePreview,
   buildRainproofBackup,
   getRainproofBackupFilename,
+  parseDetachedRainproofBackup,
   parseRainproofBackup,
   RAINPROOF_BACKUP_FORMAT,
   serializeRainproofBackup,
@@ -299,6 +301,44 @@ describe('Rainproof backup payload export', () => {
     expect(getRainproofBackupFilename(exportedAt)).toBe('rainproof-backup-2026-06-10-0830.rainproof');
   });
 
+  it('builds a non-destructive restore preview from validated top-level records', () => {
+    const backup = buildRainproofBackup(createSnapshot(), exportedAt);
+
+    expect(buildBackupRestorePreview(backup)).toEqual({
+      createdAt: exportedAt,
+      appVersion: APP_VERSION,
+      counts: {
+        accounts: 1,
+        transactions: 1,
+        budgets: 1,
+        categories: 1,
+        upcomingPayments: 1,
+      },
+    });
+  });
+
+  it('builds zero restore-preview counts for an empty backup', () => {
+    const snapshot = createSnapshot();
+    snapshot.accounts = [];
+    snapshot.transactions = [];
+    snapshot.transactionLines = [];
+    snapshot.transactionLinks = [];
+    snapshot.budgets = [];
+    snapshot.categories = [];
+    snapshot.recurringItems = [];
+    snapshot.recurringTransactionHistory = [];
+    snapshot.transactionTemplates = [];
+    snapshot.rainyDayFund.linkedAccountIds = [];
+
+    expect(buildBackupRestorePreview(buildRainproofBackup(snapshot, exportedAt)).counts).toEqual({
+      accounts: 0,
+      transactions: 0,
+      budgets: 0,
+      categories: 0,
+      upcomingPayments: 0,
+    });
+  });
+
   it('validates backup metadata and record references before restore', () => {
     const snapshot = createSnapshot();
     snapshot.transactions.push({
@@ -312,5 +352,20 @@ describe('Rainproof backup payload export', () => {
 
     backup.data.transactionLines[0].accountId = 'missing-account';
     expect(() => parseRainproofBackup(backup)).toThrow('invalid transaction line account reference');
+  });
+
+  it('validates already-detached decoded payloads without another full clone', () => {
+    const snapshot = createSnapshot();
+    snapshot.transactions.push({
+      ...snapshot.transactions[0],
+      id: 'transaction-expense',
+      kind: 'expense',
+    });
+    const decoded = JSON.parse(serializeRainproofBackup(buildRainproofBackup(snapshot, exportedAt)));
+    const parsed = parseDetachedRainproofBackup(decoded);
+
+    expect(parsed).toBe(decoded);
+    parsed.data.transactionLines[0].accountId = 'missing-account';
+    expect(() => parseDetachedRainproofBackup(parsed)).toThrow('invalid transaction line account reference');
   });
 });
