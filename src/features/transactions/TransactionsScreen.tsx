@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import { Keyboard, Platform, TextInput, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { Keyboard, Platform, Pressable, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -12,8 +13,10 @@ import {
   CompactAccountSelector,
   type CompactAccountSelectorMode,
 } from '../../components/CompactAccountSelector';
+import { TransactionQuickActions } from '../../components/TransactionQuickActions';
 import { Card, SectionHeader } from '../../components/ui';
 import type { AccountBalance, AppSnapshot } from '../../domain/types';
+import { colors } from '../../theme/tokens';
 import { TransactionsBottomControls } from './TransactionsBottomControls';
 import { TransactionsListCard } from './TransactionsListCard';
 import { shouldKeepTransactionsSearchVisible } from './transactionsSearchFocus';
@@ -33,6 +36,8 @@ type TransactionsScreenProps = {
   defaultSelectedAccountIds?: string[];
   periodState: TransactionPeriodState;
   onPeriodStateChange: (periodState: TransactionPeriodState) => void;
+  onAddTransaction: (params?: { dashboardAccountIds?: string[] }) => void;
+  onOpenTemplates: () => void;
   onOpenTransaction: (transactionId: string) => void;
   showHeader?: boolean;
 };
@@ -47,6 +52,7 @@ const TRANSACTIONS_HEADER_MANUAL_GUARD_MS = 420;
 const TRANSACTIONS_HEADER_TOP_RESTORE_OFFSET = 6;
 const TRANSACTIONS_SEARCH_REVEAL_DURATION_MS = 190;
 const TRANSACTIONS_SEARCH_REVEAL_HEIGHT = 62;
+const TRANSACTIONS_FLOATING_ADD_BUTTON_SIZE = 58;
 
 export function TransactionsScreen({
   accountBalances,
@@ -54,6 +60,8 @@ export function TransactionsScreen({
   defaultSelectedAccountIds,
   periodState,
   onPeriodStateChange,
+  onAddTransaction,
+  onOpenTemplates,
   onOpenTransaction,
   showHeader = true,
 }: TransactionsScreenProps) {
@@ -322,11 +330,7 @@ export function TransactionsScreen({
       return;
     }
 
-    if (
-      searchMustRemainVisible ||
-      scrollDecisionLockedRef.current ||
-      getRemainingHeaderGuardMs() > 0
-    ) {
+    if (scrollDecisionLockedRef.current || getRemainingHeaderGuardMs() > 0) {
       return;
     }
 
@@ -354,7 +358,6 @@ export function TransactionsScreen({
     getRemainingHeaderGuardMs,
     resetScrollIntentTracking,
     setScrollDrivenHeaderState,
-    searchMustRemainVisible,
   ]);
 
   return (
@@ -420,6 +423,14 @@ export function TransactionsScreen({
         onSelectPeriodOption={viewModel.selectPeriodOption}
         periodState={periodState}
         selectedPeriodOption={viewModel.selectedPeriodOption}
+      />
+
+      <TransactionQuickActions
+        bottom={viewModel.bottomPadding - insets.bottom - TRANSACTIONS_FLOATING_ADD_BUTTON_SIZE}
+        context="transactions"
+        onAddTransaction={onAddTransaction}
+        onOpenTemplates={onOpenTemplates}
+        selectedAccountIds={viewModel.selectedAccountIds}
       />
     </View>
   );
@@ -537,29 +548,46 @@ function TransactionSearchCard({
   onSearchQueryChange,
   searchQuery,
 }: {
-  inputRef?: Ref<TextInput>;
+  inputRef: RefObject<TextInput | null>;
   onBlur: () => void;
   onFocus: () => void;
   onSearchQueryChange: (query: string) => void;
   searchQuery: string;
 }) {
+  const handleClearSearch = useCallback(() => {
+    onSearchQueryChange('');
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [inputRef, onSearchQueryChange]);
+
   return (
     <Card style={styles.searchCard}>
-      <TextInput
-        ref={inputRef}
-        accessibilityLabel="Search transactions"
-        autoCapitalize="none"
-        autoCorrect={false}
-        clearButtonMode="while-editing"
-        onBlur={onBlur}
-        onChangeText={onSearchQueryChange}
-        onFocus={onFocus}
-        placeholder="Search item, split line, category, account"
-        placeholderTextColor={transactionSearchPlaceholderColor}
-        returnKeyType="search"
-        style={styles.searchInput}
-        value={searchQuery}
-      />
+      <View style={styles.searchInputContainer}>
+        <TextInput
+          ref={inputRef}
+          accessibilityLabel="Search transactions"
+          autoCapitalize="none"
+          autoCorrect={false}
+          onBlur={onBlur}
+          onChangeText={onSearchQueryChange}
+          onFocus={onFocus}
+          placeholder="Search transactions"
+          placeholderTextColor={transactionSearchPlaceholderColor}
+          returnKeyType="search"
+          style={styles.searchInput}
+          value={searchQuery}
+        />
+        {searchQuery.length ? (
+          <Pressable
+            accessibilityLabel="Clear transaction search"
+            accessibilityRole="button"
+            hitSlop={4}
+            onPress={handleClearSearch}
+            style={({ pressed }) => [styles.searchClearButton, pressed && styles.pressed]}
+          >
+            <Ionicons name="close" size={20} color={colors.muted} />
+          </Pressable>
+        ) : null}
+      </View>
     </Card>
   );
 }

@@ -66,6 +66,7 @@ export function TransactionsListCard({
   return (
     <Card testID="transaction-list-card" style={styles.transactionListCard}>
       <SectionList<TransactionDisplayEntry, TransactionDisplaySection>
+        testID="transactions-section-list"
         sections={sections}
         extraData={suppressRowAnimations}
         keyExtractor={(entry) => entry.id}

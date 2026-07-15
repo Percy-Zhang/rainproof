@@ -120,6 +120,7 @@ export function CompactAccountSelector({
   const expandButtonIcon = mode === 'expanded' ? 'chevron-up' : 'chevron-down';
   const revealHeight = useSharedValue(accountListTargetHeight);
   const revealOpacity = useSharedValue(mode !== 'summary' ? 1 : 0);
+  const accountListScrollRef = useRef<ScrollView>(null);
   const localModeRef = useRef(mode);
   const immediateRevealTargetRef = useRef<{ height: number; mode: CompactAccountSelectorMode } | null>(null);
 
@@ -169,6 +170,9 @@ export function CompactAccountSelector({
 
     const nextMode = getNextAccountSelectorMode(localModeRef.current);
     localModeRef.current = nextMode;
+    if (nextMode === 'expanded') {
+      accountListScrollRef.current?.scrollTo({ animated: false, y: 0 });
+    }
     animateAccountListToMode(nextMode, 'manual');
     onPressExpandToggle();
   }, [animateAccountListToMode, onPressExpandToggle]);
@@ -289,6 +293,7 @@ export function CompactAccountSelector({
           revealOpacity={revealOpacity}
         >
           <ScrollView
+            ref={accountListScrollRef}
             nestedScrollEnabled
             scrollEnabled={accountListScrollEnabled}
             showsVerticalScrollIndicator={accountListScrollEnabled}

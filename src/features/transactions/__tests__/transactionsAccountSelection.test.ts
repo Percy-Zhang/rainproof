@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
+import { ScrollView } from 'react-native';
 
 import { CompactAccountSelector } from '../../../components/CompactAccountSelector';
 import { getTransactionsInitialSelectedAccountIds } from '../useTransactionsViewModel';
@@ -92,6 +93,27 @@ describe('transactions account selection helpers', () => {
 });
 
 describe('CompactAccountSelector immediate selection', () => {
+  it('resets the internal account list scroll before manually expanding it', () => {
+    const scrollTo = jest.spyOn(ScrollView.prototype, 'scrollTo').mockImplementation(() => undefined);
+    const onPressExpandToggle = jest.fn();
+    const screen = render(React.createElement(CompactAccountSelector, {
+      accounts: [account('a1'), account('a2'), account('a3'), account('a4'), account('a5')],
+      mode: 'peek',
+      onClearSelection: jest.fn(),
+      onPressExpandToggle,
+      onSelectAll: jest.fn(),
+      onToggleAccount: jest.fn(),
+      selectedAccountIds: ['a1'],
+      title: 'Accounts',
+    }));
+
+    fireEvent.press(screen.getByLabelText('Show all accounts'));
+
+    expect(scrollTo).toHaveBeenCalledWith({ animated: false, y: 0 });
+    expect(onPressExpandToggle).toHaveBeenCalledTimes(1);
+    scrollTo.mockRestore();
+  });
+
   it('commits account filter changes immediately on valid taps', () => {
     const onSelectedAccountIdsChange = jest.fn();
     const screen = renderAccountSelector({

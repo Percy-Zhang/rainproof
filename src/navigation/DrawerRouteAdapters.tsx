@@ -128,6 +128,7 @@ function StatsDrawerRoute({
 function TransactionsDrawerRoute({
   accountBalances,
   defaultSelectedAccountIds,
+  drawerNavigation,
   onPeriodStateChange,
   rootNavigation,
   snapshot,
@@ -140,6 +141,8 @@ function TransactionsDrawerRoute({
       defaultSelectedAccountIds={defaultSelectedAccountIds}
       periodState={transactionPeriodState}
       onPeriodStateChange={onPeriodStateChange}
+      onAddTransaction={(params) => rootNavigation?.navigate('AddTransaction', params)}
+      onOpenTemplates={() => drawerNavigation.navigate('Templates')}
       onOpenTransaction={(transactionId) => rootNavigation?.navigate('EditTransaction', { transactionId })}
       showHeader={false}
     />

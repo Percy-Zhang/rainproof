@@ -28,6 +28,9 @@ export const transactionsScreenStyles = StyleSheet.create({
   searchReveal: {
     overflow: 'hidden',
   },
+  searchInputContainer: {
+    position: 'relative',
+  },
   label: {
     color: colors.muted,
     fontSize: typography.small,
@@ -68,9 +71,19 @@ export const transactionsScreenStyles = StyleSheet.create({
     fontSize: typography.body,
     height: 44,
     includeFontPadding: false,
-    paddingHorizontal: spacing.md,
+    paddingLeft: spacing.md,
+    paddingRight: 48,
     paddingVertical: 0,
     textAlignVertical: 'center',
+  },
+  searchClearButton: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 4,
+    top: 4,
+    width: 36,
   },
   customRangeRow: {
     alignItems: 'stretch',

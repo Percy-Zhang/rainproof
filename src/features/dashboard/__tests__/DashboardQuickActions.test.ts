@@ -15,7 +15,7 @@ jest.mock('@expo/vector-icons', () => {
 });
 
 describe('Dashboard quick actions', () => {
-  it('opens and closes the add action menu from the main dashboard button', () => {
+  it('opens and closes the add action menu from the main dashboard button', async () => {
     const screen = renderDashboard();
 
     expect(screen.queryByTestId('dashboard-quick-action-menu')).toBeNull();
@@ -30,21 +30,23 @@ describe('Dashboard quick actions', () => {
     ]);
 
     fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
+    await flushAnimationFrameCleanup();
     expect(screen.queryByTestId('dashboard-quick-action-menu')).toBeNull();
   });
 
-  it('uses the existing add transaction navigation target and closes the menu', () => {
+  it('uses the existing add transaction navigation target and closes the menu', async () => {
     const onAddTransaction = jest.fn();
     const screen = renderDashboard({ onAddTransaction });
 
     fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
     fireEvent.press(screen.getByTestId('dashboard-quick-action-add-transaction'));
+    await flushAnimationFrameCleanup();
 
     expect(onAddTransaction).toHaveBeenCalledWith({ dashboardAccountIds: [] });
     expect(screen.queryByTestId('dashboard-quick-action-menu')).toBeNull();
   });
 
-  it('passes the selected dashboard account context to Add Transaction', () => {
+  it('passes the selected dashboard account context to Add Transaction', async () => {
     const onAddTransaction = jest.fn();
     const accounts = [account('bank'), account('wallet')];
     const screen = renderDashboard({
@@ -55,6 +57,7 @@ describe('Dashboard quick actions', () => {
 
     fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
     fireEvent.press(screen.getByTestId('dashboard-quick-action-add-transaction'));
+    await flushAnimationFrameCleanup();
 
     expect(onAddTransaction).toHaveBeenCalledWith({ dashboardAccountIds: ['bank', 'wallet'] });
   });
@@ -116,12 +119,13 @@ describe('Dashboard quick actions', () => {
     await flushAnimationFrameCleanup();
   });
 
-  it('opens Templates from the Use Template action and closes the menu', () => {
+  it('opens Templates from the Use Template action and closes the menu', async () => {
     const onOpenTemplates = jest.fn();
     const screen = renderDashboard({ onOpenTemplates });
 
     fireEvent.press(screen.getByTestId('dashboard-add-transaction'));
     fireEvent.press(screen.getByTestId('dashboard-quick-action-use-template'));
+    await flushAnimationFrameCleanup();
 
     expect(onOpenTemplates).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('dashboard-quick-action-menu')).toBeNull();
