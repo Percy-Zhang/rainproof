@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { runOnJS } from 'react-native-worklets';
+import { scheduleOnRN } from 'react-native-worklets';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -282,7 +282,7 @@ function SubcategoryReveal({
       easing: Easing.in(Easing.cubic),
     }, (finished) => {
       if (finished) {
-        runOnJS(finishCollapse)();
+        scheduleOnRN(finishCollapse);
       }
     });
   }, [expanded, expandedHeight, finishCollapse, revealHeight, revealOpacity, shouldRender]);

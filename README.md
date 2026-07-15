@@ -27,7 +27,7 @@ Rainproof is a local-first personal finance app built with Expo and React Native
 
 ## Backup And Privacy
 
-Rainproof exports compressed `.rainproof` backup files. A non-empty, confirmed password protects the file with password-derived authenticated encryption; a blank password creates an unencrypted backup after a clear warning. Export, validation, and restore show progress at real processing boundaries. Restore shows safe file metadata, validates the complete backup, presents a data-count preview and requires explicit replacement confirmation before applying restored data atomically.
+Rainproof exports compressed `.rainproof` backup files. A non-empty, confirmed password protects the file with password-derived authenticated encryption; a blank password creates an unencrypted backup after a clear warning. Restore shows safe file metadata, validates the complete backup, and presents a data-count preview before applying restored data atomically.
 
 ## Development
 

@@ -1,4 +1,3 @@
-import { StatusBar } from 'expo-status-bar';
 import { useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -84,7 +83,6 @@ function DrawerRootScreen({ rootScreen }: DrawerRootScreenProps) {
   if (loading || !snapshot || !derived.rainyDayProgress) {
     return (
       <SafeAreaView style={styles.loadingShell}>
-        <StatusBar style="dark" />
         <ActivityIndicator color={colors.primary} />
         <Text style={styles.loadingText}>Preparing Rainproof</Text>
         {error ? <FormError message={error} /> : null}
@@ -94,7 +92,6 @@ function DrawerRootScreen({ rootScreen }: DrawerRootScreenProps) {
 
   return (
     <View style={styles.shell}>
-      <StatusBar style="dark" />
       {error ? <View style={styles.errorWrap}><FormError message={error} /></View> : null}
       <DrawerRouteAdapter
         accountBalances={derived.accountBalances}

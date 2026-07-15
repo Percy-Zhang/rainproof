@@ -17,7 +17,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { runOnJS } from 'react-native-worklets';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import {
   getReorderRowMetrics,
@@ -433,7 +433,7 @@ function DashboardCardReorderItem({
         }
 
         touchIntent.value = REORDER_TOUCH_INTENT.reorder;
-        runOnJS(pressGuard.suppressPress)();
+        scheduleOnRN(pressGuard.suppressPress);
         activeRowId.value = row.id;
         slotAnimationsEnabled.value = false;
         dragArmed.value = true;
@@ -446,7 +446,7 @@ function DashboardCardReorderItem({
         startTop.value = rowOffsets.value[row.id] ?? index * DASHBOARD_CARD_REORDER_FALLBACK_ROW_HEIGHT;
         cancelAnimation(dragTop);
         dragTop.value = startTop.value;
-        runOnJS(onDragStart)(row.id);
+        scheduleOnRN(onDragStart, row.id);
       };
 
       const finishDrag = () => {
@@ -467,8 +467,8 @@ function DashboardCardReorderItem({
 
           activeRowId.value = null;
           touchIntent.value = REORDER_TOUCH_INTENT.idle;
-          runOnJS(onAutoScrollStop)();
-          runOnJS(onDragFinish)([...orderIds.value]);
+          scheduleOnRN(onAutoScrollStop);
+          scheduleOnRN(onDragFinish, [...orderIds.value]);
         });
       };
 
@@ -483,8 +483,8 @@ function DashboardCardReorderItem({
         slotAnimationsEnabled.value = false;
         activeRowId.value = null;
         touchIntent.value = REORDER_TOUCH_INTENT.idle;
-        runOnJS(onAutoScrollStop)();
-        runOnJS(onDragFinish)([...orderIds.value]);
+        scheduleOnRN(onAutoScrollStop);
+        scheduleOnRN(onDragFinish, [...orderIds.value]);
       };
 
       const longPressGesture = createReorderLongPressGesture(DASHBOARD_CARD_REORDER_ACTIVATION_MS)
@@ -534,7 +534,7 @@ function DashboardCardReorderItem({
           initialTouchAbsoluteY.value = touch.absoluteY;
           latestTouchAbsoluteY.value = touch.absoluteY;
           touchIntent.value = REORDER_TOUCH_INTENT.pending;
-          runOnJS(pressGuard.beginTouchSession)();
+          scheduleOnRN(pressGuard.beginTouchSession);
         })
         .onTouchesMove((event, stateManager) => {
           'worklet';
@@ -557,19 +557,19 @@ function DashboardCardReorderItem({
               touchIntent.value !== REORDER_TOUCH_INTENT.scroll
             ) {
               touchIntent.value = nextTouchIntent;
-              runOnJS(pressGuard.suppressPress)();
+              scheduleOnRN(pressGuard.suppressPress);
               stateManager.fail();
             }
 
             return;
           }
 
-          runOnJS(onAutoScrollTouch)(touch.absoluteY);
+          scheduleOnRN(onAutoScrollTouch, touch.absoluteY);
 
           if (dragArmed.value && !dragActive.value && activeRowId.value === row.id) {
             dragActive.value = true;
             stateManager.activate();
-            runOnJS(onAutoScrollStart)(latestTouchAbsoluteY.value);
+            scheduleOnRN(onAutoScrollStart, latestTouchAbsoluteY.value);
           }
 
           if (dragArmed.value && activeRowId.value === row.id) {
@@ -584,12 +584,12 @@ function DashboardCardReorderItem({
 
           dragActive.value = true;
           activationTranslationY.value = event.translationY;
-          runOnJS(onAutoScrollStart)(event.absoluteY);
+          scheduleOnRN(onAutoScrollStart, event.absoluteY);
         })
         .onUpdate((event) => {
           'worklet';
           latestTouchAbsoluteY.value = event.absoluteY;
-          runOnJS(onAutoScrollTouch)(event.absoluteY);
+          scheduleOnRN(onAutoScrollTouch, event.absoluteY);
           updateDragPosition(event.translationY - activationTranslationY.value);
         })
         .onEnd(finishDrag)

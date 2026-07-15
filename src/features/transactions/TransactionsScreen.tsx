@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode, type Ref } from 'react';
-import { InteractionManager, Keyboard, Platform, TextInput, View } from 'react-native';
+import { Keyboard, Platform, TextInput, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -430,7 +430,7 @@ function useDeferredTransactionListReady(): boolean {
 
   useEffect(() => {
     let cancelled = false;
-    const task = InteractionManager.runAfterInteractions(() => {
+    const idleCallbackId = requestIdleCallback(() => {
       if (!cancelled) {
         setReady(true);
       }
@@ -438,7 +438,7 @@ function useDeferredTransactionListReady(): boolean {
 
     return () => {
       cancelled = true;
-      task.cancel?.();
+      cancelIdleCallback(idleCallbackId);
     };
   }, []);
 

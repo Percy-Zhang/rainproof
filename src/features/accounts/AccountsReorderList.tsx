@@ -10,7 +10,7 @@ import Animated, {
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
-import { runOnJS } from 'react-native-worklets';
+import { scheduleOnRN } from 'react-native-worklets';
 
 import type { Account } from '../../domain/types';
 import { spacing } from '../../theme/tokens';
@@ -296,7 +296,7 @@ function AccountReorderItem({
         }
 
         touchIntent.value = REORDER_TOUCH_INTENT.reorder;
-        runOnJS(pressGuard.suppressPress)();
+        scheduleOnRN(pressGuard.suppressPress);
         const currentIndex = positions.value[account.id] ?? index;
         activeAccountId.value = account.id;
         dragArmed.value = true;
@@ -308,7 +308,7 @@ function AccountReorderItem({
         startTop.value = currentIndex * ACCOUNT_ROW_FRAME_HEIGHT;
         cancelAnimation(dragTop);
         dragTop.value = startTop.value;
-        runOnJS(onDragStart)(account.id);
+        scheduleOnRN(onDragStart, account.id);
       };
 
       const finishDrag = () => {
@@ -328,8 +328,8 @@ function AccountReorderItem({
 
           activeAccountId.value = null;
           touchIntent.value = REORDER_TOUCH_INTENT.idle;
-          runOnJS(onAutoScrollStop)();
-          runOnJS(onDragFinish)({ ...positions.value });
+          scheduleOnRN(onAutoScrollStop);
+          scheduleOnRN(onDragFinish, { ...positions.value });
         });
       };
 
@@ -343,8 +343,8 @@ function AccountReorderItem({
         dragActive.value = false;
         activeAccountId.value = null;
         touchIntent.value = REORDER_TOUCH_INTENT.idle;
-        runOnJS(onAutoScrollStop)();
-        runOnJS(onDragFinish)({ ...positions.value });
+        scheduleOnRN(onAutoScrollStop);
+        scheduleOnRN(onDragFinish, { ...positions.value });
       };
 
       const longPressGesture = createReorderLongPressGesture(ACCOUNT_REORDER_ACTIVATION_MS)
@@ -394,7 +394,7 @@ function AccountReorderItem({
           initialTouchAbsoluteY.value = touch.absoluteY;
           latestTouchAbsoluteY.value = touch.absoluteY;
           touchIntent.value = REORDER_TOUCH_INTENT.pending;
-          runOnJS(pressGuard.beginTouchSession)();
+          scheduleOnRN(pressGuard.beginTouchSession);
         })
         .onTouchesMove((event, stateManager) => {
           'worklet';
@@ -417,19 +417,19 @@ function AccountReorderItem({
               touchIntent.value !== REORDER_TOUCH_INTENT.scroll
             ) {
               touchIntent.value = nextTouchIntent;
-              runOnJS(pressGuard.suppressPress)();
+              scheduleOnRN(pressGuard.suppressPress);
               stateManager.fail();
             }
 
             return;
           }
 
-          runOnJS(onAutoScrollTouch)(touch.absoluteY);
+          scheduleOnRN(onAutoScrollTouch, touch.absoluteY);
 
           if (dragArmed.value && !dragActive.value && activeAccountId.value === account.id) {
             dragActive.value = true;
             stateManager.activate();
-            runOnJS(onAutoScrollStart)(latestTouchAbsoluteY.value);
+            scheduleOnRN(onAutoScrollStart, latestTouchAbsoluteY.value);
           }
 
           if (dragArmed.value && activeAccountId.value === account.id) {
@@ -444,12 +444,12 @@ function AccountReorderItem({
 
           dragActive.value = true;
           activationTranslationY.value = event.translationY;
-          runOnJS(onAutoScrollStart)(event.absoluteY);
+          scheduleOnRN(onAutoScrollStart, event.absoluteY);
         })
         .onUpdate((event) => {
           'worklet';
           latestTouchAbsoluteY.value = event.absoluteY;
-          runOnJS(onAutoScrollTouch)(event.absoluteY);
+          scheduleOnRN(onAutoScrollTouch, event.absoluteY);
           updateDragPosition(event.translationY - activationTranslationY.value);
         })
         .onEnd(finishDrag)

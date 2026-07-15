@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { Pressable, StyleSheet, Text, type GestureResponderEvent, View } from 'react-native';
-import { runOnJS } from 'react-native-worklets';
+import { scheduleOnRN } from 'react-native-worklets';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -315,7 +315,7 @@ const BudgetHistoryReveal = forwardRef<BudgetHistoryRevealHandle, BudgetHistoryR
       }, (finished) => {
         if (finished) {
           revealHeight.value = 0;
-          runOnJS(finishCollapse)();
+          scheduleOnRN(finishCollapse);
         }
       });
       contentTranslateY.value = withTiming(BUDGET_HISTORY_REVEAL_CONTENT_OFFSET, {

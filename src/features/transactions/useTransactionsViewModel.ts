@@ -1,6 +1,6 @@
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { InteractionManager, Platform } from 'react-native';
+import { Platform } from 'react-native';
 
 import { useRenderScopedAnimationSuppression } from '../../components/useRenderScopedAnimationSuppression';
 import {
@@ -254,11 +254,11 @@ export function useTransactionsViewModel({
       return;
     }
 
-    let interactionTask: { cancel?: () => void } | null = null;
+    let idleCallbackId: number | null = null;
     const applyToken = searchApplyTokenRef.current + 1;
     searchApplyTokenRef.current = applyToken;
     const timeoutId = setTimeout(() => {
-      interactionTask = InteractionManager.runAfterInteractions(() => {
+      idleCallbackId = requestIdleCallback(() => {
         if (searchApplyTokenRef.current !== applyToken) {
           return;
         }
@@ -270,7 +270,9 @@ export function useTransactionsViewModel({
     return () => {
       searchApplyTokenRef.current += 1;
       clearTimeout(timeoutId);
-      interactionTask?.cancel?.();
+      if (idleCallbackId !== null) {
+        cancelIdleCallback(idleCallbackId);
+      }
     };
   }, [
     appliedSearchQuery,
