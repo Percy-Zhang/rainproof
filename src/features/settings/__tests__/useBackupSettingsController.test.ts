@@ -8,7 +8,13 @@ import {
 } from '../../../domain/backupContainer';
 import { buildRainproofBackup } from '../../../domain/backupExport';
 import type { AppSnapshot } from '../../../domain/types';
-import type { BackupSettingsServices } from '../backupSettingsServices';
+import {
+  BackupFilePickerError,
+  readSelectedBackupFile,
+  type BackupSettingsServices,
+  type ReadableBackupFile,
+  type SelectedBackupFile,
+} from '../backupSettingsServices';
 import { useBackupSettingsController } from '../useBackupSettingsController';
 
 jest.mock('../../../domain/backupContainer', () => {
@@ -25,6 +31,13 @@ const mockedCreateContainer = jest.mocked(createRainproofBackupContainerFromSnap
 const mockedInspectBackup = jest.mocked(inspectRainproofBackup);
 const mockedValidateBackup = jest.mocked(validateRainproofBackup);
 const exportedAt = '2026-07-14T10:42:00.000Z';
+const selectedBackupBytes = new Uint8Array([
+  ...Buffer.from('RNPF0002', 'ascii'),
+  0,
+  0,
+  0,
+  0,
+]);
 
 describe('useBackupSettingsController', () => {
   let frameCallbacks: FrameRequestCallback[];
@@ -202,12 +215,19 @@ describe('useBackupSettingsController', () => {
     mockedValidateBackup
       .mockRejectedValueOnce(new BackupReadError('incorrect_password_or_corrupt_backup'))
       .mockResolvedValueOnce(backup);
-    const { result } = renderController();
+    const { result, services } = renderController();
 
     act(() => result.current.openRestoreFlow());
     expect(result.current.flow).toMatchObject({ kind: 'restore', phase: 'selecting' });
     await flushFrames(3);
     await waitFor(() => expect(result.current.flow).toMatchObject({ kind: 'restore', phase: 'file-selected' }));
+    expect(services.readBackupFile).toHaveBeenCalledWith(expect.objectContaining({
+      mimeType: 'application/octet-stream',
+      name: 'selected.rainproof',
+      pickerMethod: 'file-system',
+      size: selectedBackupBytes.length,
+      uri: 'content://selected',
+    }));
 
     act(() => {
       result.current.setRestorePassword('wrong');
@@ -312,6 +332,89 @@ describe('useBackupSettingsController', () => {
     }));
   });
 
+  it('treats picker cancellation as a no-op without reading or inspecting', async () => {
+    const pickBackupFile = jest.fn(async () => null);
+    const { result, services } = renderController(jest.fn(async () => undefined), {
+      pickBackupFile,
+    });
+
+    act(() => result.current.openRestoreFlow());
+    await flushNextFrame();
+
+    await waitFor(() => expect(result.current.flow).toEqual({ kind: 'idle' }));
+    expect(pickBackupFile).toHaveBeenCalledTimes(1);
+    expect(services.readBackupFile).not.toHaveBeenCalled();
+    expect(mockedInspectBackup).not.toHaveBeenCalled();
+  });
+
+  it('shows a concise error when the FileSystem picker fails', async () => {
+    const pickerError = new BackupFilePickerError(
+      'file-system',
+      Object.assign(new Error('native picker failure'), { code: 'ERR_PICKER' }),
+    );
+    const { result, services } = renderController(jest.fn(async () => undefined), {
+      pickBackupFile: jest.fn(async () => { throw pickerError; }),
+    });
+
+    act(() => result.current.openRestoreFlow());
+    await flushNextFrame();
+
+    await waitFor(() => expect(result.current.flow).toMatchObject({
+      kind: 'restore',
+      phase: 'file-error',
+      error: "Couldn't open the selected backup.",
+    }));
+    expect(services.readBackupFile).not.toHaveBeenCalled();
+    expect(mockedInspectBackup).not.toHaveBeenCalled();
+  });
+
+  it('does not inspect or fall back when the selected File bytes read fails', async () => {
+    const selected = selectedBackupFile({
+      bytes: jest.fn(async () => {
+        throw Object.assign(new Error('read failed'), { code: 'ERR_INVALID_PERMISSION' });
+      }),
+    });
+    const readBackupFile = jest.fn(readSelectedBackupFile);
+    const { result } = renderController(jest.fn(async () => undefined), {
+      pickBackupFile: jest.fn(async () => selected),
+      readBackupFile,
+    });
+
+    act(() => result.current.openRestoreFlow());
+    await flushFrames(2);
+
+    await waitFor(() => expect(result.current.flow).toMatchObject({
+      kind: 'restore',
+      phase: 'file-error',
+      error: "Couldn't read the selected backup.",
+    }));
+    expect(readBackupFile).toHaveBeenCalledTimes(1);
+    expect(mockedInspectBackup).not.toHaveBeenCalled();
+  });
+
+  it('reaches password entry after reading the FileSystem picker File directly', async () => {
+    mockedInspectBackup.mockReturnValue(inspection('password'));
+    const selected = selectedBackupFile();
+    const readBackupFile = jest.fn(readSelectedBackupFile);
+    const { result } = renderController(jest.fn(async () => undefined), {
+      pickBackupFile: jest.fn(async () => selected),
+      readBackupFile,
+    });
+
+    act(() => result.current.openRestoreFlow());
+    await flushFrames(3);
+
+    await waitFor(() => expect(result.current.flow).toMatchObject({
+      kind: 'restore',
+      phase: 'file-selected',
+      pendingBackup: {
+        inspection: { protectionMode: 'password' },
+      },
+    }));
+    expect(readBackupFile).toHaveBeenCalledTimes(1);
+    expect(selected.file.bytes).toHaveBeenCalledTimes(1);
+  });
+
   async function reachRestorePreview(result: ReturnType<typeof renderController>['result']) {
     act(() => result.current.openRestoreFlow());
     await flushFrames(3);
@@ -337,13 +440,25 @@ describe('useBackupSettingsController', () => {
   }
 });
 
-function renderController(onRestoreBackup = jest.fn(async () => undefined)) {
+function renderController(
+  onRestoreBackup = jest.fn(async () => undefined),
+  overrides: Partial<BackupSettingsServices> = {},
+) {
+  const selected = selectedBackupFile();
   const services: BackupSettingsServices = {
     getRandomBytes: jest.fn(async (length) => new Uint8Array(length).fill(7)),
-    pickBackupFile: jest.fn(async () => ({ name: 'selected.rainproof', uri: 'file://selected' })),
-    readBackupFile: jest.fn(async () => new Uint8Array([8, 9, 10])),
+    pickBackupFile: jest.fn(async () => selected),
+    readBackupFile: jest.fn(async () => ({
+      actualBytes: selectedBackupBytes.length,
+      bytes: selectedBackupBytes,
+      fileExists: true,
+      fileSize: selectedBackupBytes.length,
+      magicMatches: true as const,
+      pickerMethod: 'file-system' as const,
+    })),
     writeBackupFile: jest.fn(async () => 'file://written-backup'),
     shareBackupFile: jest.fn(async () => undefined),
+    ...overrides,
   };
   const hook = renderHook(() => useBackupSettingsController({
     snapshot: snapshot(),
@@ -351,6 +466,25 @@ function renderController(onRestoreBackup = jest.fn(async () => undefined)) {
     services,
   }));
   return { ...hook, services };
+}
+
+function selectedBackupFile(
+  fileOverrides: Partial<ReadableBackupFile> = {},
+): SelectedBackupFile {
+  const file: ReadableBackupFile = {
+    bytes: jest.fn(async () => selectedBackupBytes),
+    exists: true,
+    size: selectedBackupBytes.length,
+    ...fileOverrides,
+  };
+  return {
+    file,
+    mimeType: 'application/octet-stream',
+    name: 'selected.rainproof',
+    pickerMethod: 'file-system',
+    size: selectedBackupBytes.length,
+    uri: 'content://selected',
+  };
 }
 
 function inspection(protectionMode: 'none' | 'password') {

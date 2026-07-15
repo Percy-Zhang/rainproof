@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   BackupReadError,
   createRainproofBackupContainerFromSnapshot,
+  hasRainproofBackupMagic,
   inspectRainproofBackup,
   validateRainproofBackup,
   type BackupContainerObserver,
@@ -19,6 +20,8 @@ import {
 import type { AppSnapshot } from '../../domain/types';
 import { logDevPerfDuration, logDevPerfMeasurement } from '../../performance';
 import {
+  BackupFileAccessError,
+  BackupFilePickerError,
   defaultBackupSettingsServices,
   type BackupSettingsServices,
   type SelectedBackupFile,
@@ -282,6 +285,7 @@ export function useBackupSettingsController({
         if (!isCurrentOperation(token)) {
           return;
         }
+        logBackupPickerError(error);
         setFlow({
           ...createRestoreFlow('file-error'),
           error: getBackupErrorMessage(error, "Couldn't open the selected backup."),
@@ -304,9 +308,18 @@ export function useBackupSettingsController({
         return;
       }
       const readStartedAt = Date.now();
-      const bytes = await services.readBackupFile(selected.uri);
-      logDevPerfDuration('backup.inspection.read-file', readStartedAt, {
-        inputBytes: bytes.length,
+      const readResult = await services.readBackupFile(selected);
+      const bytes = readResult.bytes;
+      logDevPerfDuration('backup.inspection.read-file-success', readStartedAt, {
+        actualBytes: readResult.actualBytes,
+        fileExists: readResult.fileExists,
+        fileSize: readResult.fileSize,
+        magicMatches: readResult.magicMatches,
+        mimeType: selected.mimeType,
+        pickerMethod: readResult.pickerMethod,
+        reportedSize: selected.size,
+        stage: 'read-bytes',
+        uriScheme: getUriScheme(selected.uri),
       });
       if (!isCurrentOperation(token)) {
         return;
@@ -316,10 +329,23 @@ export function useBackupSettingsController({
         getBackupWorkProgress('inspection', 'inspect-file'),
       );
       const inspectStartedAt = Date.now();
-      const inspection = inspectRainproofBackup(bytes);
+      let inspection: RainproofBackupInspection;
+      try {
+        inspection = inspectRainproofBackup(bytes);
+      } catch (error) {
+        logDevPerfDuration('backup.inspection.inspect-file', inspectStartedAt, {
+          errorCode: error instanceof BackupReadError ? error.code : null,
+          errorName: error instanceof Error ? error.name : null,
+          inputBytes: bytes.length,
+          magicMatches: hasRainproofBackupMagic(bytes),
+          status: 'error',
+        });
+        throw error;
+      }
       logDevPerfDuration('backup.inspection.inspect-file', inspectStartedAt, {
         inputBytes: bytes.length,
         passwordProtected: inspection.protectionMode === 'password',
+        status: 'success',
       });
       setFlow({
         ...createRestoreFlow('file-selected'),
@@ -330,6 +356,7 @@ export function useBackupSettingsController({
       if (!isCurrentOperation(token)) {
         return;
       }
+      logBackupFileAccessError(error, selected);
       setFlow({
         ...createRestoreFlow('file-error'),
         selectedFileName: selected.name,
@@ -662,6 +689,43 @@ function logBackupStageTiming(timing: BackupStageTiming, passwordProtected: bool
   );
 }
 
+function logBackupFileAccessError(error: unknown, selected: SelectedBackupFile) {
+  if (!(error instanceof BackupFileAccessError)) {
+    return;
+  }
+  logDevPerfMeasurement('backup.inspection.read-file-error', 0, {
+    actualBytes: error.actualBytes,
+    errorCode: error.nativeCode,
+    errorName: error.nativeErrorName,
+    fileExists: error.fileExists,
+    fileSize: error.fileSize,
+    magicMatches: error.magicMatches,
+    mimeType: selected.mimeType,
+    pickerMethod: selected.pickerMethod,
+    reason: error.reason,
+    reportedSize: selected.size,
+    stage: error.stage,
+    uriScheme: getUriScheme(selected.uri),
+  });
+}
+
+function logBackupPickerError(error: unknown) {
+  if (!(error instanceof BackupFilePickerError)) {
+    return;
+  }
+  logDevPerfMeasurement('backup.inspection.pick-file-error', 0, {
+    errorCode: error.nativeCode,
+    errorName: error.nativeErrorName,
+    pickerMethod: error.pickerMethod,
+    stage: 'pick-file',
+  });
+}
+
+function getUriScheme(uri: string): string {
+  const separator = uri.indexOf(':');
+  return separator > 0 ? uri.slice(0, separator).toLowerCase() : 'unknown';
+}
+
 function isBusyFlow(flow: BackupFlowState): boolean {
   return (flow.kind === 'export' && flow.phase === 'exporting')
     || (flow.kind === 'restore' && [
@@ -678,6 +742,11 @@ function isActiveBackupOperation(flow: BackupFlowState): boolean {
 }
 
 function getBackupErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof BackupFileAccessError) {
+    return error.reason === 'read-failed'
+      ? "Couldn't read the selected backup."
+      : "The selected file isn't a valid Rainproof backup.";
+  }
   if (!(error instanceof BackupReadError)) {
     return fallback;
   }

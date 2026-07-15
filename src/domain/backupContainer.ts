@@ -276,6 +276,11 @@ export function inspectRainproofBackup(container: Uint8Array): RainproofBackupIn
   };
 }
 
+export function hasRainproofBackupMagic(container: Uint8Array): boolean {
+  return container.length >= MAGIC.length
+    && bytesEqual(container.subarray(0, MAGIC.length), MAGIC);
+}
+
 export async function validateRainproofBackup(
   container: Uint8Array,
   password = '',
@@ -438,7 +443,7 @@ function parseContainer(container: Uint8Array): {
   if (container.length < MAGIC.length + HEADER_LENGTH_BYTES + 1) {
     throw new BackupReadError('invalid_backup');
   }
-  if (!bytesEqual(container.subarray(0, MAGIC.length), MAGIC)) {
+  if (!hasRainproofBackupMagic(container)) {
     throw new BackupReadError('unsupported_format');
   }
 
