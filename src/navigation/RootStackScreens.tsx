@@ -19,7 +19,6 @@ export { StatsDrilldownRouteScreen } from './StatsRouteScreens';
 export {
   AddTransactionRouteScreen,
   EditTransactionRouteScreen,
-  LinkTransactionRouteScreen,
 } from './TransactionRouteScreens';
 export {
   AddTransactionTemplateRouteScreen,

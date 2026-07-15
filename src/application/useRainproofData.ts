@@ -54,7 +54,6 @@ import {
   canPatchSnapshotAfterAddTransaction,
   canPatchSnapshotAfterAddTransactionLink,
   canPatchSnapshotAfterDeleteTransaction,
-  canPatchSnapshotAfterEditTransaction,
   canPatchSnapshotAfterTransactionLinkBatch,
   canPatchSnapshotAfterUpdateTransactionLink,
   getRollbackForRecurringItemStateChange,
@@ -162,6 +161,7 @@ type TransactionLinkMutationOptions = {
 };
 type UpdateTransactionMutationOptions = {
   optimistic?: boolean;
+  transactionLinkBatch?: TransactionLinkBatchInput;
   transactionLinkDeleteIds?: string[];
 };
 type OptimisticTransactionActionLabel =
@@ -408,12 +408,16 @@ export function useRainproofData(): RainproofDataState {
       const startedAt = Date.now();
 
       try {
-        if (options.optimistic === false || options.transactionLinkDeleteIds?.length) {
+        if (
+          options.optimistic === false ||
+          options.transactionLinkDeleteIds?.length
+        ) {
           return withFullRefreshActionTiming('updateTransaction', startedAt, persistUpdateTransactionWithSaving({
             input,
             refresh,
             repository,
             setSaving,
+            transactionLinkBatch: options.transactionLinkBatch,
             transactionLinkDeleteIds: options.transactionLinkDeleteIds,
           }));
         }
@@ -427,6 +431,7 @@ export function useRainproofData(): RainproofDataState {
             refresh,
             repository,
             setSaving,
+            transactionLinkBatch: options.transactionLinkBatch,
           }));
         }
 
@@ -436,11 +441,43 @@ export function useRainproofData(): RainproofDataState {
           metadata,
         );
         const rollback = getRollbackForEditTransaction(previousSnapshot, input.id);
-        const canPatchOptimistically = rollback &&
-          canPatchSnapshotAfterEditTransaction(previousSnapshot, {
-            input,
-            ...optimisticRecords,
-          });
+        const transactionPatch = { input, ...optimisticRecords };
+        const transactionLinkBatch = options.transactionLinkBatch &&
+          hasTransactionLinkBatchChanges(options.transactionLinkBatch)
+          ? options.transactionLinkBatch
+          : undefined;
+        const projectedTransactionSnapshot = rollback
+          ? patchSnapshotAfterEditTransactionWithRollback(previousSnapshot, transactionPatch, rollback)
+          : null;
+        let optimisticLinkRecords: TransactionLinkBatchPersistenceRecords | undefined;
+        let linkRollback: OptimisticTransactionLinkBatchRollback | undefined;
+        let canPatchOptimistically = Boolean(projectedTransactionSnapshot);
+
+        if (
+          projectedTransactionSnapshot &&
+          transactionLinkBatch
+        ) {
+          optimisticLinkRecords = timeDevPerf(
+            'rainproofData.updateTransaction.linkBatchOptimisticBuild',
+            () => repository.prepareTransactionLinkBatch(
+              transactionLinkBatch,
+              projectedTransactionSnapshot,
+            ),
+            getTransactionLinkBatchPerfMetadata(transactionLinkBatch),
+          );
+          linkRollback = getRollbackForTransactionLinkBatch(
+            projectedTransactionSnapshot,
+            optimisticLinkRecords,
+          ) ?? undefined;
+          const snapshotWithLinks = linkRollback
+            ? patchSnapshotAfterTransactionLinkBatchWithRollback(
+                projectedTransactionSnapshot,
+                optimisticLinkRecords,
+                linkRollback,
+              )
+            : null;
+          canPatchOptimistically = Boolean(snapshotWithLinks);
+        }
 
         if (!rollback || !canPatchOptimistically) {
           return withFullRefreshActionTiming('updateTransaction', startedAt, persistUpdateTransactionWithSaving({
@@ -448,6 +485,7 @@ export function useRainproofData(): RainproofDataState {
             refresh,
             repository,
             setSaving,
+            transactionLinkBatch,
           }));
         }
 
@@ -456,10 +494,13 @@ export function useRainproofData(): RainproofDataState {
             applySnapshotPatch,
             input,
             optimisticRecords,
+            optimisticLinkRecords,
             refresh,
             repository,
             rollback,
+            linkRollback,
             setError,
+            transactionLinkBatch,
             transactionWriteQueueRef,
           });
         });
@@ -1646,35 +1687,53 @@ function applyAcceptedOptimisticUpcomingPaymentTransaction({
 function applyAcceptedOptimisticEditTransaction({
   applySnapshotPatch,
   input,
+  linkRollback,
+  optimisticLinkRecords,
   optimisticRecords,
   refresh,
   repository,
   rollback,
   setError,
+  transactionLinkBatch,
   transactionWriteQueueRef,
 }: {
   applySnapshotPatch: (patchSnapshot: (snapshot: AppSnapshot) => AppSnapshot | null) => AppSnapshot | null;
   input: UpdateTransactionInput;
+  linkRollback?: OptimisticTransactionLinkBatchRollback;
+  optimisticLinkRecords?: TransactionLinkBatchPersistenceRecords;
   optimisticRecords: UpdateTransactionPersistenceRecords;
   refresh: () => Promise<void>;
   repository: FinanceRepository;
   rollback: OptimisticEditTransactionRollback;
   setError: (message: string) => void;
+  transactionLinkBatch?: TransactionLinkBatchInput;
   transactionWriteQueueRef: BackgroundWriteQueueRef;
 }): void {
   const optimisticPatchStartedAt = Date.now();
-  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) =>
-    patchSnapshotAfterEditTransactionWithRollback(currentSnapshot, {
+  const optimisticSnapshot = applySnapshotPatch((currentSnapshot) => {
+    const snapshotWithTransaction = patchSnapshotAfterEditTransactionWithRollback(currentSnapshot, {
       input,
       ...optimisticRecords,
-    }, rollback),
-  );
+    }, rollback);
+    if (!snapshotWithTransaction) {
+      return null;
+    }
+
+    return optimisticLinkRecords && linkRollback
+      ? patchSnapshotAfterTransactionLinkBatchWithRollback(
+          snapshotWithTransaction,
+          optimisticLinkRecords,
+          linkRollback,
+        )
+      : snapshotWithTransaction;
+  });
 
   if (!optimisticSnapshot) {
     void persistUpdateTransactionWithFullRefresh({
       input,
       refresh,
       repository,
+      transactionLinkBatch,
     }).catch((caught) => {
       setError(caught instanceof Error ? caught.message : 'Could not update transaction.');
     });
@@ -1695,17 +1754,31 @@ function applyAcceptedOptimisticEditTransaction({
   enqueueBackgroundWrite(transactionWriteQueueRef, async () => {
     await persistOptimisticEditTransaction({
       input,
+      optimisticLinkRecords,
       optimisticRecords,
       refresh,
       repository,
       rollback,
-      rollbackPatch: (editRollback, records) => applySnapshotPatch((currentSnapshot) =>
-        rollbackSnapshotAfterOptimisticEditTransaction(currentSnapshot, editRollback, {
-          input,
-          ...records,
-        }),
-      ),
+      rollbackPatch: (editRollback, records) => applySnapshotPatch((currentSnapshot) => {
+        const snapshotWithoutLinkBatch = optimisticLinkRecords && linkRollback
+          ? rollbackSnapshotAfterOptimisticTransactionLinkBatch(
+              currentSnapshot,
+              linkRollback,
+              optimisticLinkRecords,
+            )
+          : currentSnapshot;
+        if (!snapshotWithoutLinkBatch) {
+          return null;
+        }
+
+        return rollbackSnapshotAfterOptimisticEditTransaction(
+          snapshotWithoutLinkBatch,
+          editRollback,
+          { input, ...records },
+        );
+      }),
       setError,
+      transactionLinkBatch,
     });
   });
 }
@@ -2403,12 +2476,14 @@ async function persistUpdateTransactionWithSaving({
   refresh,
   repository,
   setSaving,
+  transactionLinkBatch,
   transactionLinkDeleteIds,
 }: {
   input: UpdateTransactionInput;
   refresh: () => Promise<void>;
   repository: FinanceRepository;
   setSaving: (saving: boolean) => void;
+  transactionLinkBatch?: TransactionLinkBatchInput;
   transactionLinkDeleteIds?: string[];
 }): Promise<void> {
   try {
@@ -2417,6 +2492,7 @@ async function persistUpdateTransactionWithSaving({
       input,
       refresh,
       repository,
+      transactionLinkBatch,
       transactionLinkDeleteIds,
     });
   } finally {
@@ -2428,16 +2504,18 @@ async function persistUpdateTransactionWithFullRefresh({
   input,
   refresh,
   repository,
+  transactionLinkBatch,
   transactionLinkDeleteIds,
 }: {
   input: UpdateTransactionInput;
   refresh: () => Promise<void>;
   repository: FinanceRepository;
+  transactionLinkBatch?: TransactionLinkBatchInput;
   transactionLinkDeleteIds?: string[];
 }): Promise<void> {
   await timeDevPerfAsync(
     'rainproofData.updateTransaction.repositoryUpdate',
-    () => repository.updateTransaction(input, undefined, { transactionLinkDeleteIds }),
+    () => repository.updateTransaction(input, undefined, { transactionLinkBatch, transactionLinkDeleteIds }),
     getNewTransactionInputPerfMetadata(input),
   );
   await refresh();
@@ -2445,14 +2523,17 @@ async function persistUpdateTransactionWithFullRefresh({
 
 async function persistOptimisticEditTransaction({
   input,
+  optimisticLinkRecords,
   optimisticRecords,
   refresh,
   repository,
   rollback,
   rollbackPatch,
   setError,
+  transactionLinkBatch,
 }: {
   input: UpdateTransactionInput;
+  optimisticLinkRecords?: TransactionLinkBatchPersistenceRecords;
   optimisticRecords: UpdateTransactionPersistenceRecords;
   refresh: () => Promise<void>;
   repository: FinanceRepository;
@@ -2462,6 +2543,7 @@ async function persistOptimisticEditTransaction({
     records: UpdateTransactionPersistenceRecords,
   ) => AppSnapshot | null;
   setError: (message: string) => void;
+  transactionLinkBatch?: TransactionLinkBatchInput;
 }): Promise<void> {
   let transactionPersisted = false;
 
@@ -2471,7 +2553,10 @@ async function persistOptimisticEditTransaction({
       async () => {
         const records = await timeDevPerfAsync(
           'rainproofData.updateTransaction.repositoryUpdate',
-          () => repository.updateTransaction(input, optimisticRecords),
+          () => repository.updateTransaction(input, optimisticRecords, {
+            transactionLinkBatch,
+            transactionLinkRecords: optimisticLinkRecords,
+          }),
           getNewTransactionInputPerfMetadata(input),
         );
         transactionPersisted = true;
@@ -2700,6 +2785,10 @@ async function persistOptimisticAddTransaction({
     }
     setError(message);
   }
+}
+
+function hasTransactionLinkBatchChanges(input?: TransactionLinkBatchInput): boolean {
+  return !!input && (input.toAdd.length > 0 || input.toUpdate.length > 0 || input.deleteIds.length > 0);
 }
 
 async function persistOptimisticUpcomingPaymentDueDate({

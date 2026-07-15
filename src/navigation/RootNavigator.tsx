@@ -47,7 +47,6 @@ import {
   CategorySelectRouteScreen,
   EditBudgetRouteScreen,
   EditTransactionTemplateRouteScreen,
-  LinkTransactionRouteScreen,
   RainyDayFundRouteScreen,
   StatsDrilldownRouteScreen,
 } from './RootStackScreens';
@@ -78,7 +77,6 @@ export function RootNavigator() {
             <RootStack.Screen name="EditAccount" component={EditAccountRouteScreen} />
             <RootStack.Screen name="AddTransaction" component={AddTransactionRouteScreen} />
             <RootStack.Screen name="EditTransaction" component={EditTransactionRouteScreen} />
-            <RootStack.Screen name="LinkTransaction" component={LinkTransactionRouteScreen} />
             <RootStack.Screen
               name="StatsDrilldown"
               component={StatsDrilldownRouteScreen}

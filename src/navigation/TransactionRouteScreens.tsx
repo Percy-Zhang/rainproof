@@ -1,3 +1,6 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert } from 'react-native';
+
 import { useRainproofDataContext } from '../application/RainproofDataProvider';
 import {
   buildAddTransactionPrefillFromRecurringItem,
@@ -7,7 +10,6 @@ import { buildAddTransactionPrefillFromTemplate } from '../domain/transactionTem
 import type { AddTransactionDefaults, NewTransactionInput } from '../domain/types';
 import { AddTransactionScreen } from '../features/transactions/AddTransactionScreen';
 import { EditTransactionScreen } from '../features/transactions/EditTransactionScreen';
-import { LinkTransactionScreen } from '../features/transactions/LinkTransactionScreen';
 import {
   ComposerRouteScaffold,
   PREPARING_RAINPROOF_MESSAGE,
@@ -102,6 +104,25 @@ export function EditTransactionRouteScreen() {
   const { snapshot, actions } = useRainproofDataContext();
   const { transactionId } = route.params;
   const openCategorySelect = useOpenCategorySelect(navigation);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const allowRemovalRef = useRef(false);
+
+  useEffect(() => navigation.addListener('beforeRemove', (event) => {
+    if (!hasUnsavedChanges || allowRemovalRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+    confirmDiscardUnsavedTransactionChanges(() => {
+      allowRemovalRef.current = true;
+      navigation.dispatch(event.data.action);
+    });
+  }), [hasUnsavedChanges, navigation]);
+
+  const handleDone = useCallback(() => {
+    allowRemovalRef.current = true;
+    navigation.goBack();
+  }, [navigation]);
 
   if (!snapshot) {
     return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
@@ -114,32 +135,22 @@ export function EditTransactionRouteScreen() {
         transactionId={transactionId}
         onUpdateTransaction={actions.updateTransaction}
         onDeleteTransaction={actions.deleteTransaction}
-        onOpenTransactionLink={() => navigation.navigate('LinkTransaction', { transactionId })}
         onOpenCategorySelect={openCategorySelect}
         onCancel={() => navigation.goBack()}
-        onDone={() => navigation.goBack()}
+        onDirtyChange={setHasUnsavedChanges}
+        onDone={handleDone}
       />
     </ComposerRouteScaffold>
   );
 }
 
-export function LinkTransactionRouteScreen() {
-  const navigation = useRootStackNavigation();
-  const route = useRootStackRoute<'LinkTransaction'>();
-  const { snapshot, actions } = useRainproofDataContext();
-
-  if (!snapshot) {
-    return <RouteMessageShell message={PREPARING_RAINPROOF_MESSAGE} />;
-  }
-
-  return (
-    <ComposerRouteScaffold screenKey="linkTransaction">
-      <LinkTransactionScreen
-        snapshot={snapshot}
-        transactionId={route.params.transactionId}
-        onSaveTransactionLinkBatch={actions.saveTransactionLinkBatch}
-        onBack={() => navigation.goBack()}
-      />
-    </ComposerRouteScaffold>
+export function confirmDiscardUnsavedTransactionChanges(onDiscard: () => void) {
+  Alert.alert(
+    'Discard unsaved changes?',
+    'You have unsaved changes to this transaction. If you leave now, they will be lost.',
+    [
+      { text: 'Keep editing', style: 'cancel' },
+      { text: 'Discard', style: 'destructive', onPress: onDiscard },
+    ],
   );
 }

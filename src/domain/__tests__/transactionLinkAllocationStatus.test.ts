@@ -160,6 +160,41 @@ describe('transaction link allocation status', () => {
     }));
   });
 
+  it('uses net whole capacity while preserving opposite-sign mixed child capacity', () => {
+    const mixedLines = [
+      transactionLine({ id: 'salary', transactionId: 'paycheck', amountMinor: 380000 }),
+      transactionLine({ id: 'tax', transactionId: 'paycheck', amountMinor: -80000 }),
+    ];
+    const taxLink = link({
+      id: 'tax-refund',
+      sourceTransactionId: 'income-2',
+      targetTransactionId: 'paycheck',
+      targetLineId: 'tax',
+      amountMinor: 50000,
+    });
+
+    expect(getTransactionLinkAllocationStatus({
+      transactionId: 'paycheck',
+      currencyCode: 'AUD',
+      side: 'source',
+      lines: mixedLines,
+      persistedLinks: [],
+    })).toEqual(expect.objectContaining({ originalMinor: 300000, remainingMinor: 300000 }));
+    expect(getTransactionLineLinkAllocationStatus({
+      transactionId: 'paycheck',
+      lineId: 'tax',
+      currencyCode: 'AUD',
+      side: 'target',
+      lines: mixedLines,
+      persistedLinks: [taxLink],
+    })).toEqual(expect.objectContaining({
+      originalMinor: 80000,
+      allocatedMinor: 50000,
+      parentRemainingMinor: 30000,
+      remainingMinor: 30000,
+    }));
+  });
+
   it('applies persisted updates as replacements instead of double-counting them', () => {
     const draftChanges: TransactionLinkBatchInput = {
       deleteIds: [],

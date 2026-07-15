@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler } from 'react-native';
 
 import {
@@ -36,12 +36,14 @@ import {
   getTransactionEditDraftTotalMinor,
   getTransactionEditLinkSavePlan,
   getTransferAmountCurrencyCode,
+  hasMeaningfulTransactionEditChanges,
   isOutsideAccountId,
   type TransactionEditDraft,
   type TransactionEditSplitLineDraft,
 } from '../../domain/transactionEdit';
 import type {
   AppSnapshot,
+  TransactionLinkBatchInput,
   TransactionKind,
   UpdateTransactionInput,
 } from '../../domain/types';
@@ -61,7 +63,11 @@ type UseEditTransactionControllerOptions = {
   transactionId: string;
   onUpdateTransaction: (
     input: UpdateTransactionInput,
-    options?: { optimistic?: boolean; transactionLinkDeleteIds?: string[] },
+    options?: {
+      optimistic?: boolean;
+      transactionLinkBatch?: TransactionLinkBatchInput;
+      transactionLinkDeleteIds?: string[];
+    },
   ) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
   onOpenCategorySelect: (
@@ -85,6 +91,14 @@ export function useEditTransactionController({
   const [page, setPage] = useState<EditTransactionPage>('form');
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [transactionLinkDraftChanges, setTransactionLinkDraftChanges] = useState<TransactionLinkBatchInput>({
+    toAdd: [],
+    toUpdate: [],
+    deleteIds: [],
+  });
+  const originalDraftRef = useRef<TransactionEditDraft | null>(null);
+  const loadedTransactionIdRef = useRef<string | null>(null);
+  const saveInFlightRef = useRef(false);
   const {
     closePicker,
     openSourceAccountPicker,
@@ -165,14 +179,31 @@ export function useEditTransactionController({
     : '';
   const selectedCategory = draft?.categoryId ? getCategory(draft.categoryId, categories) : getDefaultCategoryForKind(draft?.kind ?? 'expense', categories);
   const canSave = draft ? canBuildTransactionUpdateInput(draft, snapshot.accounts) : false;
+  const hasUnsavedChanges = useMemo(() => hasMeaningfulTransactionEditChanges({
+    accounts: snapshot.accounts,
+    currentDraft: draft,
+    originalDraft: originalDraftRef.current,
+    transactionLinkDraftChanges,
+  }), [draft, snapshot.accounts, transactionLinkDraftChanges]);
 
   useEffect(() => {
+    setTransactionLinkDraftChanges({ toAdd: [], toUpdate: [], deleteIds: [] });
+  }, [transactionId]);
+
+  useEffect(() => {
+    if (loadedTransactionIdRef.current === transactionId) {
+      return;
+    }
     setConfirmDelete(false);
     setPage('form');
     try {
-      setDraft(createTransactionEditDraft(snapshot, transactionId));
+      const initialDraft = createTransactionEditDraft(snapshot, transactionId);
+      originalDraftRef.current = initialDraft;
+      loadedTransactionIdRef.current = transactionId;
+      setDraft(initialDraft);
       setError('');
     } catch (caught) {
+      originalDraftRef.current = null;
       setDraft(null);
       setError(caught instanceof Error ? caught.message : 'Could not load transaction.');
     }
@@ -411,7 +442,7 @@ export function useEditTransactionController({
   }
 
   async function save() {
-    if (!draft) {
+    if (!draft || saveInFlightRef.current) {
       return;
     }
 
@@ -420,28 +451,30 @@ export function useEditTransactionController({
       return;
     }
 
+    saveInFlightRef.current = true;
     try {
       const saveStartedAt = Date.now();
       const input = buildTransactionUpdateInput(draft, snapshot.accounts);
       const linkSavePlan = getTransactionEditLinkSavePlan({
+        draftChanges: transactionLinkDraftChanges,
         input,
         transactionId,
         transactionLinks: snapshot.transactionLinks,
       });
-      if (linkSavePlan.toAdd.length || linkSavePlan.toUpdate.length) {
-        throw new Error('Transaction edit link reconciliation produced unsupported link changes.');
-      }
-      const hasLinkSavePlanChanges = linkSavePlan.deleteIds.length > 0;
+      const hasLinkSavePlanChanges = linkSavePlan.toAdd.length > 0 ||
+        linkSavePlan.toUpdate.length > 0 ||
+        linkSavePlan.deleteIds.length > 0;
 
       await onUpdateTransaction(input, {
-        optimistic: !hasLinkSavePlanChanges,
-        transactionLinkDeleteIds: linkSavePlan.deleteIds,
+        optimistic: true,
+        transactionLinkBatch: hasLinkSavePlanChanges ? linkSavePlan : undefined,
       });
       logDevPerfDuration('editTransactionController.updateAccepted', saveStartedAt);
 
       logDevPerfDuration('editTransactionController.closeRequested', saveStartedAt);
       onDone();
     } catch (caught) {
+      saveInFlightRef.current = false;
       setError(caught instanceof Error ? caught.message : 'Could not save transaction.');
     }
   }
@@ -533,6 +566,7 @@ export function useEditTransactionController({
     getEditableSplitLines: getEditableTransactionEditSplitLines,
     getSplitTotalMinor: getTransactionEditDraftTotalMinor,
     groupSuggestions,
+    hasUnsavedChanges,
     handleNativePickerChange,
     isCrossCurrencyTransfer,
     itemHistory,
@@ -557,9 +591,11 @@ export function useEditTransactionController({
     setPage,
     showCurrencyCodes,
     targetAmountCurrencyCode,
+    transactionLinkDraftChanges,
     crossCurrencyTransferRateLabel,
     toAccount,
     transactionExists,
+    setTransactionLinkDraftChanges,
     updateDraft,
     updateSplitLine,
   };

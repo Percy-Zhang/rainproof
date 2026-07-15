@@ -6,9 +6,10 @@ import {
   getEditableTransactionEditSplitLines,
   getTransactionEditDraftTotalMinor,
   getTransactionEditLinkSavePlan,
+  hasMeaningfulTransactionEditChanges,
   OUTSIDE_ACCOUNT_ID,
 } from '../transactionEdit';
-import type { Account, AppSnapshot, Transaction, TransactionLine, TransactionLink } from '../types';
+import type { Account, AppSnapshot, Transaction, TransactionLine, TransactionLink, TransactionLinkBatchInput } from '../types';
 
 const accounts: Account[] = [
   account('a1', 'Everyday', 'AUD'),
@@ -115,6 +116,60 @@ function snapshot(kind: Transaction['kind'], lines: TransactionLine[]): AppSnaps
 }
 
 describe('transaction edit helpers', () => {
+  it('detects meaningful transaction and link draft changes without representation-only false positives', () => {
+    const originalDraft = createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1');
+    const emptyLinks: TransactionLinkBatchInput = { toAdd: [], toUpdate: [], deleteIds: [] };
+    const hasChanges = (currentDraft: typeof originalDraft, transactionLinkDraftChanges = emptyLinks) =>
+      hasMeaningfulTransactionEditChanges({
+        accounts,
+        currentDraft,
+        originalDraft,
+        transactionLinkDraftChanges,
+      });
+
+    expect(hasChanges(originalDraft)).toBe(false);
+    expect(hasChanges({ ...originalDraft, amount: '12' })).toBe(false);
+    expect(hasChanges({ ...originalDraft, amount: '13.00' })).toBe(true);
+    expect(hasChanges({ ...originalDraft, title: 'Changed' })).toBe(true);
+    expect(hasChanges({ ...originalDraft, date: '2026-05-27' })).toBe(true);
+    expect(hasChanges({ ...originalDraft, accountId: 'a2' })).toBe(true);
+    expect(hasChanges(originalDraft, { ...emptyLinks, deleteIds: ['link-1'] })).toBe(true);
+    expect(hasChanges(originalDraft, { ...emptyLinks, toAdd: [{
+      sourceTransactionId: 'income-1',
+      targetTransactionId: 'tx-1',
+      sourceLineId: null,
+      targetLineId: null,
+      linkType: 'refund',
+      amountMinor: 1200,
+      currencyCode: 'AUD',
+    }] })).toBe(true);
+  });
+
+  it('detects split edits and clears dirty state when the original split is restored', () => {
+    const originalDraft = createTransactionEditDraft(snapshot('expense', [
+      line({ id: 'line-1', amountMinor: -700, note: 'Food' }),
+      line({ id: 'line-2', amountMinor: -500, note: 'Drink' }),
+    ]), 'tx-1');
+    const changedDraft = {
+      ...originalDraft,
+      splitLines: originalDraft.splitLines?.map((item) =>
+        item.id === 'line-2' ? { ...item, amount: '6.00' } : item),
+    };
+
+    expect(hasMeaningfulTransactionEditChanges({
+      accounts,
+      currentDraft: changedDraft,
+      originalDraft,
+      transactionLinkDraftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
+    })).toBe(true);
+    expect(hasMeaningfulTransactionEditChanges({
+      accounts,
+      currentDraft: { ...changedDraft, splitLines: originalDraft.splitLines },
+      originalDraft,
+      transactionLinkDraftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
+    })).toBe(false);
+  });
+
   it('builds an edited expense line with new account/category/amount', () => {
     const draft = createTransactionEditDraft(snapshot('expense', [line({})]), 'tx-1');
     const input = buildTransactionUpdateInput(
@@ -791,6 +846,51 @@ describe('transaction edit helpers', () => {
       transactionId: 'tx-1',
       transactionLinks: [link({ sourceLineId: 'linked-line', amountMinor: 2000 })],
     })).toThrow('Cannot remove or change a linked split line. Unlink it first.');
+  });
+
+  it('preserves opposite-kind mixed split endpoints when their line sign remains valid', () => {
+    const netIncomeInput = {
+      id: 'tx-1',
+      kind: 'income' as const,
+      title: 'Paycheck',
+      datetime: '2026-05-17T00:00:00.000Z',
+      lines: [
+        { id: 'salary-line', accountId: 'acct-1', amountMinor: 380000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'salary' },
+        { id: 'tax-line', accountId: 'acct-1', amountMinor: -80000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+      ],
+    };
+    expect(getTransactionEditLinkSavePlan({
+      input: netIncomeInput,
+      transactionId: 'tx-1',
+      transactionLinks: [link({
+        id: 'tax-refund',
+        sourceTransactionId: 'income-2',
+        targetTransactionId: 'tx-1',
+        targetLineId: 'tax-line',
+        amountMinor: 50000,
+      })],
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
+
+    const netExpenseInput = {
+      ...netIncomeInput,
+      kind: 'expense' as const,
+      title: 'Mixed expense',
+      lines: [
+        { id: 'purchase-line', accountId: 'acct-1', amountMinor: -80000, currencyCode: 'AUD', categoryId: 'food', subcategoryId: 'groceries' },
+        { id: 'refund-line', accountId: 'acct-1', amountMinor: 30000, currencyCode: 'AUD', categoryId: 'income', subcategoryId: 'reimbursement' },
+      ],
+    };
+    expect(getTransactionEditLinkSavePlan({
+      input: netExpenseInput,
+      transactionId: 'tx-1',
+      transactionLinks: [link({
+        id: 'refund-use',
+        sourceTransactionId: 'tx-1',
+        sourceLineId: 'refund-line',
+        targetTransactionId: 'expense-2',
+        amountMinor: 20000,
+      })],
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
   });
 
   it('rejects a kind change regardless of source link order', () => {

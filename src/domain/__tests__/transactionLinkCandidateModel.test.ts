@@ -5,7 +5,11 @@ import {
   deriveIncomeLinkSourceCandidateViews,
   getDefaultLinkAllocationAmountMinor,
   getLinkAllocationEditableMaximumMinor,
+  getTransactionLinkCandidateStatusBuckets,
+  getTransactionLinkSourceOptionViews,
+  getTransactionLinkTargetScopeViews,
   getTransactionLinkTargetOptionViews,
+  prepareIncomeLinkSourceCandidateViews,
 } from '../transactionLinkCandidateModel';
 import { getTransactionLinkAllocationStatus } from '../transactionLinkAllocationStatus';
 import type { Account, Transaction, TransactionLine, TransactionLink, TransactionLinkBatchInput } from '../types';
@@ -68,7 +72,6 @@ describe('transaction link candidate model', () => {
       snapshot,
       currencyCode: 'AUD',
       currentTransaction: snapshot.transactions.find((item) => item.id === 'expense-current')!,
-      desiredAmountMinor: 5500,
       draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
       filter: 'open',
       query: 'partial',
@@ -77,34 +80,92 @@ describe('transaction link candidate model', () => {
       snapshot,
       currencyCode: 'AUD',
       currentTransaction: snapshot.transactions.find((item) => item.id === 'expense-current')!,
-      desiredAmountMinor: 5500,
       draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
       filter: 'partial',
       query: 'partial',
     }).map((candidate) => candidate.transaction.id)).toEqual(['income-partial']);
   });
 
-  it('ranks exact usable capacity first, then amount proximity, with deterministic date and id tie-breaks', () => {
+  it('precomputes stable status buckets and candidate icon identity', () => {
+    const snapshot = sourceCandidateSnapshot();
+    snapshot.transactionLinks = [
+      link({ id: 'partial-link', sourceTransactionId: 'income-partial', amountMinor: 4000 }),
+      link({ id: 'settled-link', sourceTransactionId: 'income-settled', amountMinor: 3000 }),
+    ];
+    const prepared = prepareIncomeLinkSourceCandidateViews({
+      snapshot,
+      currencyCode: 'AUD',
+      currentTransaction: snapshot.transactions.find((item) => item.id === 'expense-current')!,
+      draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
+    });
+    const buckets = getTransactionLinkCandidateStatusBuckets(prepared);
+
+    expect(buckets.partial.map((candidate) => candidate.transaction.id)).toEqual(['income-partial']);
+    expect(buckets.partial[0].presentation.statusLabel).toBe('Linked $40.00 · Remaining $60.00');
+    expect(buckets.settled.map((candidate) => candidate.transaction.id)).toEqual(['income-settled']);
+    expect(buckets.open.map((candidate) => candidate.transaction.id)).not.toEqual(
+      expect.arrayContaining(['income-partial', 'income-settled']),
+    );
+    expect(buckets.all).toEqual(prepared);
+    expect(prepared[0]).toEqual(expect.objectContaining({
+      iconCategoryId: expect.any(String),
+      iconSubcategoryId: expect.any(String),
+      presentation: {
+        accountName: 'Everyday',
+        amountLabel: '+$55.00',
+        amountTone: 'positive',
+        dateLabel: 'Jul 12',
+        iconColor: expect.any(String),
+        iconName: expect.any(String),
+        parentLabel: 'Parent transaction',
+        statusLabel: 'Remaining $55.00',
+        title: 'Exact',
+      },
+    }));
+  });
+
+  it('sorts candidates with the same newest-first transaction ordering regardless of amount match', () => {
     const snapshot = sourceCandidateSnapshot();
     snapshot.transactions.push(transaction('income-exact-z', 'income', 'Exact Z', '2026-07-11T10:00:00.000Z'));
     snapshot.transactionLines.push(line('income-exact-z-line', 'income-exact-z', 5500));
     const first = deriveSourceCandidates(snapshot, { filter: 'open' });
     const second = deriveSourceCandidates({ ...snapshot, transactions: [...snapshot.transactions].reverse() }, { filter: 'open' });
 
-    expect(first[0].transaction.id).toBe('income-exact');
-    expect(first[0].exactCapacityMatch).toBe(true);
+    expect(first.map((item) => item.transaction.id)).toEqual([
+      'income-exact',
+      'income-exact-z',
+      'income-close',
+      'income-partial',
+      'income-settled',
+      'income-old',
+    ]);
     expect(first.map((item) => item.transaction.id)).toEqual(second.map((item) => item.transaction.id));
-    expect(first.findIndex((item) => item.transaction.id === 'income-close'))
-      .toBeLessThan(first.findIndex((item) => item.transaction.id === 'income-old'));
   });
 
-  it('searches title, external party, amount, date, account, category, subcategory, note, and currency', () => {
+  it('uses Transactions created-time and id tie-breaks for equal datetimes', () => {
+    const snapshot = sourceCandidateSnapshot();
+    const datetime = '2026-07-14T10:00:00.000Z';
+    snapshot.transactions.push(
+      { ...transaction('income-tie-a', 'income', 'Tie A', datetime), createdAt: '2026-07-14T10:01:00.000Z' },
+      { ...transaction('income-tie-b', 'income', 'Tie B', datetime), createdAt: '2026-07-14T10:02:00.000Z' },
+      { ...transaction('income-tie-c', 'income', 'Tie C', datetime), createdAt: '2026-07-14T10:02:00.000Z' },
+    );
+    snapshot.transactionLines.push(
+      line('income-tie-a-line', 'income-tie-a', 1000),
+      line('income-tie-b-line', 'income-tie-b', 1000),
+      line('income-tie-c-line', 'income-tie-c', 1000),
+    );
+
+    expect(deriveSourceCandidates(snapshot, { filter: 'open' }).slice(0, 3).map((item) => item.transaction.id))
+      .toEqual(['income-tie-c', 'income-tie-b', 'income-tie-a']);
+  });
+
+  it('searches title, external party, amount, account, category, subcategory, note, and currency', () => {
     const snapshot = expenseCandidateSnapshot();
     const queries = [
       'friend dinner',
       'alice',
       '55.00',
-      '12 jul',
       'holiday wallet',
       'food',
       'restaurants',
@@ -116,6 +177,22 @@ describe('transaction link candidate model', () => {
       expect(deriveTargetCandidates(snapshot, query).map((candidate) => candidate.transaction.id))
         .toContain('expense-search');
     }
+  });
+
+  it('does not match date text while retaining matching transaction text', () => {
+    const snapshot = expenseCandidateSnapshot();
+    snapshot.transactions.push(
+      transaction('expense-june-date', 'expense', 'Groceries', '2026-06-12T10:00:00.000Z'),
+      transaction('expense-jun-name', 'expense', 'Lunch with Jun', '2026-05-12T10:00:00.000Z'),
+    );
+    snapshot.transactionLines.push(
+      line('expense-june-date-line', 'expense-june-date', -1200),
+      line('expense-jun-name-line', 'expense-jun-name', -1800),
+    );
+
+    expect(deriveTargetCandidates(snapshot, 'Jun').map((candidate) => candidate.transaction.id))
+      .toEqual(['expense-jun-name']);
+    expect(deriveTargetCandidates(snapshot, '12 Jun')).toEqual([]);
   });
 
   it('keeps older results beyond twelve discoverable without an arbitrary domain cap', () => {
@@ -180,8 +257,17 @@ describe('transaction link candidate model', () => {
       draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
     });
 
-    expect(options.find((option) => option.targetLineId === null)?.status).toEqual(
-      expect.objectContaining({ allocatedMinor: 5000, remainingMinor: 5000 }),
+    expect(options.map((option) => option.targetLineId)).toEqual(['food-line', 'drinks-line']);
+    const scopes = getTransactionLinkTargetScopeViews({
+      transaction: expense,
+      snapshot: { transactionLines, transactionLinks },
+      draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
+    });
+    expect(scopes.find((scope) => scope.targetLineId === null)).toEqual(
+      expect.objectContaining({
+        selectable: false,
+        status: expect.objectContaining({ allocatedMinor: 5000, remainingMinor: 5000 }),
+      }),
     );
     expect(options.find((option) => option.targetLineId === 'food-line')?.status).toEqual(
       expect.objectContaining({ directAllocatedMinor: 2000, wholeScopeAllocatedMinor: 3000, remainingMinor: 4000 }),
@@ -189,6 +275,90 @@ describe('transaction link candidate model', () => {
     expect(options.find((option) => option.targetLineId === 'drinks-line')?.status).toEqual(
       expect.objectContaining({ directAllocatedMinor: 0, wholeScopeAllocatedMinor: 3000, remainingMinor: 4000 }),
     );
+  });
+
+  it('discovers a negative split line inside a net-positive parent and aggregates its status', () => {
+    const snapshot = expenseCandidateSnapshot();
+    snapshot.transactions.push(transaction('paycheck', 'income', 'Paycheck'));
+    snapshot.transactionLines.push(
+      line('salary-line', 'paycheck', 380000, { note: 'Salary' }),
+      line('tax-line', 'paycheck', -80000, { note: 'Tax withheld' }),
+    );
+
+    const candidate = deriveExpenseCandidates(snapshot, { filter: 'open' })
+      .find((item) => item.transaction.id === 'paycheck');
+
+    expect(candidate).toEqual(expect.objectContaining({
+      lineCount: 2,
+      parentKind: 'mixed',
+      selectable: false,
+      signedAmountMinor: -80000,
+      status: expect.objectContaining({ originalMinor: 80000, remainingMinor: 80000, status: 'unlinked' }),
+    }));
+
+    const options = getTransactionLinkTargetOptionViews({
+      transaction: candidate!.transaction,
+      currencyCode: 'AUD',
+      snapshot,
+      draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
+    });
+    expect(options.map((option) => option.targetLineId)).toEqual(['tax-line']);
+    expect(options[0]).toEqual(expect.objectContaining({ amountMinor: 80000, eligible: true }));
+
+    snapshot.transactionLinks = [link({
+      id: 'tax-allocation',
+      sourceTransactionId: 'income-current',
+      targetTransactionId: 'paycheck',
+      targetLineId: 'tax-line',
+      amountMinor: 50000,
+    })];
+    expect(deriveExpenseCandidates(snapshot, { filter: 'open' }).map((item) => item.transaction.id))
+      .not.toContain('paycheck');
+    expect(deriveExpenseCandidates(snapshot, { filter: 'partial' }).find((item) => item.transaction.id === 'paycheck'))
+      .toEqual(expect.objectContaining({ status: expect.objectContaining({ remainingMinor: 30000 }) }));
+
+    snapshot.transactionLinks = [{ ...snapshot.transactionLinks[0], amountMinor: 80000 }];
+    expect(deriveExpenseCandidates(snapshot, { filter: 'partial' }).map((item) => item.transaction.id))
+      .not.toContain('paycheck');
+    expect(deriveExpenseCandidates(snapshot, { filter: 'settled' }).find((item) => item.transaction.id === 'paycheck'))
+      .toEqual(expect.objectContaining({ status: expect.objectContaining({ remainingMinor: 0, status: 'settled' }) }));
+    expect(deriveExpenseCandidates(snapshot, { filter: 'all' }).map((item) => item.transaction.id))
+      .toContain('paycheck');
+  });
+
+  it('discovers a positive split line inside a net-negative parent', () => {
+    const snapshot = sourceCandidateSnapshot();
+    snapshot.transactions.push(transaction('mixed-expense', 'expense', 'Mixed expense'));
+    snapshot.transactionLines.push(
+      line('purchase-line', 'mixed-expense', -80000),
+      line('refund-line', 'mixed-expense', 30000, { note: 'Refund portion' }),
+    );
+
+    const candidate = deriveSourceCandidates(snapshot, { filter: 'open' })
+      .find((item) => item.transaction.id === 'mixed-expense');
+
+    expect(candidate).toEqual(expect.objectContaining({
+      lineCount: 2,
+      parentKind: 'mixed',
+      selectable: false,
+      signedAmountMinor: 30000,
+      status: expect.objectContaining({ originalMinor: 30000, remainingMinor: 30000 }),
+    }));
+    expect(getTransactionLinkSourceOptionViews({
+      transaction: candidate!.transaction,
+      currencyCode: 'AUD',
+      snapshot,
+      draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
+    }).map((option) => option.sourceLineId)).toEqual(['refund-line']);
+  });
+
+  it('keeps transfer parents out of scope-aware candidate discovery', () => {
+    const snapshot = expenseCandidateSnapshot();
+    snapshot.transactions.push(transaction('transfer-parent', 'transfer', 'Transfer'));
+    snapshot.transactionLines.push(line('transfer-target', 'transfer-parent', -5500));
+
+    expect(deriveExpenseCandidates(snapshot, { filter: 'all' }).map((item) => item.transaction.id))
+      .not.toContain('transfer-parent');
   });
 });
 
@@ -200,7 +370,6 @@ function deriveSourceCandidates(
     snapshot,
     currencyCode: 'AUD',
     currentTransaction: snapshot.transactions.find((item) => item.id === 'expense-current')!,
-    desiredAmountMinor: 5500,
     draftChanges: overrides.draftChanges ?? { toAdd: [], toUpdate: [], deleteIds: [] },
     filter: overrides.filter ?? 'open',
     query: '',
@@ -215,7 +384,6 @@ function deriveExpenseCandidates(
     snapshot,
     currencyCode: 'AUD',
     currentTransaction: snapshot.transactions.find((item) => item.id === 'income-current')!,
-    desiredAmountMinor: 5500,
     draftChanges: { toAdd: [], toUpdate: [], deleteIds: [] },
     filter: overrides.filter ?? 'all',
     query: overrides.query ?? '',

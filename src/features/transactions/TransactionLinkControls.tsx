@@ -1,4 +1,6 @@
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useCallback, useRef } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { formatMoney } from '../../domain/money';
 import type {
@@ -8,7 +10,6 @@ import type {
 import type { TransactionLinkCandidateFilter } from '../../domain/transactionLinkCandidateModel';
 import { sharedStyles } from '../../theme/sharedStyles';
 import { colors, spacing, typography } from '../../theme/tokens';
-import { InlineField } from './TransactionFormComponents';
 
 export function LinkAllocationSummary({ status }: { status: ScopedTransactionLinkAllocationStatus }) {
   const source = status.side === 'source';
@@ -47,67 +48,62 @@ export function TransactionLinkCandidateFilterControl({ value, onChange }: {
     { label: 'All', value: 'all' },
   ];
   return (
-    <View style={styles.segmentedRow}>
-      {filters.map((filter) => {
-        const selected = filter.value === value;
-        return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityState={{ selected }}
-            key={filter.value}
-            onPress={() => onChange(filter.value)}
-            style={({ pressed }) => [styles.segment, selected && styles.filterSelected, pressed && sharedStyles.pressed]}
-          >
-            <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{filter.label}</Text>
-          </Pressable>
-        );
-      })}
+    <View>
+      <View style={styles.segmentedRow}>
+        {filters.map((filter) => {
+          const selected = filter.value === value;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              key={filter.value}
+              onPress={() => onChange(filter.value)}
+              style={({ pressed }) => [styles.segment, selected && styles.filterSelected, pressed && sharedStyles.pressed]}
+            >
+              <Text style={[styles.segmentText, selected && styles.segmentTextSelected]}>{filter.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
     </View>
   );
 }
 
-export function LinkAllocationAmountEditor({
-  amount,
-  currencyCode,
-  quickActionLabel,
-  onChangeAmount,
-  onRemove,
-  onUseMaximum,
-}: {
-  amount: string;
-  currencyCode: string;
-  quickActionLabel: string;
-  onChangeAmount: (amount: string) => void;
-  onRemove?: () => void;
-  onUseMaximum: () => void;
+export function TransactionLinkSearchField({ value, onChange }: {
+  value: string;
+  onChange: (value: string) => void;
 }) {
+  const inputRef = useRef<TextInput>(null);
+  const handleClear = useCallback(() => {
+    onChange('');
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [onChange]);
+
   return (
-    <View style={styles.amountEditor}>
-      <InlineField
-        label="Allocate"
-        value={amount}
-        onChange={onChangeAmount}
-        placeholder="0.00"
-        keyboardType="decimal-pad"
-        rightLabel={currencyCode}
-        selectAllOnFocus
-      />
-      <View style={styles.editorDivider} />
-      <View style={styles.editorActions} testID="link-allocation-actions">
-        <Pressable
-          accessibilityRole="button"
-          onPress={onUseMaximum}
-          style={({ pressed }) => [styles.quickAction, pressed && sharedStyles.pressed]}
-        >
-          <Text style={styles.quickActionText}>{quickActionLabel}</Text>
-        </Pressable>
-        {onRemove ? (
+    <View style={styles.searchBlock}>
+      <Text style={styles.searchLabel}>Search</Text>
+      <View style={styles.searchInputContainer}>
+        <TextInput
+          ref={inputRef}
+          accessibilityLabel="Search transactions"
+          autoCapitalize="none"
+          autoCorrect={false}
+          onChangeText={onChange}
+          placeholder="Search transactions"
+          placeholderTextColor={`${colors.muted}99`}
+          returnKeyType="search"
+          style={styles.searchInput}
+          value={value}
+        />
+        {value.length ? (
           <Pressable
+            accessibilityLabel="Clear transaction search"
             accessibilityRole="button"
-            onPress={onRemove}
-            style={({ pressed }) => [styles.removeAction, pressed && sharedStyles.pressed]}
+            hitSlop={4}
+            onPress={handleClear}
+            style={({ pressed }) => [styles.searchClearButton, pressed && sharedStyles.pressed]}
           >
-            <Text style={styles.removeActionText}>Remove</Text>
+            <Ionicons name="close" size={20} color={colors.muted} />
           </Pressable>
         ) : null}
       </View>
@@ -131,39 +127,9 @@ function formatAllocationStatus(status: TransactionLinkAllocationState): string 
 }
 
 const styles = StyleSheet.create({
-  amountEditor: { gap: spacing.sm },
   contextText: { color: colors.muted, fontSize: typography.small, fontWeight: '700' },
   filterSelected: { backgroundColor: colors.primaryDark },
   invalidText: { color: colors.danger },
-  quickAction: {
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    borderColor: colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 36,
-    paddingHorizontal: spacing.sm,
-  },
-  quickActionText: { color: colors.primaryDark, fontSize: typography.small, fontWeight: '900' },
-  editorActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'space-between',
-  },
-  editorDivider: { backgroundColor: colors.faint, height: StyleSheet.hairlineWidth },
-  removeAction: {
-    alignItems: 'center',
-    borderColor: colors.danger,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 36,
-    minWidth: 88,
-    paddingHorizontal: spacing.sm,
-  },
-  removeActionText: { color: colors.danger, fontSize: typography.small, fontWeight: '900' },
   segment: {
     alignItems: 'center',
     borderRadius: 6,
@@ -183,6 +149,32 @@ const styles = StyleSheet.create({
   },
   segmentText: { color: colors.muted, fontSize: typography.small, fontWeight: '800' },
   segmentTextSelected: { color: colors.surface },
+  searchBlock: { gap: spacing.xs },
+  searchClearButton: {
+    alignItems: 'center',
+    height: 36,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 4,
+    top: 4,
+    width: 36,
+  },
+  searchInput: {
+    backgroundColor: colors.surface,
+    borderColor: colors.faint,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: colors.ink,
+    fontSize: typography.body,
+    height: 44,
+    includeFontPadding: false,
+    paddingLeft: spacing.md,
+    paddingRight: 48,
+    paddingVertical: 0,
+    textAlignVertical: 'center',
+  },
+  searchInputContainer: { position: 'relative' },
+  searchLabel: { color: colors.muted, fontSize: typography.small, fontWeight: '800', textTransform: 'uppercase' },
   statusText: { color: colors.primaryDark, fontSize: typography.small, fontWeight: '900' },
   summaryBlock: { gap: spacing.xs },
   summaryCell: {

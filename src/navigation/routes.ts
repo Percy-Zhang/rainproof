@@ -53,7 +53,6 @@ export type RootStackParamList = {
   EditAccount: { accountId: string };
   AddTransaction: { templateId?: string; upcomingPaymentId?: string; dashboardAccountIds?: string[] } | undefined;
   EditTransaction: { transactionId: string };
-  LinkTransaction: { transactionId: string };
   StatsDrilldown: {
     reportKind: StatsReportKind;
     categoryId: string;

@@ -139,9 +139,9 @@ describe('transaction link allocation form helpers', () => {
     ]);
 
     expect(scopes).toEqual([
-      expect.objectContaining({ targetLineId: null, amountMinor: 5000 }),
-      expect.objectContaining({ targetLineId: 'food', amountMinor: 3000 }),
-      expect.objectContaining({ targetLineId: 'home', amountMinor: 2000 }),
+      expect.objectContaining({ targetLineId: null, amountMinor: 5000, selectable: false }),
+      expect.objectContaining({ targetLineId: 'food', amountMinor: 3000, selectable: true }),
+      expect.objectContaining({ targetLineId: 'home', amountMinor: 2000, selectable: true }),
     ]);
   });
 
@@ -165,7 +165,7 @@ describe('transaction link allocation form helpers', () => {
     ]);
   });
 
-  it('builds whole-source and split-line source options for expense-side linking', () => {
+  it('builds only split-line source options for new expense-side links', () => {
     const options = getTransactionLinkSourceOptions({
       transaction: transaction('income-1', 'income'),
       lines: [
@@ -176,13 +176,12 @@ describe('transaction link allocation form helpers', () => {
     });
 
     expect(options).toEqual([
-      expect.objectContaining({ sourceLineId: null, amountMinor: 5000 }),
       expect.objectContaining({ sourceLineId: 'salary', amountMinor: 3000 }),
       expect.objectContaining({ sourceLineId: 'bonus', amountMinor: 2000 }),
     ]);
   });
 
-  it('builds whole-target and split-line target options', () => {
+  it('builds only split-line target options for new links', () => {
     const options = getTransactionLinkTargetOptions({
       transaction: transaction('expense-1', 'expense'),
       lines: [
@@ -193,13 +192,54 @@ describe('transaction link allocation form helpers', () => {
     });
 
     expect(options).toEqual([
-      expect.objectContaining({ targetLineId: null, amountMinor: 5000 }),
       expect.objectContaining({ targetLineId: 'food', amountMinor: 3000, subcategoryId: 'groceries' }),
       expect.objectContaining({ targetLineId: 'home', amountMinor: 2000, subcategoryId: 'rent' }),
     ]);
   });
 
-  it('marks linked target options at the whole or split-line level', () => {
+  it('uses net amount for whole mixed endpoints while exposing opposite-kind child scopes', () => {
+    const netIncome = transaction('net-income', 'income');
+    const netIncomeLines = [
+      line({ id: 'salary', transactionId: netIncome.id, amountMinor: 380000 }),
+      line({ id: 'tax', transactionId: netIncome.id, amountMinor: -80000 }),
+    ];
+    expect(getTransactionLinkSourceOptions({
+      transaction: netIncome,
+      lines: netIncomeLines,
+      currencyCode: 'AUD',
+    }).map((option) => [option.sourceLineId, option.amountMinor])).toEqual([
+      ['salary', 380000],
+    ]);
+    expect(getTransactionLinkTargetOptions({
+      transaction: netIncome,
+      lines: netIncomeLines,
+      currencyCode: 'AUD',
+    }).map((option) => [option.targetLineId, option.amountMinor])).toEqual([
+      ['tax', 80000],
+    ]);
+
+    const netExpense = transaction('net-expense', 'expense');
+    const netExpenseLines = [
+      line({ id: 'purchase', transactionId: netExpense.id, amountMinor: -80000 }),
+      line({ id: 'refund', transactionId: netExpense.id, amountMinor: 30000 }),
+    ];
+    expect(getTransactionLinkTargetOptions({
+      transaction: netExpense,
+      lines: netExpenseLines,
+      currencyCode: 'AUD',
+    }).map((option) => [option.targetLineId, option.amountMinor])).toEqual([
+      ['purchase', 80000],
+    ]);
+    expect(getTransactionLinkSourceOptions({
+      transaction: netExpense,
+      lines: netExpenseLines,
+      currencyCode: 'AUD',
+    }).map((option) => [option.sourceLineId, option.amountMinor])).toEqual([
+      ['refund', 30000],
+    ]);
+  });
+
+  it('keeps historical whole links out of new options while marking linked split-line options', () => {
     const options = getTransactionLinkTargetOptions({
       transaction: transaction('expense-1', 'expense'),
       lines: [
@@ -214,10 +254,22 @@ describe('transaction link allocation form helpers', () => {
     });
 
     expect(options.map((option) => [option.targetLineId, option.isLinked])).toEqual([
-      [null, true],
       ['food', false],
       ['home', true],
     ]);
+  });
+
+  it('keeps a normal one-line parent selectable as a whole endpoint', () => {
+    expect(getTransactionLinkSourceOptions({
+      transaction: transaction('income-1', 'income'),
+      lines: [line({ id: 'income-line', transactionId: 'income-1', amountMinor: 5000 })],
+      currencyCode: 'AUD',
+    }).map((option) => option.sourceLineId)).toEqual([null]);
+    expect(getTransactionLinkTargetOptions({
+      transaction: transaction('expense-1', 'expense'),
+      lines: [line({ id: 'expense-line', transactionId: 'expense-1', amountMinor: -5000 })],
+      currencyCode: 'AUD',
+    }).map((option) => option.targetLineId)).toEqual([null]);
   });
 
   it('calculates selected-source allocated amount', () => {
@@ -322,6 +374,22 @@ describe('transaction link allocation form helpers', () => {
     expect(changes.toAdd).toEqual([
       expect.objectContaining({ sourceTransactionId: 'income-3', targetLineId: 'expense-line-3', amountMinor: 500 }),
     ]);
+  });
+
+  it('does not emit updates for unchanged accepted allocations', () => {
+    const existing = link({ amountMinor: 2000 });
+
+    expect(getTransactionLinkAllocationChanges({
+      sourceTransactionId: existing.sourceTransactionId,
+      existingLinks: [existing],
+      allocations: createTransactionLinkAllocationDrafts(existing.sourceTransactionId, [existing]),
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
+
+    expect(getExpenseTransactionLinkAllocationChanges({
+      targetTransactionId: existing.targetTransactionId,
+      existingLinks: [existing],
+      allocations: createExpenseTransactionLinkAllocationDrafts(existing.targetTransactionId, [existing]),
+    })).toEqual({ toAdd: [], toUpdate: [], deleteIds: [] });
   });
 
   it('rejects zero and negative allocation drafts instead of converting them to positive values', () => {

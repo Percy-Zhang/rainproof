@@ -79,11 +79,11 @@ export function validateTransactionLinkInput({
     throw new Error('Target transaction not found.');
   }
 
-  if (source.kind !== 'income') {
+  if (source.kind === 'transfer' || (!sourceLineId && source.kind !== 'income')) {
     throw new Error('Source transaction must be income.');
   }
 
-  if (target.kind !== 'expense') {
+  if (target.kind === 'transfer' || (!targetLineId && target.kind !== 'expense')) {
     throw new Error('Target transaction must be expense.');
   }
 

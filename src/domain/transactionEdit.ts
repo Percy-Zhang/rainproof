@@ -31,6 +31,7 @@ import {
   getTransactionLinkAllocationStatus,
   type TransactionLinkAllocationSide,
 } from './transactionLinkAllocationStatus';
+import { applyTransactionLinkBatchToLinks } from './transactionLinkAllocationForm';
 import type {
   Account,
   AppSnapshot,
@@ -335,6 +336,36 @@ export function canBuildTransactionUpdateInput(draft: TransactionEditDraft, acco
   }
 }
 
+export function hasMeaningfulTransactionEditChanges({
+  accounts,
+  currentDraft,
+  originalDraft,
+  transactionLinkDraftChanges,
+}: {
+  accounts: Account[];
+  currentDraft: TransactionEditDraft | null;
+  originalDraft: TransactionEditDraft | null;
+  transactionLinkDraftChanges: TransactionLinkBatchInput;
+}): boolean {
+  if (
+    transactionLinkDraftChanges.toAdd.length > 0 ||
+    transactionLinkDraftChanges.toUpdate.length > 0 ||
+    transactionLinkDraftChanges.deleteIds.length > 0
+  ) {
+    return true;
+  }
+  if (!currentDraft || !originalDraft) {
+    return currentDraft !== originalDraft;
+  }
+
+  try {
+    return JSON.stringify(buildTransactionUpdateInput(currentDraft, accounts)) !==
+      JSON.stringify(buildTransactionUpdateInput(originalDraft, accounts));
+  } catch {
+    return JSON.stringify(currentDraft) !== JSON.stringify(originalDraft);
+  }
+}
+
 export function getEditableTransactionEditSplitLines(
   current: TransactionEditDraft,
 ): TransactionEditSplitLineDraft[] {
@@ -368,18 +399,23 @@ export function getTransactionEditDraftTotalMinor(draft: Pick<TransactionEditDra
 }
 
 export function getTransactionEditLinkSavePlan({
+  draftChanges,
   input,
   transactionId,
   transactionLinks,
 }: {
+  draftChanges?: TransactionLinkBatchInput;
   input: UpdateTransactionInput;
   transactionId: string;
   transactionLinks: TransactionLink[];
 }): TransactionEditLinkSavePlan {
-  const sourceLinks = transactionLinks
+  const effectiveLinks = draftChanges
+    ? applyTransactionLinkBatchToLinks(transactionLinks, draftChanges)
+    : transactionLinks;
+  const sourceLinks = effectiveLinks
     .filter((link) => link.sourceTransactionId === transactionId)
     .sort(compareTransactionLinksById);
-  const targetLinks = transactionLinks
+  const targetLinks = effectiveLinks
     .filter((link) => link.targetTransactionId === transactionId)
     .sort(compareTransactionLinksById);
   const editedLines = input.lines.map((line, index) => ({
@@ -389,8 +425,8 @@ export function getTransactionEditLinkSavePlan({
     currencyCode: line.currencyCode,
   }));
   if (
-    (sourceLinks.length && input.kind !== 'income') ||
-    (targetLinks.length && input.kind !== 'expense')
+    (sourceLinks.some((link) => !link.sourceLineId) && input.kind !== 'income') ||
+    (targetLinks.some((link) => !link.targetLineId) && input.kind !== 'expense')
   ) {
     throw new Error('Unlink this transaction before changing its type.');
   }
@@ -407,29 +443,23 @@ export function getTransactionEditLinkSavePlan({
     throw new Error('Unlink this transaction before changing its linked currency or account scope.');
   }
 
-  const plan: TransactionEditLinkSavePlan = {
-    toAdd: [],
-    toUpdate: [],
-    deleteIds: [],
-  };
+  const plan: TransactionEditLinkSavePlan = draftChanges ?? { toAdd: [], toUpdate: [], deleteIds: [] };
 
-  if (input.kind === 'income') {
+  if (sourceLinks.length) {
     assertEditedTransactionLinkCapacity({
       transactionId,
       side: 'source',
       lines: editedLines,
-      transactionLinks,
-      draftChanges: plan,
+      transactionLinks: effectiveLinks,
     });
   }
 
-  if (input.kind === 'expense') {
+  if (targetLinks.length) {
     assertEditedTransactionLinkCapacity({
       transactionId,
       side: 'target',
       lines: editedLines,
-      transactionLinks,
-      draftChanges: plan,
+      transactionLinks: effectiveLinks,
     });
   }
 
@@ -460,11 +490,11 @@ function assertEditedTransactionLinkCapacity({
   side: TransactionLinkAllocationSide;
   lines: { id: string; transactionId: string; amountMinor: number; currencyCode: string }[];
   transactionLinks: TransactionLink[];
-  draftChanges: TransactionLinkBatchInput;
+  draftChanges?: TransactionLinkBatchInput;
 }): void {
   const retainedLinks = transactionLinks.filter((link) =>
     (side === 'source' ? link.sourceTransactionId : link.targetTransactionId) === transactionId &&
-    !draftChanges.deleteIds.includes(link.id));
+    !draftChanges?.deleteIds.includes(link.id));
   const currencyCodes = [...new Set(retainedLinks.map((link) => normalizeCurrencyCode(link.currencyCode)))].sort();
 
   for (const currencyCode of currencyCodes) {

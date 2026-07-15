@@ -252,52 +252,7 @@ export async function saveTransactionLinkBatchStorage(
   let persistedRecords: TransactionLinkBatchStorageRecords | null = null;
 
   await db.withTransactionAsync(async () => {
-    const validationState = await getTransactionLinkValidationStateForBatch(db, input);
-    const records = preparedRecords ?? createTransactionLinkBatchStorageRecords(input, validationState);
-    validatePreparedTransactionLinkBatchRecords(input, records, validationState);
-
-    for (const linkId of records.deletedLinkIds) {
-      await db.runAsync('DELETE FROM transaction_links WHERE id = ?', linkId);
-    }
-
-    for (const link of records.updatedLinks) {
-      await db.runAsync(
-        `UPDATE transaction_links
-         SET source_transaction_id = ?, target_transaction_id = ?, source_line_id = ?, target_line_id = ?,
-             link_type = ?, amount_minor = ?, currency_code = ?, updated_at = ?
-         WHERE id = ?`,
-        link.sourceTransactionId,
-        link.targetTransactionId,
-        link.sourceLineId ?? null,
-        link.targetLineId ?? null,
-        link.linkType,
-        link.amountMinor,
-        link.currencyCode,
-        link.updatedAt,
-        link.id,
-      );
-    }
-
-    for (const link of records.addedLinks) {
-      await db.runAsync(
-        `INSERT INTO transaction_links (
-          id, source_transaction_id, target_transaction_id, source_line_id, target_line_id,
-          link_type, amount_minor, currency_code, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        link.id,
-        link.sourceTransactionId,
-        link.targetTransactionId,
-        link.sourceLineId ?? null,
-        link.targetLineId ?? null,
-        link.linkType,
-        link.amountMinor,
-        link.currencyCode,
-        link.createdAt,
-        link.updatedAt,
-      );
-    }
-
-    persistedRecords = records;
+    persistedRecords = await saveTransactionLinkBatchInTransactionStorage(db, input, preparedRecords);
   });
 
   if (!persistedRecords) {
@@ -305,6 +260,59 @@ export async function saveTransactionLinkBatchStorage(
   }
 
   return persistedRecords;
+}
+
+export async function saveTransactionLinkBatchInTransactionStorage(
+  db: RepositoryDatabase,
+  input: TransactionLinkBatchInput,
+  preparedRecords?: TransactionLinkBatchStorageRecords,
+): Promise<TransactionLinkBatchStorageRecords> {
+  const validationState = await getTransactionLinkValidationStateForBatch(db, input);
+  const records = preparedRecords ?? createTransactionLinkBatchStorageRecords(input, validationState);
+  validatePreparedTransactionLinkBatchRecords(input, records, validationState);
+
+  for (const linkId of records.deletedLinkIds) {
+    await db.runAsync('DELETE FROM transaction_links WHERE id = ?', linkId);
+  }
+
+  for (const link of records.updatedLinks) {
+    await db.runAsync(
+      `UPDATE transaction_links
+       SET source_transaction_id = ?, target_transaction_id = ?, source_line_id = ?, target_line_id = ?,
+           link_type = ?, amount_minor = ?, currency_code = ?, updated_at = ?
+       WHERE id = ?`,
+      link.sourceTransactionId,
+      link.targetTransactionId,
+      link.sourceLineId ?? null,
+      link.targetLineId ?? null,
+      link.linkType,
+      link.amountMinor,
+      link.currencyCode,
+      link.updatedAt,
+      link.id,
+    );
+  }
+
+  for (const link of records.addedLinks) {
+    await db.runAsync(
+      `INSERT INTO transaction_links (
+        id, source_transaction_id, target_transaction_id, source_line_id, target_line_id,
+        link_type, amount_minor, currency_code, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      link.id,
+      link.sourceTransactionId,
+      link.targetTransactionId,
+      link.sourceLineId ?? null,
+      link.targetLineId ?? null,
+      link.linkType,
+      link.amountMinor,
+      link.currencyCode,
+      link.createdAt,
+      link.updatedAt,
+    );
+  }
+
+  return records;
 }
 
 export async function getTransactionLinksStorage(db: RepositoryDatabase): Promise<TransactionLink[]> {

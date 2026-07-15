@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 
 import {
   DEFAULT_TRANSACTION_LINK_CANDIDATE_FILTER,
@@ -8,11 +8,61 @@ import {
 
 export function useTransactionLinkCandidateDiscovery(active: boolean) {
   const [query, setQuery] = useState('');
-  const [filter, setFilter] = useState<TransactionLinkCandidateFilter>(DEFAULT_TRANSACTION_LINK_CANDIDATE_FILTER);
+  const [resultState, setResultState] = useState({
+    filter: DEFAULT_TRANSACTION_LINK_CANDIDATE_FILTER as TransactionLinkCandidateFilter,
+    visibleCount: TRANSACTION_LINK_CANDIDATE_PAGE_SIZE,
+  });
   const [preparationReady, setPreparationReady] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(TRANSACTION_LINK_CANDIDATE_PAGE_SIZE);
-  const requestedInput = useMemo(() => ({ filter, query }), [filter, query]);
-  const appliedInput = useDeferredValue(requestedInput);
+  const endReachedHandledRef = useRef(false);
+  const scrollIntentRef = useRef(false);
+  const appliedQuery = useDeferredValue(query);
+
+  const resetPagination = useCallback(() => {
+    scrollIntentRef.current = false;
+    endReachedHandledRef.current = false;
+    setResultState((current) => current.visibleCount === TRANSACTION_LINK_CANDIDATE_PAGE_SIZE
+      ? current
+      : { ...current, visibleCount: TRANSACTION_LINK_CANDIDATE_PAGE_SIZE });
+  }, []);
+
+  const updateQuery = useCallback((nextQuery: string) => {
+    resetPagination();
+    setQuery(nextQuery);
+  }, [resetPagination]);
+
+  const updateFilter = useCallback((nextFilter: TransactionLinkCandidateFilter) => {
+    scrollIntentRef.current = false;
+    endReachedHandledRef.current = false;
+    setResultState((current) => (
+      current.filter === nextFilter && current.visibleCount === TRANSACTION_LINK_CANDIDATE_PAGE_SIZE
+        ? current
+        : { filter: nextFilter, visibleCount: TRANSACTION_LINK_CANDIDATE_PAGE_SIZE }
+    ));
+  }, []);
+
+  const revealNextPage = useCallback((totalCount: number) => {
+    if (!scrollIntentRef.current || endReachedHandledRef.current) {
+      return;
+    }
+    setResultState((current) => {
+      if (!scrollIntentRef.current || endReachedHandledRef.current || current.visibleCount >= totalCount) {
+        scrollIntentRef.current = false;
+        endReachedHandledRef.current = true;
+        return current;
+      }
+      scrollIntentRef.current = false;
+      endReachedHandledRef.current = true;
+      return {
+        ...current,
+        visibleCount: Math.min(current.visibleCount + TRANSACTION_LINK_CANDIDATE_PAGE_SIZE, totalCount),
+      };
+    });
+  }, []);
+
+  const beginPaginationScroll = useCallback(() => {
+    scrollIntentRef.current = true;
+    endReachedHandledRef.current = false;
+  }, []);
 
   useEffect(() => {
     if (!active || preparationReady) {
@@ -39,17 +89,19 @@ export function useTransactionLinkCandidateDiscovery(active: boolean) {
   }, [active, preparationReady]);
 
   useEffect(() => {
-    setVisibleCount(TRANSACTION_LINK_CANDIDATE_PAGE_SIZE);
-  }, [appliedInput]);
+    resetPagination();
+  }, [appliedQuery, resetPagination]);
 
   return {
-    appliedInput,
-    filter,
+    appliedQuery,
+    beginPaginationScroll,
+    filter: resultState.filter,
     preparationReady,
     query,
-    setFilter,
-    setQuery,
-    setVisibleCount,
-    visibleCount,
+    resetPagination,
+    revealNextPage,
+    setFilter: updateFilter,
+    setQuery: updateQuery,
+    visibleCount: resultState.visibleCount,
   };
 }

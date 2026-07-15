@@ -22,8 +22,16 @@ import {
   type ExpenseLinkTargetCandidate,
   type IncomeLinkSourceCandidate,
 } from './transactionLinking';
+import { compareTransactionsDescending } from './aggregates';
+import { getAccountDisplayName } from './accountThemes';
+import { getSubcategoryColor, getSubcategoryIcon } from './categories';
+import { formatMoney, normalizeCurrencyCode } from './money';
+import {
+  formatTransactionShortDate,
+  getTransactionAmountTone,
+  type TransactionAmountTone,
+} from './transactionDisplay';
 import type {
-  Account,
   AppSnapshot,
   CurrencyCode,
   Transaction,
@@ -34,16 +42,38 @@ export const DEFAULT_TRANSACTION_LINK_CANDIDATE_FILTER = 'open' as const;
 export const TRANSACTION_LINK_CANDIDATE_PAGE_SIZE = 20;
 
 export type TransactionLinkCandidateFilter = 'open' | 'partial' | 'settled' | 'all';
+export type TransactionLinkCandidateParentKind = 'parent' | 'split' | 'mixed';
+export type TransactionLinkCandidatePresentation = {
+  accountName: string | null;
+  amountLabel: string;
+  amountTone: TransactionAmountTone;
+  dateLabel: string;
+  iconColor: string | null;
+  iconName: string | null;
+  parentLabel: string;
+  statusLabel: string;
+  title: string;
+};
 
 export type ExpenseLinkTargetCandidateView = ExpenseLinkTargetCandidate & {
-  exactCapacityMatch: boolean;
-  externalPartyMatch: boolean;
+  iconCategoryId: string | null;
+  iconSubcategoryId: string | null;
+  lineCount: number;
+  parentKind: TransactionLinkCandidateParentKind;
+  presentation: TransactionLinkCandidatePresentation;
+  selectable: boolean;
+  signedAmountMinor: number;
   status: ScopedTransactionLinkAllocationStatus;
 };
 
 export type IncomeLinkSourceCandidateView = IncomeLinkSourceCandidate & {
-  exactCapacityMatch: boolean;
-  externalPartyMatch: boolean;
+  iconCategoryId: string | null;
+  iconSubcategoryId: string | null;
+  lineCount: number;
+  parentKind: TransactionLinkCandidateParentKind;
+  presentation: TransactionLinkCandidatePresentation;
+  selectable: boolean;
+  signedAmountMinor: number;
   status: ScopedTransactionLinkAllocationStatus;
 };
 
@@ -63,11 +93,12 @@ export type TransactionLinkTargetOptionView = TransactionLinkTargetOption & {
   status: ScopedTransactionLinkAllocationStatus;
 };
 
+export type TransactionLinkCandidateStatusBuckets<T> = Record<TransactionLinkCandidateFilter, T[]>;
+
 type CandidateDerivationInput = {
   snapshot: Pick<AppSnapshot, 'accounts' | 'categories' | 'transactions' | 'transactionLines' | 'transactionLinks'>;
   currencyCode: CurrencyCode;
   currentTransaction: Transaction;
-  desiredAmountMinor: number;
   draftChanges: TransactionLinkBatchInput;
   filter: TransactionLinkCandidateFilter;
   query: string;
@@ -91,18 +122,16 @@ export function prepareExpenseLinkTargetCandidateViews({
   snapshot,
   currencyCode,
   currentTransaction,
-  desiredAmountMinor,
   draftChanges,
   statusContext,
 }: CandidatePreparationInput): ExpenseLinkTargetCandidateView[] {
+  const parentPresentations = createCandidateParentPresentationLookup(snapshot.transactionLines);
+  const presentationContext = createCandidatePresentationContext(snapshot);
   const context = statusContext ?? createTransactionLinkAllocationStatusContext({
     lines: snapshot.transactionLines,
     persistedLinks: snapshot.transactionLinks,
     draftChanges,
   });
-  const currentParties = getTransactionExternalParties(currentTransaction.id, snapshot.transactionLines);
-  const partiesByTransactionId = groupExternalPartiesByTransactionId(snapshot.transactionLines);
-
   return getExpenseLinkTargetCandidates({
     sourceTransactionId: currentTransaction.id,
     sourceCurrencyCode: currencyCode,
@@ -123,22 +152,31 @@ export function prepareExpenseLinkTargetCandidateViews({
         draftChanges,
         context,
       });
+      const parentPresentation = getCandidateParentPresentation(
+        candidate.transaction.id,
+        candidate.currencyCode,
+        parentPresentations,
+      );
+      const signedAmountMinor = -candidate.amountMinor;
       return {
         ...candidate,
         isLinked: status.allocatedMinor > 0,
-        eligible: candidate.eligible && status.remainingMinor > 0,
+        eligible: candidate.eligible,
+        selectable: candidate.eligible && parentPresentation.parentKind === 'parent' && status.remainingMinor > 0,
         disabledReason: candidate.eligible && status.remainingMinor <= 0 ? 'Settled' : candidate.disabledReason,
-        exactCapacityMatch: desiredAmountMinor > 0 && status.remainingMinor === desiredAmountMinor,
-        externalPartyMatch: hasMatchingExternalParty(candidate.transaction.id, currentParties, partiesByTransactionId),
+        ...parentPresentation,
+        presentation: createCandidatePresentation({
+          candidate,
+          context: presentationContext,
+          parentPresentation,
+          signedAmountMinor,
+          status,
+        }),
+        signedAmountMinor,
         status,
       };
     })
-    .sort((left, right) => compareCandidateViews({
-      left,
-      right,
-      currentTransaction,
-      desiredAmountMinor,
-    }));
+    .sort((left, right) => compareTransactionsDescending(left.transaction, right.transaction));
 }
 
 export function deriveIncomeLinkSourceCandidateViews({
@@ -156,18 +194,16 @@ export function prepareIncomeLinkSourceCandidateViews({
   snapshot,
   currencyCode,
   currentTransaction,
-  desiredAmountMinor,
   draftChanges,
   statusContext,
 }: CandidatePreparationInput): IncomeLinkSourceCandidateView[] {
+  const parentPresentations = createCandidateParentPresentationLookup(snapshot.transactionLines);
+  const presentationContext = createCandidatePresentationContext(snapshot);
   const context = statusContext ?? createTransactionLinkAllocationStatusContext({
     lines: snapshot.transactionLines,
     persistedLinks: snapshot.transactionLinks,
     draftChanges,
   });
-  const currentParties = getTransactionExternalParties(currentTransaction.id, snapshot.transactionLines);
-  const partiesByTransactionId = groupExternalPartiesByTransactionId(snapshot.transactionLines);
-
   return getIncomeLinkSourceCandidates({
     targetTransactionId: currentTransaction.id,
     targetCurrencyCode: currencyCode,
@@ -188,46 +224,90 @@ export function prepareIncomeLinkSourceCandidateViews({
         draftChanges,
         context,
       });
+      const parentPresentation = getCandidateParentPresentation(
+        candidate.transaction.id,
+        candidate.currencyCode,
+        parentPresentations,
+      );
+      const signedAmountMinor = candidate.amountMinor;
       return {
         ...candidate,
         isLinked: status.allocatedMinor > 0,
-        eligible: candidate.eligible && status.remainingMinor > 0,
+        eligible: candidate.eligible,
+        selectable: candidate.eligible && parentPresentation.parentKind === 'parent' && status.remainingMinor > 0,
         disabledReason: candidate.eligible && status.remainingMinor <= 0 ? 'Settled' : candidate.disabledReason,
-        exactCapacityMatch: desiredAmountMinor > 0 && status.remainingMinor === desiredAmountMinor,
-        externalPartyMatch: hasMatchingExternalParty(candidate.transaction.id, currentParties, partiesByTransactionId),
+        ...parentPresentation,
+        presentation: createCandidatePresentation({
+          candidate,
+          context: presentationContext,
+          parentPresentation,
+          signedAmountMinor,
+          status,
+        }),
+        signedAmountMinor,
         status,
       };
     })
-    .sort((left, right) => compareCandidateViews({
-      left,
-      right,
-      currentTransaction,
-      desiredAmountMinor,
-    }));
+    .sort((left, right) => compareTransactionsDescending(left.transaction, right.transaction));
 }
 
 export function filterPreparedExpenseLinkTargetCandidateViews(
   candidates: ExpenseLinkTargetCandidateView[],
   input: Pick<CandidateDerivationInput, 'filter' | 'query'>,
 ): ExpenseLinkTargetCandidateView[] {
-  return filterPreparedCandidateViews(candidates, input);
+  return filterExpenseLinkTargetCandidateViewsByStatus(
+    searchPreparedExpenseLinkTargetCandidateViews(candidates, input.query),
+    input.filter,
+  );
 }
 
 export function filterPreparedIncomeLinkSourceCandidateViews(
   candidates: IncomeLinkSourceCandidateView[],
   input: Pick<CandidateDerivationInput, 'filter' | 'query'>,
 ): IncomeLinkSourceCandidateView[] {
-  return filterPreparedCandidateViews(candidates, input);
+  return filterIncomeLinkSourceCandidateViewsByStatus(
+    searchPreparedIncomeLinkSourceCandidateViews(candidates, input.query),
+    input.filter,
+  );
 }
 
-function filterPreparedCandidateViews<T extends ExpenseLinkTargetCandidateView | IncomeLinkSourceCandidateView>(
+export function searchPreparedExpenseLinkTargetCandidateViews(
+  candidates: ExpenseLinkTargetCandidateView[],
+  query: string,
+): ExpenseLinkTargetCandidateView[] {
+  return searchPreparedCandidateViews(candidates, query);
+}
+
+export function searchPreparedIncomeLinkSourceCandidateViews(
+  candidates: IncomeLinkSourceCandidateView[],
+  query: string,
+): IncomeLinkSourceCandidateView[] {
+  return searchPreparedCandidateViews(candidates, query);
+}
+
+export function filterExpenseLinkTargetCandidateViewsByStatus(
+  candidates: ExpenseLinkTargetCandidateView[],
+  filter: TransactionLinkCandidateFilter,
+): ExpenseLinkTargetCandidateView[] {
+  return candidates.filter((candidate) => candidateMatchesFilter(candidate, filter));
+}
+
+export function filterIncomeLinkSourceCandidateViewsByStatus(
+  candidates: IncomeLinkSourceCandidateView[],
+  filter: TransactionLinkCandidateFilter,
+): IncomeLinkSourceCandidateView[] {
+  return candidates.filter((candidate) => candidateMatchesFilter(candidate, filter));
+}
+
+function searchPreparedCandidateViews<T extends ExpenseLinkTargetCandidateView | IncomeLinkSourceCandidateView>(
   candidates: T[],
-  { filter, query }: Pick<CandidateDerivationInput, 'filter' | 'query'>,
+  query: string,
 ): T[] {
+  if (!query.trim()) {
+    return candidates;
+  }
+
   return candidates.flatMap((candidate) => {
-    if (!candidateMatchesFilter(candidate, filter)) {
-      return [];
-    }
     const searchMatch = matchTransactionLinkCandidateSearch(candidate.searchIndex, query);
     if (!searchMatch.parentMatches && !searchMatch.lineIds.length) {
       return [];
@@ -238,6 +318,33 @@ function filterPreparedCandidateViews<T extends ExpenseLinkTargetCandidateView |
       searchMatchedLineIds: searchMatch.lineIds,
     }];
   });
+}
+
+export function getTransactionLinkCandidateStatusBuckets<
+  T extends ExpenseLinkTargetCandidateView | IncomeLinkSourceCandidateView,
+>(candidates: T[]): TransactionLinkCandidateStatusBuckets<T> {
+  const buckets: TransactionLinkCandidateStatusBuckets<T> = {
+    all: [],
+    open: [],
+    partial: [],
+    settled: [],
+  };
+
+  for (const candidate of candidates) {
+    if (!candidateMatchesFilter(candidate, 'all')) {
+      continue;
+    }
+    buckets.all.push(candidate);
+    if (candidate.status.status === 'settled') {
+      buckets.settled.push(candidate);
+    } else if (candidate.status.status === 'partial') {
+      buckets.partial.push(candidate);
+    } else if (candidate.status.status === 'unlinked') {
+      buckets.open.push(candidate);
+    }
+  }
+
+  return buckets;
 }
 
 export function getTransactionLinkSourceScopeViews({
@@ -438,76 +545,6 @@ function candidateMatchesFilter(
   return candidate.status.status === 'unlinked';
 }
 
-function compareCandidateViews({
-  left,
-  right,
-  currentTransaction,
-  desiredAmountMinor,
-}: {
-  left: ExpenseLinkTargetCandidateView | IncomeLinkSourceCandidateView;
-  right: ExpenseLinkTargetCandidateView | IncomeLinkSourceCandidateView;
-  currentTransaction: Transaction;
-  desiredAmountMinor: number;
-}): number {
-  const exactDiff = Number(right.exactCapacityMatch) - Number(left.exactCapacityMatch);
-  if (exactDiff) return exactDiff;
-  const usableDiff = Number(right.status.remainingMinor > 0) - Number(left.status.remainingMinor > 0);
-  if (usableDiff) return usableDiff;
-  const partialDiff = Number(right.status.status === 'partial') - Number(left.status.status === 'partial');
-  if (partialDiff) return partialDiff;
-  const amountDiff = Math.abs(left.status.remainingMinor - desiredAmountMinor) -
-    Math.abs(right.status.remainingMinor - desiredAmountMinor);
-  if (amountDiff) return amountDiff;
-  const partyDiff = Number(right.externalPartyMatch) - Number(left.externalPartyMatch);
-  if (partyDiff) return partyDiff;
-  const dateDistanceDiff = getDateDistance(left.transaction.datetime, currentTransaction.datetime) -
-    getDateDistance(right.transaction.datetime, currentTransaction.datetime);
-  if (dateDistanceDiff) return dateDistanceDiff;
-  const datetimeDiff = getTime(right.transaction.datetime) - getTime(left.transaction.datetime);
-  if (datetimeDiff) return datetimeDiff;
-  return left.transaction.id.localeCompare(right.transaction.id);
-}
-
-function getTransactionExternalParties(transactionId: string, lines: AppSnapshot['transactionLines']): Set<string> {
-  return new Set(lines
-    .filter((line) => line.transactionId === transactionId)
-    .map((line) => line.externalParty.trim().toLocaleLowerCase())
-    .filter(Boolean));
-}
-
-function hasMatchingExternalParty(
-  transactionId: string,
-  currentParties: Set<string>,
-  partiesByTransactionId: Map<string, Set<string>>,
-): boolean {
-  if (!currentParties.size) return false;
-  const candidateParties = partiesByTransactionId.get(transactionId);
-  return !!candidateParties && [...candidateParties].some((party) => currentParties.has(party));
-}
-
-function groupExternalPartiesByTransactionId(
-  lines: AppSnapshot['transactionLines'],
-): Map<string, Set<string>> {
-  const result = new Map<string, Set<string>>();
-  for (const line of lines) {
-    const party = line.externalParty.trim().toLocaleLowerCase();
-    if (!party) continue;
-    const existing = result.get(line.transactionId);
-    if (existing) existing.add(party);
-    else result.set(line.transactionId, new Set([party]));
-  }
-  return result;
-}
-
-function getDateDistance(left: string, right: string): number {
-  return Math.abs(getTime(left) - getTime(right));
-}
-
-function getTime(value: string): number {
-  const time = new Date(value).getTime();
-  return Number.isNaN(time) ? 0 : time;
-}
-
 export function getLinkAllocationEditableMaximumMinor({
   currentAmountMinor,
   sourceStatus,
@@ -536,6 +573,172 @@ export function getDefaultLinkAllocationAmountMinor(
   return Math.min(sourceStatus.remainingMinor, targetStatus.remainingMinor);
 }
 
-export function getAccountForCandidate(accountId: string, accounts: Account[]): Account | undefined {
-  return accounts.find((account) => account.id === accountId);
+export function getTransactionLinkCandidateParentLabel(
+  parentKind: TransactionLinkCandidateParentKind,
+  lineCount: number,
+): string {
+  if (parentKind === 'mixed') {
+    return `Mixed split parent · ${lineCount} lines`;
+  }
+  if (parentKind === 'split') {
+    return `Split parent · ${lineCount} lines`;
+  }
+  return 'Parent transaction';
+}
+
+function getCandidateParentPresentation(
+  transactionId: string,
+  currencyCode: CurrencyCode,
+  lookup: Map<string, CandidateParentPresentation>,
+): CandidateParentPresentation {
+  return lookup.get(getCandidateParentPresentationKey(transactionId, currencyCode)) ?? {
+    iconCategoryId: null,
+    iconSubcategoryId: null,
+    lineCount: 0,
+    parentKind: 'parent',
+  };
+}
+
+type CandidateParentPresentation = {
+  iconCategoryId: string | null;
+  iconSubcategoryId: string | null;
+  lineCount: number;
+  parentKind: TransactionLinkCandidateParentKind;
+};
+
+type CandidatePresentationContext = {
+  accountNames: Map<string, string>;
+  categories: AppSnapshot['categories'];
+  icons: Map<string, { color: string; name: string }>;
+};
+
+function createCandidatePresentationContext(
+  snapshot: Pick<AppSnapshot, 'accounts' | 'categories'>,
+): CandidatePresentationContext {
+  return {
+    accountNames: new Map(snapshot.accounts.map((account) => [account.id, getAccountDisplayName(account)])),
+    categories: snapshot.categories,
+    icons: new Map(),
+  };
+}
+
+function createCandidatePresentation({
+  candidate,
+  context,
+  parentPresentation,
+  signedAmountMinor,
+  status,
+}: {
+  candidate: Pick<ExpenseLinkTargetCandidate, 'accountId' | 'currencyCode' | 'transaction'>;
+  context: CandidatePresentationContext;
+  parentPresentation: CandidateParentPresentation;
+  signedAmountMinor: number;
+  status: ScopedTransactionLinkAllocationStatus;
+}): TransactionLinkCandidatePresentation {
+  const icon = getCandidateIconPresentation(
+    parentPresentation.iconCategoryId,
+    parentPresentation.iconSubcategoryId,
+    context,
+  );
+  return {
+    accountName: context.accountNames.get(candidate.accountId) ?? null,
+    amountLabel: formatSignedCandidateMoney(signedAmountMinor, candidate.currencyCode),
+    amountTone: getTransactionAmountTone(signedAmountMinor),
+    dateLabel: formatTransactionShortDate(candidate.transaction.datetime),
+    iconColor: icon?.color ?? null,
+    iconName: icon?.name ?? null,
+    parentLabel: getTransactionLinkCandidateParentLabel(parentPresentation.parentKind, parentPresentation.lineCount),
+    statusLabel: formatCandidateStatus(status, candidate.currencyCode),
+    title: candidate.transaction.title || 'Transaction',
+  };
+}
+
+function getCandidateIconPresentation(
+  categoryId: string | null,
+  subcategoryId: string | null,
+  context: CandidatePresentationContext,
+): { color: string; name: string } | null {
+  if (!categoryId) {
+    return null;
+  }
+  const key = `${categoryId}:${subcategoryId ?? ''}`;
+  const cached = context.icons.get(key);
+  if (cached) {
+    return cached;
+  }
+  const icon = {
+    color: getSubcategoryColor(categoryId, subcategoryId ?? '', context.categories),
+    name: getSubcategoryIcon(categoryId, subcategoryId ?? '', context.categories),
+  };
+  context.icons.set(key, icon);
+  return icon;
+}
+
+function formatCandidateStatus(status: ScopedTransactionLinkAllocationStatus, currencyCode: CurrencyCode): string {
+  if (status.remainingMinor <= 0) {
+    return 'Settled';
+  }
+  if (status.allocatedMinor > 0) {
+    return `Linked ${formatMoney(status.allocatedMinor, currencyCode)} · Remaining ${formatMoney(status.remainingMinor, currencyCode)}`;
+  }
+  return `Remaining ${formatMoney(status.remainingMinor, currencyCode)}`;
+}
+
+function formatSignedCandidateMoney(amountMinor: number, currencyCode: CurrencyCode): string {
+  const amount = formatMoney(Math.abs(amountMinor), currencyCode);
+  return amountMinor < 0 ? `-${amount}` : `+${amount}`;
+}
+
+function createCandidateParentPresentationLookup(
+  lines: AppSnapshot['transactionLines'],
+): Map<string, CandidateParentPresentation> {
+  const linesByScope = new Map<string, AppSnapshot['transactionLines']>();
+  for (const line of lines) {
+    if (line.amountMinor === 0) {
+      continue;
+    }
+    const key = getCandidateParentPresentationKey(line.transactionId, line.currencyCode);
+    const scopedLines = linesByScope.get(key);
+    if (scopedLines) {
+      scopedLines.push(line);
+    } else {
+      linesByScope.set(key, [line]);
+    }
+  }
+
+  const presentations = new Map<string, CandidateParentPresentation>();
+  for (const [key, transactionLines] of linesByScope) {
+    presentations.set(key, createCandidateParentPresentation(transactionLines));
+  }
+  return presentations;
+}
+
+function createCandidateParentPresentation(
+  transactionLines: AppSnapshot['transactionLines'],
+): CandidateParentPresentation {
+  const hasIncome = transactionLines.some((line) => line.amountMinor > 0);
+  const hasExpense = transactionLines.some((line) => line.amountMinor < 0);
+  const parentKind: TransactionLinkCandidateParentKind = hasIncome && hasExpense
+    ? 'mixed'
+    : transactionLines.length > 1
+      ? 'split'
+      : 'parent';
+  const firstLine = transactionLines[0];
+  const iconLine = parentKind === 'parent'
+    ? firstLine
+    : firstLine && transactionLines.every(
+        (line) => line.categoryId === firstLine.categoryId && line.subcategoryId === firstLine.subcategoryId,
+      )
+      ? firstLine
+      : undefined;
+  return {
+    iconCategoryId: iconLine?.categoryId ?? null,
+    iconSubcategoryId: iconLine?.subcategoryId ?? null,
+    lineCount: transactionLines.length,
+    parentKind,
+  };
+}
+
+function getCandidateParentPresentationKey(transactionId: string, currencyCode: CurrencyCode): string {
+  return `${transactionId}:${normalizeCurrencyCode(currencyCode)}`;
 }

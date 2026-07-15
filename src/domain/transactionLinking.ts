@@ -1,4 +1,5 @@
 import { getAccountDisplayName } from './accountThemes';
+import { compareTransactionsDescending } from './aggregates';
 import { formatMoney, normalizeCurrencyCode } from './money';
 import { formatTransactionShortDate, getSplitLineChildDisplayText } from './transactionDisplay';
 import { getTransactionLinkAllocationStatus } from './transactionLinkAllocationStatus';
@@ -110,6 +111,37 @@ export function getExpenseLinkTargetMoney(
   return amountMinor > 0 ? { amountMinor, currencyCode: targetCurrencyCode } : null;
 }
 
+export function getTransactionLinkEndpointSignedAmountMinor({
+  transactionId,
+  lineId,
+  currencyCode,
+  lines,
+}: {
+  transactionId: string;
+  lineId: string | null;
+  currencyCode: CurrencyCode;
+  lines: TransactionLine[];
+}): number {
+  const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  if (lineId) {
+    const line = lines.find(
+      (item) =>
+        item.id === lineId &&
+        item.transactionId === transactionId &&
+        normalizeCurrencyCode(item.currencyCode) === normalizedCurrencyCode,
+    );
+    return line?.amountMinor ?? 0;
+  }
+
+  return lines
+    .filter(
+      (line) =>
+        line.transactionId === transactionId &&
+        normalizeCurrencyCode(line.currencyCode) === normalizedCurrencyCode,
+    )
+    .reduce((sum, line) => sum + line.amountMinor, 0);
+}
+
 export function getExpenseLinkTargetCandidates({
   sourceTransactionId,
   sourceCurrencyCode,
@@ -137,7 +169,7 @@ export function getExpenseLinkTargetCandidates({
     .map((link) => link.targetTransactionId));
 
   return transactions
-    .filter((transaction) => transaction.kind === 'expense' && transaction.id !== sourceTransactionId)
+    .filter((transaction) => transaction.kind !== 'transfer' && transaction.id !== sourceTransactionId)
     .map((transaction) => {
       const transactionLines = linesByTransactionId.get(transaction.id) ?? [];
       const allExpenseLines = transactionLines.filter((line) => line.amountMinor < 0);
@@ -219,7 +251,7 @@ export function getIncomeLinkSourceCandidates({
     .map((link) => link.sourceTransactionId));
 
   return transactions
-    .filter((transaction) => transaction.kind === 'income' && transaction.id !== targetTransactionId)
+    .filter((transaction) => transaction.kind !== 'transfer' && transaction.id !== targetTransactionId)
     .map((transaction) => {
       const transactionLines = linesByTransactionId.get(transaction.id) ?? [];
       const allIncomeLines = transactionLines.filter((line) => line.amountMinor > 0);
@@ -296,8 +328,6 @@ export function createTransactionLinkCandidateSearchIndex({
       transaction.title,
       transaction.notes,
       ...transaction.labels,
-      transaction.datetime,
-      formatTransactionSearchDate(transaction.datetime),
       ...parentValues,
     ]),
     lineTextById,
@@ -344,15 +374,6 @@ function getAmountSearchValues(amountMinor: number, currencyCode: CurrencyCode):
     fixedAmount.replace(/\.00$/, ''),
     formatMoney(Math.abs(amountMinor), currencyCode),
   ];
-}
-
-function formatTransactionSearchDate(datetime: string): string {
-  const date = new Date(datetime);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-
-  return date.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
 function getLineCategorySearchValues(
@@ -691,38 +712,12 @@ function compareCandidateTransactionsDescending(
   left: ExpenseLinkTargetCandidate,
   right: ExpenseLinkTargetCandidate,
 ): number {
-  const datetimeDiff =
-    new Date(right.transaction.datetime).getTime() - new Date(left.transaction.datetime).getTime();
-  if (datetimeDiff !== 0) {
-    return datetimeDiff;
-  }
-
-  const createdDiff =
-    new Date(right.transaction.createdAt || 0).getTime() -
-    new Date(left.transaction.createdAt || 0).getTime();
-  if (createdDiff !== 0) {
-    return createdDiff;
-  }
-
-  return right.transaction.id.localeCompare(left.transaction.id);
+  return compareTransactionsDescending(left.transaction, right.transaction);
 }
 
 function compareIncomeSourceCandidatesDescending(
   left: IncomeLinkSourceCandidate,
   right: IncomeLinkSourceCandidate,
 ): number {
-  const datetimeDiff =
-    new Date(right.transaction.datetime).getTime() - new Date(left.transaction.datetime).getTime();
-  if (datetimeDiff !== 0) {
-    return datetimeDiff;
-  }
-
-  const createdDiff =
-    new Date(right.transaction.createdAt || 0).getTime() -
-    new Date(left.transaction.createdAt || 0).getTime();
-  if (createdDiff !== 0) {
-    return createdDiff;
-  }
-
-  return right.transaction.id.localeCompare(left.transaction.id);
+  return compareTransactionsDescending(left.transaction, right.transaction);
 }

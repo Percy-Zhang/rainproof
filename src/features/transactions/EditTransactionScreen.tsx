@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,12 +15,16 @@ import {
   formatEditDateLabel,
 } from '../../domain/transactionEdit';
 import {
+  applyTransactionLinkBatchToLinks,
+} from '../../domain/transactionLinkAllocationForm';
+import {
   createTransactionLinkAllocationStatusContext,
   getTransactionLineLinkAllocationStatus,
   getTransactionLinkAllocationStatus,
 } from '../../domain/transactionLinkAllocationStatus';
 import type {
   AppSnapshot,
+  TransactionLinkBatchInput,
   UpdateTransactionInput,
 } from '../../domain/types';
 import type {
@@ -39,6 +43,7 @@ import { DeleteTransactionPanel, TransactionLinkEntryRow } from './TransactionEd
 import { TransactionAccountCategorySelectors } from './TransactionAccountCategorySelectors';
 import { TransactionMetadataFields } from './TransactionDetailsSection';
 import { SplitTransactionEditor, SplitTransactionEditorScrollContainer } from './SplitTransactionEditor';
+import { LinkTransactionScreen } from './LinkTransactionScreen';
 import { useEditTransactionController } from './useEditTransactionController';
 
 type EditTransactionScreenProps = {
@@ -46,15 +51,19 @@ type EditTransactionScreenProps = {
   transactionId: string;
   onUpdateTransaction: (
     input: UpdateTransactionInput,
-    options?: { optimistic?: boolean; transactionLinkDeleteIds?: string[] },
+    options?: {
+      optimistic?: boolean;
+      transactionLinkBatch?: TransactionLinkBatchInput;
+      transactionLinkDeleteIds?: string[];
+    },
   ) => Promise<void>;
   onDeleteTransaction: (transactionId: string) => Promise<void>;
-  onOpenTransactionLink: () => void;
   onOpenCategorySelect: (
     params: CategorySelectLaunchParams,
     onSelect: (selection: CategorySelectionResult) => void,
   ) => void;
   onCancel: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onDone: () => void;
 };
 
@@ -63,11 +72,12 @@ export function EditTransactionScreen({
   transactionId,
   onUpdateTransaction,
   onDeleteTransaction,
-  onOpenTransactionLink,
   onOpenCategorySelect,
   onCancel,
+  onDirtyChange,
   onDone,
 }: EditTransactionScreenProps) {
+  const [linkScreenOpen, setLinkScreenOpen] = useState(false);
   const controller = useEditTransactionController({
     snapshot,
     transactionId,
@@ -96,6 +106,7 @@ export function EditTransactionScreen({
     getEditableSplitLines,
     getSplitTotalMinor,
     groupSuggestions,
+    hasUnsavedChanges,
     handleNativePickerChange,
     isCrossCurrencyTransfer,
     itemHistory,
@@ -119,27 +130,42 @@ export function EditTransactionScreen({
     setPage,
     showCurrencyCodes,
     targetAmountCurrencyCode,
+    transactionLinkDraftChanges,
     toAccount,
     transactionExists,
     crossCurrencyTransferRateLabel,
     updateDraft,
     updateSplitLine,
+    setTransactionLinkDraftChanges,
   } = controller;
+
+  useEffect(() => {
+    onDirtyChange?.(hasUnsavedChanges);
+  }, [hasUnsavedChanges, onDirtyChange]);
+  const projectedTransactionLinks = useMemo(() => applyTransactionLinkBatchToLinks(
+    snapshot.transactionLinks,
+    transactionLinkDraftChanges,
+  ), [snapshot.transactionLinks, transactionLinkDraftChanges]);
+  const projectedSnapshot = useMemo(() => ({
+    ...snapshot,
+    transactionLinks: projectedTransactionLinks,
+  }), [projectedTransactionLinks, snapshot]);
   const splitAllocationStatus = useMemo(() => {
     const transaction = snapshot.transactions.find((item) => item.id === transactionId);
     if (!transaction || transaction.kind === 'transfer') {
       return { byLineId: new Map(), whole: null };
     }
     const side = transaction.kind === 'income' ? 'source' as const : 'target' as const;
-    const lines = snapshot.transactionLines.filter((line) =>
-      line.transactionId === transactionId && (side === 'source' ? line.amountMinor > 0 : line.amountMinor < 0));
+    const lines = snapshot.transactionLines.filter(
+      (line) => line.transactionId === transactionId && line.amountMinor !== 0,
+    );
     const currencyCode = lines[0]?.currencyCode;
     if (!currencyCode) {
       return { byLineId: new Map(), whole: null };
     }
     const context = createTransactionLinkAllocationStatusContext({
       lines: snapshot.transactionLines,
-      persistedLinks: snapshot.transactionLinks,
+      persistedLinks: projectedTransactionLinks,
     });
     const byLineId = new Map(lines.map((line) => [
       line.id,
@@ -147,9 +173,9 @@ export function EditTransactionScreen({
         transactionId,
         lineId: line.id,
         currencyCode: line.currencyCode,
-        side,
+        side: line.amountMinor > 0 ? 'source' : 'target',
         lines: snapshot.transactionLines,
-        persistedLinks: snapshot.transactionLinks,
+        persistedLinks: projectedTransactionLinks,
         context,
       }),
     ]));
@@ -160,11 +186,23 @@ export function EditTransactionScreen({
         currencyCode,
         side,
         lines: snapshot.transactionLines,
-        persistedLinks: snapshot.transactionLinks,
+        persistedLinks: projectedTransactionLinks,
         context,
       }),
     };
-  }, [snapshot.transactionLines, snapshot.transactionLinks, snapshot.transactions, transactionId]);
+  }, [projectedTransactionLinks, snapshot.transactionLines, snapshot.transactions, transactionId]);
+
+  if (linkScreenOpen) {
+    return (
+      <LinkTransactionScreen
+        initialDraftChanges={transactionLinkDraftChanges}
+        snapshot={snapshot}
+        transactionId={transactionId}
+        onAcceptTransactionLinkDraft={setTransactionLinkDraftChanges}
+        onBack={() => setLinkScreenOpen(false)}
+      />
+    );
+  }
 
   if (draft && pickerMode) {
     return (
@@ -346,9 +384,9 @@ export function EditTransactionScreen({
 
               {draft.kind !== 'transfer' ? (
                 <TransactionLinkEntryRow
-                  snapshot={snapshot}
+                  snapshot={projectedSnapshot}
                   transactionId={transactionId}
-                  onPress={onOpenTransactionLink}
+                  onPress={() => setLinkScreenOpen(true)}
                 />
               ) : null}
               <DeleteTransactionPanel

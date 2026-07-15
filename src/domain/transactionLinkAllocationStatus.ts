@@ -50,6 +50,7 @@ export type TransactionLinkAllocationStatusContext = {
   invalidDraftChangeCount: number;
   linesByScopeKey: Map<string, AllocationStatusInput['lines']>;
   linksByScopeKey: Map<string, EffectiveTransactionLink[]>;
+  signedAmountByTransactionCurrencyKey: Map<string, number>;
 };
 
 type EffectiveTransactionLink = Pick<
@@ -84,6 +85,7 @@ export function createTransactionLinkAllocationStatusContext({
   const effective = getEffectiveTransactionLinks(persistedLinks, draftChanges);
   const linesByScopeKey = new Map<string, AllocationStatusInput['lines']>();
   const linksByScopeKey = new Map<string, EffectiveTransactionLink[]>();
+  const signedAmountByTransactionCurrencyKey = new Map<string, number>();
 
   for (const line of lines) {
     if (line.amountMinor === 0) {
@@ -91,6 +93,11 @@ export function createTransactionLinkAllocationStatusContext({
     }
     const side: TransactionLinkAllocationSide = line.amountMinor > 0 ? 'source' : 'target';
     appendToIndex(linesByScopeKey, getScopeKey(line.transactionId, line.currencyCode, side), line);
+    const transactionCurrencyKey = getTransactionCurrencyKey(line.transactionId, line.currencyCode);
+    signedAmountByTransactionCurrencyKey.set(
+      transactionCurrencyKey,
+      (signedAmountByTransactionCurrencyKey.get(transactionCurrencyKey) ?? 0) + line.amountMinor,
+    );
   }
 
   for (const link of effective.links) {
@@ -110,6 +117,7 @@ export function createTransactionLinkAllocationStatusContext({
     invalidDraftChangeCount: effective.invalidDraftChangeCount,
     linesByScopeKey,
     linksByScopeKey,
+    signedAmountByTransactionCurrencyKey,
   };
 }
 
@@ -131,10 +139,17 @@ function getScopedTransactionLinkAllocationStatus({
   });
   const scopeKey = getScopeKey(transactionId, normalizedCurrencyCode, side);
   const transactionLines = statusContext.linesByScopeKey.get(scopeKey) ?? [];
-  const parentOriginalMinor = transactionLines.reduce(
+  const sideOriginalMinor = transactionLines.reduce(
     (sum, line) => sum + Math.abs(line.amountMinor),
     0,
   );
+  const signedTransactionAmountMinor = statusContext.signedAmountByTransactionCurrencyKey.get(
+    getTransactionCurrencyKey(transactionId, normalizedCurrencyCode),
+  ) ?? 0;
+  const wholeScopeOriginalMinor = side === 'source'
+    ? Math.max(0, signedTransactionAmountMinor)
+    : Math.max(0, -signedTransactionAmountMinor);
+  const parentOriginalMinor = wholeScopeOriginalMinor || sideOriginalMinor;
   const requestedLine = lineId
     ? transactionLines.find((line) => line.id === lineId)
     : undefined;
@@ -220,6 +235,10 @@ function getScopeKey(
   side: TransactionLinkAllocationSide,
 ): string {
   return `${side}\u0000${transactionId}\u0000${normalizeCurrencyCode(currencyCode)}`;
+}
+
+function getTransactionCurrencyKey(transactionId: string, currencyCode: CurrencyCode): string {
+  return `${transactionId}\u0000${normalizeCurrencyCode(currencyCode)}`;
 }
 
 function getEffectiveTransactionLinks(

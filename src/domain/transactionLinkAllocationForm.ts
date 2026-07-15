@@ -29,6 +29,7 @@ export type TransactionLinkSourceScope = {
   currencyCode: CurrencyCode;
   line?: TransactionLine;
   isLinked: boolean;
+  selectable: boolean;
 };
 
 export type TransactionLinkTargetScope = {
@@ -38,6 +39,7 @@ export type TransactionLinkTargetScope = {
   currencyCode: CurrencyCode;
   line?: TransactionLine;
   isLinked: boolean;
+  selectable: boolean;
 };
 
 export type TransactionLinkTargetOption = {
@@ -90,7 +92,7 @@ export function getTransactionLinkSourceScopes(
   lines: TransactionLine[],
   transactionLinks: TransactionLink[] = [],
 ): TransactionLinkSourceScope[] {
-  if (transaction.kind !== 'income') {
+  if (transaction.kind === 'transfer') {
     return [];
   }
 
@@ -101,18 +103,22 @@ export function getTransactionLinkSourceScopes(
 
   const currencyCode = normalizeCurrencyCode(incomeLines[0].currencyCode);
   const sameCurrencyLines = incomeLines.filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode);
-  const wholeAmountMinor = sameCurrencyLines.reduce((sum, line) => sum + line.amountMinor, 0);
-  const scopes: TransactionLinkSourceScope[] = [
-    {
+  const transactionCurrencyLines = getTransactionCurrencyLines(transaction.id, currencyCode, lines);
+  const wholeAmountMinor = getSignedTransactionAmountMinor(transactionCurrencyLines);
+  const scopes: TransactionLinkSourceScope[] = [];
+
+  if (wholeAmountMinor > 0) {
+    scopes.push({
       id: 'source:whole',
       sourceLineId: null,
       amountMinor: wholeAmountMinor,
       currencyCode,
       isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
-    },
-  ];
+      selectable: transactionCurrencyLines.length === 1,
+    });
+  }
 
-  if (sameCurrencyLines.length > 1) {
+  if (transactionCurrencyLines.length > 1) {
     scopes.push(
       ...sameCurrencyLines.map((line) => ({
         id: `source:${line.id}`,
@@ -121,6 +127,7 @@ export function getTransactionLinkSourceScopes(
         currencyCode: normalizeCurrencyCode(line.currencyCode),
         line,
         isLinked: isTransactionLineLinked(line.id, transactionLinks),
+        selectable: true,
       })),
     );
   }
@@ -139,11 +146,12 @@ export function getTransactionLinkTargetOptions({
   currencyCode: CurrencyCode;
   transactionLinks?: TransactionLink[];
 }): TransactionLinkTargetOption[] {
-  if (transaction.kind !== 'expense') {
+  if (transaction.kind === 'transfer') {
     return [];
   }
 
   const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  const transactionCurrencyLines = getTransactionCurrencyLines(transaction.id, normalizedCurrencyCode, lines);
   const expenseLines = lines.filter(
     (line) =>
       line.transactionId === transaction.id &&
@@ -154,14 +162,16 @@ export function getTransactionLinkTargetOptions({
     return [];
   }
 
-  const wholeAmountMinor = expenseLines.reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
+  const wholeSignedAmountMinor = getSignedTransactionAmountMinor(transactionCurrencyLines);
   const firstLine = expenseLines[0];
-  const options: TransactionLinkTargetOption[] = [
-    {
+  const options: TransactionLinkTargetOption[] = [];
+
+  if (wholeSignedAmountMinor < 0 && transactionCurrencyLines.length === 1) {
+    options.push({
       id: `${transaction.id}:whole`,
       transaction,
       targetLineId: null,
-      amountMinor: wholeAmountMinor,
+      amountMinor: Math.abs(wholeSignedAmountMinor),
       currencyCode: normalizedCurrencyCode,
       accountId: firstLine.accountId,
       categoryId: firstLine.categoryId,
@@ -169,10 +179,10 @@ export function getTransactionLinkTargetOptions({
       eligible: true,
       disabledReason: '',
       isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
-    },
-  ];
+    });
+  }
 
-  if (expenseLines.length > 1) {
+  if (transactionCurrencyLines.length > 1) {
     options.push(
       ...expenseLines.map((line) => ({
         id: `${transaction.id}:${line.id}`,
@@ -199,7 +209,7 @@ export function getTransactionLinkTargetScopes(
   lines: TransactionLine[],
   transactionLinks: TransactionLink[] = [],
 ): TransactionLinkTargetScope[] {
-  if (transaction.kind !== 'expense') {
+  if (transaction.kind === 'transfer') {
     return [];
   }
 
@@ -210,18 +220,22 @@ export function getTransactionLinkTargetScopes(
 
   const currencyCode = normalizeCurrencyCode(expenseLines[0].currencyCode);
   const sameCurrencyLines = expenseLines.filter((line) => normalizeCurrencyCode(line.currencyCode) === currencyCode);
-  const wholeAmountMinor = sameCurrencyLines.reduce((sum, line) => sum + Math.abs(line.amountMinor), 0);
-  const scopes: TransactionLinkTargetScope[] = [
-    {
+  const transactionCurrencyLines = getTransactionCurrencyLines(transaction.id, currencyCode, lines);
+  const wholeSignedAmountMinor = getSignedTransactionAmountMinor(transactionCurrencyLines);
+  const scopes: TransactionLinkTargetScope[] = [];
+
+  if (wholeSignedAmountMinor < 0) {
+    scopes.push({
       id: 'target:whole',
       targetLineId: null,
-      amountMinor: wholeAmountMinor,
+      amountMinor: Math.abs(wholeSignedAmountMinor),
       currencyCode,
       isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
-    },
-  ];
+      selectable: transactionCurrencyLines.length === 1,
+    });
+  }
 
-  if (sameCurrencyLines.length > 1) {
+  if (transactionCurrencyLines.length > 1) {
     scopes.push(
       ...sameCurrencyLines.map((line) => ({
         id: `target:${line.id}`,
@@ -230,6 +244,7 @@ export function getTransactionLinkTargetScopes(
         currencyCode: normalizeCurrencyCode(line.currencyCode),
         line,
         isLinked: isTransactionLineLinked(line.id, transactionLinks),
+        selectable: true,
       })),
     );
   }
@@ -248,11 +263,12 @@ export function getTransactionLinkSourceOptions({
   currencyCode: CurrencyCode;
   transactionLinks?: TransactionLink[];
 }): TransactionLinkSourceOption[] {
-  if (transaction.kind !== 'income') {
+  if (transaction.kind === 'transfer') {
     return [];
   }
 
   const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  const transactionCurrencyLines = getTransactionCurrencyLines(transaction.id, normalizedCurrencyCode, lines);
   const incomeLines = lines.filter(
     (line) =>
       line.transactionId === transaction.id &&
@@ -263,10 +279,12 @@ export function getTransactionLinkSourceOptions({
     return [];
   }
 
-  const wholeAmountMinor = incomeLines.reduce((sum, line) => sum + line.amountMinor, 0);
+  const wholeAmountMinor = getSignedTransactionAmountMinor(transactionCurrencyLines);
   const firstLine = incomeLines[0];
-  const options: TransactionLinkSourceOption[] = [
-    {
+  const options: TransactionLinkSourceOption[] = [];
+
+  if (wholeAmountMinor > 0 && transactionCurrencyLines.length === 1) {
+    options.push({
       id: `${transaction.id}:whole`,
       transaction,
       sourceLineId: null,
@@ -276,10 +294,10 @@ export function getTransactionLinkSourceOptions({
       eligible: true,
       disabledReason: '',
       isLinked: isTransactionParentLinked(transaction.id, transactionLinks),
-    },
-  ];
+    });
+  }
 
-  if (incomeLines.length > 1) {
+  if (transactionCurrencyLines.length > 1) {
     options.push(
       ...incomeLines.map((line) => ({
         id: `${transaction.id}:${line.id}`,
@@ -302,12 +320,28 @@ export function getTransactionLinkSourceOptions({
 export function createTransactionLinkAllocationDrafts(
   sourceTransactionId: string,
   transactionLinks: TransactionLink[],
+  draftChanges?: TransactionLinkBatchInput,
 ): TransactionLinkAllocationDraft[] {
-  return transactionLinks
+  const deletedIds = new Set(draftChanges?.deleteIds ?? []);
+  const updatesById = new Map((draftChanges?.toUpdate ?? []).map((link) => [link.id, link]));
+  const persistedDrafts = transactionLinks
     .filter((link) => link.sourceTransactionId === sourceTransactionId)
+    .filter((link) => !deletedIds.has(link.id))
     .map((link) => ({
       id: link.id,
       existingLinkId: link.id,
+      sourceLineId: updatesById.get(link.id)?.sourceLineId ?? link.sourceLineId ?? null,
+      targetTransactionId: updatesById.get(link.id)?.targetTransactionId ?? link.targetTransactionId,
+      targetLineId: updatesById.get(link.id)?.targetLineId ?? link.targetLineId ?? null,
+      linkType: updatesById.get(link.id)?.linkType ?? link.linkType,
+      amount: formatMinorInput(updatesById.get(link.id)?.amountMinor ?? link.amountMinor),
+      currencyCode: updatesById.get(link.id)?.currencyCode ?? link.currencyCode,
+    }));
+  const addedDrafts = (draftChanges?.toAdd ?? [])
+    .map((link, index) => ({ link, index }))
+    .filter(({ link }) => link.sourceTransactionId === sourceTransactionId)
+    .map(({ link, index }) => ({
+      id: `draft:add:${index}`,
       sourceLineId: link.sourceLineId ?? null,
       targetTransactionId: link.targetTransactionId,
       targetLineId: link.targetLineId ?? null,
@@ -315,17 +349,35 @@ export function createTransactionLinkAllocationDrafts(
       amount: formatMinorInput(link.amountMinor),
       currencyCode: link.currencyCode,
     }));
+
+  return [...persistedDrafts, ...addedDrafts];
 }
 
 export function createExpenseTransactionLinkAllocationDrafts(
   targetTransactionId: string,
   transactionLinks: TransactionLink[],
+  draftChanges?: TransactionLinkBatchInput,
 ): ExpenseTransactionLinkAllocationDraft[] {
-  return transactionLinks
+  const deletedIds = new Set(draftChanges?.deleteIds ?? []);
+  const updatesById = new Map((draftChanges?.toUpdate ?? []).map((link) => [link.id, link]));
+  const persistedDrafts = transactionLinks
     .filter((link) => link.targetTransactionId === targetTransactionId)
+    .filter((link) => !deletedIds.has(link.id))
     .map((link) => ({
       id: link.id,
       existingLinkId: link.id,
+      sourceTransactionId: updatesById.get(link.id)?.sourceTransactionId ?? link.sourceTransactionId,
+      sourceLineId: updatesById.get(link.id)?.sourceLineId ?? link.sourceLineId ?? null,
+      targetLineId: updatesById.get(link.id)?.targetLineId ?? link.targetLineId ?? null,
+      linkType: updatesById.get(link.id)?.linkType ?? link.linkType,
+      amount: formatMinorInput(updatesById.get(link.id)?.amountMinor ?? link.amountMinor),
+      currencyCode: updatesById.get(link.id)?.currencyCode ?? link.currencyCode,
+    }));
+  const addedDrafts = (draftChanges?.toAdd ?? [])
+    .map((link, index) => ({ link, index }))
+    .filter(({ link }) => link.targetTransactionId === targetTransactionId)
+    .map(({ link, index }) => ({
+      id: `draft:add:${index}`,
       sourceTransactionId: link.sourceTransactionId,
       sourceLineId: link.sourceLineId ?? null,
       targetLineId: link.targetLineId ?? null,
@@ -333,6 +385,32 @@ export function createExpenseTransactionLinkAllocationDrafts(
       amount: formatMinorInput(link.amountMinor),
       currencyCode: link.currencyCode,
     }));
+
+  return [...persistedDrafts, ...addedDrafts];
+}
+
+export function applyTransactionLinkBatchToLinks(
+  transactionLinks: TransactionLink[],
+  draftChanges: TransactionLinkBatchInput,
+): TransactionLink[] {
+  const deletedIds = new Set(draftChanges.deleteIds);
+  const updatesById = new Map(draftChanges.toUpdate.map((link) => [link.id, link]));
+  const existing = transactionLinks
+    .filter((link) => !deletedIds.has(link.id))
+    .map((link) => {
+      const update = updatesById.get(link.id);
+      return update ? { ...link, ...update } : link;
+    });
+  const added = draftChanges.toAdd.map((link, index) => ({
+    ...link,
+    id: `draft:add:${index}`,
+    sourceLineId: link.sourceLineId ?? null,
+    targetLineId: link.targetLineId ?? null,
+    createdAt: '',
+    updatedAt: '',
+  }));
+
+  return [...existing, ...added];
 }
 
 export function getAllocationAmountMinor(draft: Pick<TransactionLinkAllocationDraft, 'amount'>): number {
@@ -405,7 +483,10 @@ export function getTransactionLinkAllocationChanges({
     };
 
     if (allocation.existingLinkId) {
-      toUpdate.push({ id: allocation.existingLinkId, ...input });
+      const existingLink = existingLinks.find((link) => link.id === allocation.existingLinkId);
+      if (!existingLink || !transactionLinkMatchesInput(existingLink, input)) {
+        toUpdate.push({ id: allocation.existingLinkId, ...input });
+      }
     } else {
       toAdd.push(input);
     }
@@ -448,7 +529,10 @@ export function getExpenseTransactionLinkAllocationChanges({
     };
 
     if (allocation.existingLinkId) {
-      toUpdate.push({ id: allocation.existingLinkId, ...input });
+      const existingLink = existingLinks.find((link) => link.id === allocation.existingLinkId);
+      if (!existingLink || !transactionLinkMatchesInput(existingLink, input)) {
+        toUpdate.push({ id: allocation.existingLinkId, ...input });
+      }
     } else {
       toAdd.push(input);
     }
@@ -537,6 +621,16 @@ function parsePositiveAllocationAmount(amount: string): number {
   return amountMinor;
 }
 
+function transactionLinkMatchesInput(link: TransactionLink, input: NewTransactionLinkInput): boolean {
+  return link.sourceTransactionId === input.sourceTransactionId &&
+    link.targetTransactionId === input.targetTransactionId &&
+    (link.sourceLineId ?? null) === (input.sourceLineId ?? null) &&
+    (link.targetLineId ?? null) === (input.targetLineId ?? null) &&
+    link.linkType === input.linkType &&
+    link.amountMinor === input.amountMinor &&
+    normalizeCurrencyCode(link.currencyCode) === normalizeCurrencyCode(input.currencyCode);
+}
+
 function getDraftStatusAmountMinor(amount: string): number {
   try {
     return parseMoneyInput(amount);
@@ -550,4 +644,22 @@ export function formatMinorInput(amountMinor: number): string {
   const whole = Math.floor(absolute / 100);
   const cents = String(absolute % 100).padStart(2, '0');
   return `${whole}.${cents}`;
+}
+
+function getTransactionCurrencyLines(
+  transactionId: string,
+  currencyCode: CurrencyCode,
+  lines: TransactionLine[],
+): TransactionLine[] {
+  const normalizedCurrencyCode = normalizeCurrencyCode(currencyCode);
+  return lines.filter(
+    (line) =>
+      line.transactionId === transactionId &&
+      line.amountMinor !== 0 &&
+      normalizeCurrencyCode(line.currencyCode) === normalizedCurrencyCode,
+  );
+}
+
+function getSignedTransactionAmountMinor(lines: TransactionLine[]): number {
+  return lines.reduce((sum, line) => sum + line.amountMinor, 0);
 }

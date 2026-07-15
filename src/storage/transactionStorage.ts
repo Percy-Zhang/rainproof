@@ -1,6 +1,13 @@
 import { normalizeCurrencyCode } from '../domain/money';
 import { validateSplitTransactionLines } from '../domain/splitTransactions';
-import type { NewTransactionInput, Transaction, TransactionKind, TransactionLine, UpdateTransactionInput } from '../domain/types';
+import type {
+  NewTransactionInput,
+  Transaction,
+  TransactionKind,
+  TransactionLine,
+  TransactionLinkBatchInput,
+  UpdateTransactionInput,
+} from '../domain/types';
 import { timeDevPerfAsync } from '../performance';
 import type { RepositoryDatabase } from './database';
 import { createLocalId } from './ids';
@@ -11,7 +18,11 @@ import {
   type TransactionLineRow,
   type TransactionRow,
 } from './mappers';
-import { removeTransactionLinksForTransactionStorage } from './transactionLinkStorage';
+import {
+  removeTransactionLinksForTransactionStorage,
+  saveTransactionLinkBatchInTransactionStorage,
+  type TransactionLinkBatchStorageRecords,
+} from './transactionLinkStorage';
 
 type TransactionLineInput = NewTransactionInput['lines'][number];
 
@@ -36,6 +47,8 @@ export type UpdateTransactionStorageResult = {
 };
 
 export type UpdateTransactionStorageOptions = {
+  transactionLinkBatch?: TransactionLinkBatchInput;
+  transactionLinkRecords?: TransactionLinkBatchStorageRecords;
   transactionLinkDeleteIds?: string[];
 };
 
@@ -263,6 +276,14 @@ export async function updateTransactionStorage(
         throw new Error('Prepared transaction line action is invalid.');
       }
     }
+
+    if (hasTransactionLinkBatchChanges(options.transactionLinkBatch)) {
+      await saveTransactionLinkBatchInTransactionStorage(
+        db,
+        options.transactionLinkBatch,
+        options.transactionLinkRecords,
+      );
+    }
   });
 
   if (!result) {
@@ -270,6 +291,10 @@ export async function updateTransactionStorage(
   }
 
   return result;
+}
+
+function hasTransactionLinkBatchChanges(input?: TransactionLinkBatchInput): input is TransactionLinkBatchInput {
+  return !!input && (input.toAdd.length > 0 || input.toUpdate.length > 0 || input.deleteIds.length > 0);
 }
 
 async function deleteTransactionLinksForEditStorage(

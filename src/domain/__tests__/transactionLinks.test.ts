@@ -213,6 +213,58 @@ describe('transaction link validation', () => {
     );
   });
 
+  it('uses split-line sign instead of parent kind for mixed endpoint eligibility', () => {
+    expect(
+      validateTransactionLinkInput({
+        input: input({
+          sourceTransactionId: 'expense-1',
+          sourceLineId: 'expense-1-acct-refund-500',
+          targetTransactionId: 'expense-2',
+          amountMinor: 500,
+        }),
+        transactions,
+        lines,
+      }),
+    ).toEqual(expect.objectContaining({
+      sourceTransactionId: 'expense-1',
+      sourceLineId: 'expense-1-acct-refund-500',
+    }));
+
+    expect(
+      validateTransactionLinkInput({
+        input: input({
+          sourceTransactionId: 'income-2',
+          targetTransactionId: 'income-1',
+          targetLineId: 'income-1-acct-adjustment--500',
+          amountMinor: 500,
+        }),
+        transactions,
+        lines,
+      }),
+    ).toEqual(expect.objectContaining({
+      targetTransactionId: 'income-1',
+      targetLineId: 'income-1-acct-adjustment--500',
+    }));
+  });
+
+  it('keeps whole endpoints constrained by the parent transaction kind', () => {
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ sourceTransactionId: 'expense-1', targetTransactionId: 'expense-2' }),
+        transactions,
+        lines,
+      }),
+    ).toThrow('Source transaction must be income.');
+
+    expect(() =>
+      validateTransactionLinkInput({
+        input: input({ sourceTransactionId: 'income-2', targetTransactionId: 'income-1' }),
+        transactions,
+        lines,
+      }),
+    ).toThrow('Target transaction must be expense.');
+  });
+
   it('rejects line-level references that do not belong to the linked transactions', () => {
     expect(() =>
       validateTransactionLinkInput({

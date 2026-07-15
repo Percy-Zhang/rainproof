@@ -1331,6 +1331,110 @@ describe('SQLite finance repository transactions and links', () => {
     });
   });
 
+  it('persists a transaction edit and accepted link batch in one transaction', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Income before link edit',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Expense link target',
+        lines: [{ accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const before = await repository.getSnapshot();
+      const incomeLine = getLineForTransaction(before, income.id);
+      const updateInput = {
+        id: income.id,
+        kind: 'income' as const,
+        title: 'Income after link edit',
+        datetime: income.datetime,
+        lines: [{
+          id: incomeLine.id,
+          accountId: incomeLine.accountId,
+          amountMinor: incomeLine.amountMinor,
+          currencyCode: incomeLine.currencyCode,
+          categoryId: incomeLine.categoryId,
+          subcategoryId: incomeLine.subcategoryId,
+        }],
+      };
+      const transactionLinkBatch = {
+        deleteIds: [],
+        toUpdate: [],
+        toAdd: [{
+          sourceTransactionId: income.id,
+          targetTransactionId: expense.id,
+          linkType: 'reimbursement' as const,
+          amountMinor: 3000,
+          currencyCode: 'AUD' as const,
+        }],
+      };
+      const preparedUpdate = repository.prepareUpdateTransaction(updateInput, income, [incomeLine]);
+      const preparedLinks = repository.prepareTransactionLinkBatch(transactionLinkBatch, before);
+
+      await repository.updateTransaction(updateInput, preparedUpdate, {
+        transactionLinkBatch,
+        transactionLinkRecords: preparedLinks,
+      });
+
+      const after = await repository.getSnapshot();
+      expect(after.transactions.find((transaction) => transaction.id === income.id)?.title).toBe('Income after link edit');
+      expect(after.transactionLinks).toEqual(preparedLinks.addedLinks);
+    });
+  });
+
+  it('rolls back the transaction edit when its accepted link batch fails', async () => {
+    await withInitializedRepository(async ({ repository }) => {
+      const everyday = await addAccount(repository, { name: 'Everyday' });
+      const income = await addTransaction(repository, {
+        kind: 'income',
+        title: 'Atomic edit original',
+        lines: [{ accountId: everyday.id, amountMinor: 3000, categoryId: 'income', subcategoryId: 'reimbursement' }],
+      });
+      const expense = await addTransaction(repository, {
+        kind: 'expense',
+        title: 'Atomic edit target',
+        lines: [{ accountId: everyday.id, amountMinor: -3000, categoryId: 'food-dining', subcategoryId: 'restaurants' }],
+      });
+      const before = await repository.getSnapshot();
+      const incomeLine = getLineForTransaction(before, income.id);
+      const duplicateInput = {
+        sourceTransactionId: income.id,
+        targetTransactionId: expense.id,
+        linkType: 'reimbursement' as const,
+        amountMinor: 1000,
+        currencyCode: 'AUD' as const,
+      };
+
+      await expect(repository.updateTransaction({
+        id: income.id,
+        kind: 'income',
+        title: 'Must roll back',
+        datetime: income.datetime,
+        lines: [{
+          id: incomeLine.id,
+          accountId: incomeLine.accountId,
+          amountMinor: incomeLine.amountMinor,
+          currencyCode: incomeLine.currencyCode,
+          categoryId: incomeLine.categoryId,
+          subcategoryId: incomeLine.subcategoryId,
+        }],
+      }, undefined, {
+        transactionLinkBatch: {
+          deleteIds: [],
+          toUpdate: [],
+          toAdd: [duplicateInput, duplicateInput],
+        },
+      })).rejects.toThrow('This transaction link already exists.');
+
+      const after = await repository.getSnapshot();
+      expect(after.transactions.find((transaction) => transaction.id === income.id)?.title).toBe('Atomic edit original');
+      expect(after.transactionLinks).toEqual([]);
+    });
+  });
+
   it('saves transaction link batches atomically for allocation add update and delete plans', async () => {
     await withInitializedRepository(async ({ repository }) => {
       const everyday = await addAccount(repository, { name: 'Everyday' });
